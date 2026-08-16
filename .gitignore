@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.data/
+.wrangler/
+.dev.vars*
+.tmp/
+cloud-migration-exports/
+.playwright-cli/
+*.log
+.DS_Store
+/*-proof.png
+/workflow-telemetry.json
+src-tauri/binaries/
+src-tauri/gen/
+src-tauri/resources/
+src-tauri/target/
