@@ -22,6 +22,23 @@ identity headers on every write:
 Reads may omit them. The recorded actor becomes the AI Agent, and the change
 is attributed correctly in the activity feed.
 
+## Conversation linking (threadId)
+
+Every write should also carry `threadId` — the agent's own DSH session id —
+so the task gets a "打开会话" link back to the conversation that executed it.
+
+Discover your session id from the run's patch overlay: the launch command
+passes `--patch <file>`; that file contains a `- session: <sessionId>` line:
+
+```sh
+PATCH=$(echo "$*" | grep -oE '\-\-patch [^ ]+' | awk '{print $2}')
+SID=$(grep -E '^\s*- session:' "$PATCH" | awk '{print $3}')
+```
+
+When the id is found, include it in move/comment bodies:
+`{"version": 1, "status": "in_progress", "threadId": "<sessionId>"}`.
+If no id is discoverable, omit it (the task simply gets no conversation link).
+
 ## Concurrency rule (non-negotiable)
 
 Every write response returns the task's current `version`. Every mutation must carry the version from the **latest read** (`GET /api/tasks/<id>`). A `version` mismatch means someone else updated the task — re-read, reconcile, and retry with the fresh version. Never write without a version; never overwrite a newer state.

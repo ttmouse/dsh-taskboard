@@ -51,14 +51,14 @@ AGENT_HEADERS=(-H "X-Taskboard-Client: taskctl" \
 curl -s "$BASE/api/tasks?projectId=<projectId>&status=todo"
 # Read one task (get its latest version)
 curl -s "$BASE/api/tasks/<taskId>"
-# Claim it (write -> agent headers)
+# Claim it (write -> agent headers; threadId links the task to this session)
 curl -s -X POST "$BASE/api/tasks/<taskId>/move" "${AGENT_HEADERS[@]}" \
   -H 'Content-Type: application/json' \
-  -d '{"version": <latestVersion>, "status": "in_progress"}'
+  -d '{"version": <latestVersion>, "status": "in_progress", "threadId": "<sessionId>"}'
 # Comment + move to review
 curl -s -X POST "$BASE/api/tasks/<taskId>/comments" "${AGENT_HEADERS[@]}" \
   -H 'Content-Type: application/json' \
-  -d '{"body": "关键改动/验证结果/剩余风险"}'
+  -d '{"body": "关键改动/验证结果/剩余风险", "threadId": "<sessionId>"}'
 curl -s -X POST "$BASE/api/tasks/<taskId>/move" "${AGENT_HEADERS[@]}" \
   -H 'Content-Type: application/json' \
   -d '{"version": <newLatestVersion>, "status": "in_review"}'

@@ -1839,6 +1839,13 @@ export class TaskboardDatabase {
       timestamp,
       timestamp,
     );
+    // A comment carrying a threadId also links the task to that conversation
+    // (COALESCE: never overwrite an existing link), mirroring moveTask.
+    if (input.threadId) {
+      this.database.prepare(`
+        UPDATE tasks SET thread_id = COALESCE(thread_id, ?), updated_at = ? WHERE id = ?
+      `).run(input.threadId, timestamp, task.id);
+    }
     return this.getComment(id);
   }
 
