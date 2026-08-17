@@ -16,6 +16,7 @@ import {
   type TaskStatus,
 } from "../types";
 import { labelPresentation } from "../labels";
+import { isDshThreadId } from "../threads";
 import { taskPriorityLabel, taskStatusLabel, useTaskboardI18n } from "../i18n";
 import { STATUS_DETAILS } from "./BoardColumn";
 import { LinearIcon, LinearPriorityIcon, LinearStatusIcon } from "./LinearIcon";
@@ -412,7 +413,7 @@ export function TaskContextMenu({
           )}
         </MenuItem>
         <MenuItem
-          label={task.threadId?.startsWith("dsh-")
+          label={isDshThreadId(task.threadId)
             ? text("打开会话", "Open session")
             : text("让 AI 执行", "Run with AI")}
           icon={<LinearIcon name="link" />}

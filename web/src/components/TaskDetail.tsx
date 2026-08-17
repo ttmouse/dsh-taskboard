@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { taskboardStorage } from "../storage";
+import { isDshThreadId } from "../threads";
 import {
   ApiError,
   attachmentDownloadUrl,
@@ -1384,18 +1385,18 @@ export function TaskDetail({
                 className="detail-open-thread-action"
                 type="button"
                 disabled={openingThread}
-                title={currentTask.threadId?.startsWith("dsh-")
+                title={isDshThreadId(currentTask.threadId)
                   ? text("打开该任务关联的 DSH 会话，继续沟通", "Open the linked DSH session")
                   : text("新建 DSH 会话，让 AI 执行该任务", "Run this task in a new DSH session")}
                 onClick={() => onOpenInThread(currentTask)}
               >
                 <ActorAvatar
-                  actor={currentTask.threadId?.startsWith("dsh-") ? DSH_AGENT_ACTOR : CODEX_AGENT_ACTOR}
+                  actor={isDshThreadId(currentTask.threadId) ? DSH_AGENT_ACTOR : CODEX_AGENT_ACTOR}
                   className="detail-thread-avatar"
                 />
                 <span>{openingThread
                   ? text("正在打开…", "Opening…")
-                  : currentTask.threadId?.startsWith("dsh-")
+                  : isDshThreadId(currentTask.threadId)
                     ? text("打开会话", "Open session")
                     : text("让 AI 执行", "Run with AI")}</span>
               </button>

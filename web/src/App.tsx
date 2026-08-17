@@ -43,6 +43,7 @@ import {
   updateTask as updateTaskRequest,
   resolveTaskboardUrl,
 } from "./api";
+import { isDshThreadId } from "./threads";
 import {
   actorForAssigneeTarget,
   assigneeTargetForActor,
@@ -1920,7 +1921,7 @@ export function App() {
     // dsh 心跳线程由 DeepSeek Harness 执行，Reasonix 中无对应对话：
     // headless 会话 id 与线程 id 一致（runner 每次运行生成 dsh-<uuid> 并注入
     // DSH_SESSION_ID），因此用 ?session= 深链直达该次执行的真实会话。
-    if (trimmed.startsWith("dsh-")) {
+    if (isDshThreadId(trimmed)) {
       window.open(`${DSH_WEB_URL}/?session=${encodeURIComponent(trimmed)}`, "_blank", "noopener,noreferrer");
       setAnnouncement(`${trimmed} 由 DeepSeek Harness 执行，已打开对应会话。`);
       return;
@@ -1953,7 +1954,7 @@ export function App() {
   function openTaskInThread(task: Task) {
     const threadId = task.threadId?.trim() ?? "";
     // dsh 心跳线程：直接打开该次执行的 dsh 会话，而不是在 Reasonix 新建对话。
-    if (threadId.startsWith("dsh-")) {
+    if (isDshThreadId(threadId)) {
       window.open(`${DSH_WEB_URL}/?session=${encodeURIComponent(threadId)}`, "_blank", "noopener,noreferrer");
       setAnnouncement(`已打开 DeepSeek Harness 会话 ${threadId}。`);
       return;

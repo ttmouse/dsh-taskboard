@@ -260,7 +260,28 @@ async function reindexWorkspaceSessions(ctx, log) {
         // cwd mismatch or unresolvable path: leave it unattached.
       }
     }
-    if (attached > 0) log(`workspace sessions: ${attached} newly attached`)
+    // Consistency sweep: drop stale record entries — sessions recorded under a
+    // workspace whose path no longer matches their cwd (e.g. a session first
+    // created with the process cwd, then correctly re-attached elsewhere).
+    // Without this, a session accounted twice fails the next boot's domain
+    // validation. entity.sessionIds filters by path, so stale entries are only
+    // visible through the raw record.
+    let detached = 0
+    for (const ws of workspaces) {
+      const raw = ws.record?.sessionIds ?? []
+      for (const sessionId of raw) {
+        if (ws.sessionIds.includes(sessionId)) continue
+        try {
+          await ws.detachSession(sessionId)
+          detached++
+        } catch {
+          // Already gone or not detachable.
+        }
+      }
+    }
+    if (attached > 0 || detached > 0) {
+      log(`workspace sessions: ${attached} attached, ${detached} stale removed`)
+    }
   } catch (error) {
     log(`workspace sessions failed: ${error instanceof Error ? error.message : String(error)}`)
   }

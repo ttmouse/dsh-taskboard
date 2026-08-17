@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import type { AutomationReasoningEffort } from "../../../shared/taskboard-automation-options.mjs";
 import { TaskboardIcon } from "./TaskboardIcon";
@@ -56,6 +56,11 @@ export function ProjectAutomationMenu({
   const [position, setPosition] = useState({ left: 0, top: 0, ready: false });
   const [draft, setDraft] = useState<AutomationOptions>(DEFAULT_OPTIONS);
   const [modelFilter, setModelFilter] = useState("");
+  const [modelOpen, setModelOpen] = useState(false);
+  const [modelFocused, setModelFocused] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const modelListRef = useRef<HTMLDivElement>(null);
+  const modelInputRef = useRef<HTMLInputElement>(null);
   const status = automation?.status ?? "PAUSED";
   const stateLabel = !automation?.enabledByUser
     ? text("已暂停", "Paused")
@@ -100,10 +105,91 @@ export function ProjectAutomationMenu({
     .filter(([, choices]) => choices.length > 0);
   const filteredPlainModels = plainModels.filter((choice) => modelMatchesFilter(choice) || choice === draft.model);
 
+  /** 扁平化的列表项（组标签 + 可选项），用于渲染和键盘导航。 */
+  const listItems: Array<
+    { kind: "group"; label: string }
+    | { kind: "option"; value: string; label: string; index: number }
+  > = [];
+  {
+    let counter = 0;
+    listItems.push({ kind: "option", value: "", label: text("跟随默认", "Follow default"), index: counter++ });
+    for (const [provider, choices] of filteredModelGroups) {
+      listItems.push({ kind: "group", label: provider });
+      for (const choice of choices) {
+        listItems.push({
+          kind: "option",
+          value: choice,
+          label: choice.slice(choice.indexOf("::") + 2),
+          index: counter++,
+        });
+      }
+    }
+    for (const choice of filteredPlainModels) {
+      listItems.push({ kind: "option", value: choice, label: choice, index: counter++ });
+    }
+  }
+  const keyboardOptions = listItems.filter((item): item is { kind: "option"; value: string; label: string; index: number } => item.kind === "option");
+
+  /** 打开/筛选变化时，把高亮定位到当前选中的选项（或第一项）。 */
+  useEffect(() => {
+    if (!modelOpen) return;
+    const selected = keyboardOptions.findIndex((option) => option.value === draft.model);
+    setActiveIndex(selected >= 0 ? selected : 0);
+  }, [modelOpen, modelFilter]);
+
+  /** 高亮项滚动进可视区。 */
+  useEffect(() => {
+    if (!modelOpen) return;
+    modelListRef.current?.querySelector<HTMLElement>('[data-active="true"]')?.scrollIntoView({ block: "nearest" });
+  }, [activeIndex, modelOpen]);
+
+  const handleModelKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>): void => {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setModelOpen(true);
+      setActiveIndex((current) => Math.min(current + 1, keyboardOptions.length - 1));
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setActiveIndex((current) => Math.max(current - 1, 0));
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      setActiveIndex(0);
+    } else if (event.key === "End") {
+      event.preventDefault();
+      setActiveIndex(keyboardOptions.length - 1);
+    } else if (event.key === "Enter") {
+      const option = keyboardOptions[activeIndex];
+      if (modelOpen && option !== undefined) {
+        event.preventDefault();
+        selectModel(option.value);
+      }
+    } else if (event.key === "Escape") {
+      setModelOpen(false);
+    }
+  };
+
+  /** 展示名：供应商 / 模型（与筛选查询区分）。 */
+  const modelDisplayName = (choice: string): string => {
+    const separator = choice.indexOf("::");
+    return separator >= 0
+      ? `${choice.slice(0, separator)} / ${choice.slice(separator + 2)}`
+      : choice;
+  };
+
+  /** 选中一个模型（"" = 跟随默认），关闭列表、失焦并清空筛选。 */
+  const selectModel = (choice: string): void => {
+    if (disabled) return;
+    setModelOpen(false);
+    setModelFilter("");
+    modelInputRef.current?.blur();
+    submitChange({ ...draft, model: choice });
+  };
+
   useEffect(() => {
     if (!open) return;
     setDraft({ ...DEFAULT_OPTIONS, ...automation });
     setModelFilter("");
+    setModelOpen(false);
   }, [open]);
 
   useEffect(() => {
@@ -131,7 +217,11 @@ export function ProjectAutomationMenu({
         setOpen(false);
       }
     }
-    function closeFromViewportChange() {
+    function closeFromViewportChange(event: Event) {
+      // Only the document/viewport scroll closes the menu. Inner scrollable
+      // elements (the model list) fire capture-phase scroll events too and
+      // must stay wheel-scrollable.
+      if (event.target !== document) return;
       setOpen(false);
     }
     function closeFromEscape(event: KeyboardEvent) {
@@ -204,38 +294,66 @@ export function ProjectAutomationMenu({
         </select>
       </label>
       {models.length > 0 && (
-        <label className="project-automation-field">
+        <label className="project-automation-field project-automation-field-model">
           <span>{text("认领模型", "Claim model")}</span>
-          <input
-            type="search"
-            className="project-automation-model-filter"
-            value={modelFilter}
-            onChange={(event) => setModelFilter(event.target.value)}
-            placeholder={text("筛选模型…", "Filter models…")}
-            aria-label={text("筛选模型", "Filter models")}
-          />
-          <select
-            value={draft.model}
-            disabled={disabled}
-            onChange={(event) => submitChange({
-              ...draft,
-              model: event.target.value,
-            })}
-          >
-            <option value="">{text("跟随默认", "Follow default")}</option>
-            {filteredModelGroups.map(([provider, choices]) => (
-              <optgroup key={provider} label={provider}>
-                {choices.map((choice) => (
-                  <option key={choice} value={choice}>
-                    {choice.slice(choice.indexOf("::") + 2)}
-                  </option>
+          <div className="project-automation-combobox">
+            <input
+              ref={modelInputRef}
+              type="search"
+              className="project-automation-model-filter"
+              value={modelFocused || modelFilter !== ""
+                ? modelFilter
+                : draft.model
+                  ? modelDisplayName(draft.model)
+                  : ""}
+              disabled={disabled}
+              onChange={(event) => {
+                setModelFilter(event.target.value);
+                setModelOpen(true);
+              }}
+              onFocus={() => {
+                setModelFocused(true);
+                if (!disabled) setModelOpen(true);
+              }}
+              onBlur={() => setModelFocused(false)}
+              onKeyDown={handleModelKeyDown}
+              placeholder={text("选择或搜索模型…", "Select or search model…")}
+              aria-label={text("认领模型", "Claim model")}
+              aria-expanded={modelOpen}
+              aria-activedescendant={modelOpen && keyboardOptions[activeIndex] !== undefined
+                ? `model-option-${activeIndex}`
+                : undefined}
+              role="combobox"
+            />
+            {modelOpen && !disabled && (
+              <div className="project-automation-model-list" ref={modelListRef} role="listbox">
+                {listItems.map((item) => item.kind === "group" ? (
+                  <div key={item.label} className="project-automation-model-group-label">{item.label}</div>
+                ) : (
+                  <button
+                    key={item.value}
+                    type="button"
+                    role="option"
+                    id={`model-option-${item.index}`}
+                    aria-selected={draft.model === item.value}
+                    data-active={item.index === activeIndex}
+                    className={[
+                      "project-automation-model-option",
+                      draft.model === item.value ? "is-selected" : "",
+                      item.index === activeIndex ? "is-active" : "",
+                    ].filter(Boolean).join(" ")}
+                    onClick={() => selectModel(item.value)}
+                    onMouseEnter={() => setActiveIndex(item.index)}
+                  >
+                    {item.label}
+                  </button>
                 ))}
-              </optgroup>
-            ))}
-            {filteredPlainModels.map((choice) => (
-              <option key={choice} value={choice}>{choice}</option>
-            ))}
-          </select>
+                {keyboardOptions.length === 0 && (
+                  <div className="project-automation-model-empty">{text("没有匹配的模型。", "No matching models.")}</div>
+                )}
+              </div>
+            )}
+          </div>
         </label>
       )}
       {unavailableReason && <p className="project-automation-note">{unavailableReason}</p>}

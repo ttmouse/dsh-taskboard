@@ -1483,6 +1483,7 @@ kbd {
 }
 
 .project-automation-field .project-automation-model-filter {
+  width: 100%;
   height: 26px;
   padding: 0 8px;
   border: var(--border-hairline) solid var(--border);
@@ -1496,6 +1497,77 @@ kbd {
 
 .project-automation-field .project-automation-model-filter:focus {
   border-color: var(--accent);
+}
+
+/* 模型字段：一个可搜索的组合框（输入即筛选，点击选项选中）。 */
+.project-automation-field.project-automation-field-model {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 6px;
+}
+
+.project-automation-combobox {
+  position: relative;
+  width: 100%;
+}
+
+.project-automation-model-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  max-height: 220px;
+  overflow: auto;
+  padding: 4px;
+  border: var(--border-hairline) solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+}
+
+.project-automation-model-group-label {
+  padding: 6px 8px 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+}
+
+.project-automation-model-option {
+  display: block;
+  width: 100%;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.project-automation-model-option:hover {
+  background: var(--surface-hover);
+}
+
+.project-automation-model-option.is-active {
+  background: var(--surface-hover);
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.project-automation-model-option.is-selected {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.project-automation-model-empty {
+  padding: 8px;
+  font-size: 12px;
+  color: var(--text-tertiary);
 }
 
 .project-automation-field select:focus-visible {
