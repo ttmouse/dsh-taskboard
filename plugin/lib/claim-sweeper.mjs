@@ -72,9 +72,10 @@ async function waitForClaimTurn({ ctx, sessionId, log }) {
 
 /**
  * Kick one claim agent session for a project and wait for it to settle.
+ * @param model - optional per-project model override (automation.model).
  * @returns {Promise<boolean>} true when the agent finished (or was skipped).
  */
-async function kickClaimSession({ ctx, project, baseUrl, log }) {
+async function kickClaimSession({ ctx, project, baseUrl, model, log }) {
   if (!project.workspacePath) return false
   const sessionId = `claim-${project.id.slice(0, 8)}-${randomUUID().slice(0, 8)}`
   let handle
@@ -93,6 +94,22 @@ async function kickClaimSession({ ctx, project, baseUrl, log }) {
       }
     } catch (error) {
       log(`[claim] ${project.id}: default model unavailable: ${error instanceof Error ? error.message : String(error)}`)
+    }
+    // Per-project model override (automation menu). The stored value is either
+    // a plain model id (default provider) or "provider::model".
+    if (model) {
+      const separator = model.indexOf('::')
+      if (separator >= 0) {
+        const provider = model.slice(0, separator)
+        const modelId = model.slice(separator + 2)
+        if (provider && modelId) {
+          agentOptions = { ...agentOptions, provider, model: modelId }
+          log(`[claim] ${project.id}: using ${provider}/${modelId}`)
+        }
+      } else {
+        agentOptions = { ...agentOptions, model }
+        log(`[claim] ${project.id}: using project model ${model}`)
+      }
     }
     handle = await ctx.agents.create({
       sessionId,
@@ -171,7 +188,7 @@ export async function startClaimSweeper({ ctx, baseUrl, pollMs = 60_000, log = (
         // Stamp first so a crash mid-run does not re-kick immediately.
         await fetch(`${baseUrl}/api/projects/${encodeURIComponent(project.id)}/claim-run`, { method: 'POST' })
           .catch(() => {})
-        await kickClaimSession({ ctx, project, baseUrl, log })
+        await kickClaimSession({ ctx, project, baseUrl, model: automation.model ?? null, log })
       } finally {
         inFlight.delete(project.id)
       }

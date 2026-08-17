@@ -16,7 +16,7 @@
  * agents know the plugin exists.
  */
 import { request as httpRequest } from 'node:http'
-import { appendFile, mkdir } from 'node:fs/promises'
+import { appendFile, mkdir, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -48,8 +48,8 @@ const DEFAULT_ROUTE_PREFIX = '/dsh-taskboard'
 /** Order of the announcement section within the tool-guidance band. */
 const SECTION_ORDER = 205
 
-/** Required services: webserver, system-prompt band, workspace registry, jobs, agents, sessions, and the default-model service. */
-export const inject = ['webServer', 'systemPrompt', 'workspaceRegistry', 'jobs', 'agents', 'sessions', 'agentDefaultModel']
+/** Required services: webserver, system-prompt band, workspace registry, jobs, agents, sessions, the default-model service, and llm. */
+export const inject = ['webServer', 'systemPrompt', 'workspaceRegistry', 'jobs', 'agents', 'sessions', 'agentDefaultModel', 'llm']
 
 /** Model-facing announcement: plugin presence, capabilities, and limits. */
 export const TASKBOARD_GUIDANCE = '本机已安装 dsh-taskboard 插件（DSH Web GUI 的完整任务看板）：侧边栏「任务看板」入口；完整能力来自本地 SQLite 服务——多视图（看板/列表/Gantt/工作流/仪表盘）、任务详情（关系/附件/标签/过滤器）、AI 对话、项目自动认领（DSH 原生 claim-sweep 后台作业驱动，认领/执行/回写全部通过本机看板 HTTP API 完成，无 taskctl、无外部心跳文件）。数据存 ~/.dsh/storages/dsh-taskboard/taskboard.sqlite（本机回环端口 47825）。任务可通过看板内「在对话中打开」直接驱动 DSH 会话执行并回写评论。用户提到「任务看板 / 看板 / 任务管理」时即指本插件，请据此协作。'
@@ -165,6 +165,39 @@ async function syncWorkspacesFromRegistry(registry, baseUrl, log) {
 }
 
 /**
+ * Refresh the claim model catalog: enumerate every registered provider's
+ * models via ctx.llm and write them to models.json in the data directory,
+ * where the board serves them to the automation menu. Entries are plain ids
+ * (listModels returns adapter objects).
+ * @param ctx - context carrying llm and agentDefaultModel.
+ * @param dataDirectory - board data directory.
+ * @param log - logger callback.
+ */
+async function refreshModelCatalog(ctx, dataDirectory, log) {
+  try {
+    const providers = await ctx.llm.listProviders()
+    const catalog = { providers: [], updatedAt: new Date().toISOString() }
+    for (const provider of providers) {
+      const providerId = provider?.id
+      if (!providerId) continue
+      try {
+        const models = await ctx.llm.listModels(providerId)
+        catalog.providers.push({
+          provider: providerId,
+          models: models.map((entry) => (typeof entry === 'string' ? entry : entry?.id)).filter(Boolean),
+        })
+      } catch (error) {
+        log(`model catalog: ${providerId} list failed: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+    await writeFile(path.join(dataDirectory, 'models.json'), JSON.stringify(catalog, null, 2), 'utf8')
+    log(`model catalog: ${catalog.providers.length} providers, ${catalog.providers.reduce((sum, p) => sum + p.models.length, 0)} models`)
+  } catch (error) {
+    log(`model catalog failed: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
+/**
  * Start the taskboard server, register the proxy route, and announce the
  * plugin. Start failures are logged, never thrown.
  * @param ctx - context carrying webServer, systemPrompt, and workspaceRegistry.
@@ -203,6 +236,10 @@ export function apply(ctx, config) {
       baseUrl = `http://127.0.0.1:${address.port}`
       void pluginLog(`dsh-taskboard: serving ${config.routePrefix} (internal loopback port ${address.port}, data ${dataDirectory})`)
       ctx.logger.info(`dsh-taskboard: serving ${config.routePrefix} (internal loopback port ${address.port}, data ${dataDirectory})`)
+      void refreshModelCatalog(ctx, dataDirectory, (message) => {
+        void pluginLog(message)
+        ctx.logger.info(`dsh-taskboard: ${message}`)
+      })
       if (config.syncWorkspaces) {
         const runSync = () => {
           void syncWorkspacesFromRegistry(ctx.workspaceRegistry, baseUrl, (message) => {

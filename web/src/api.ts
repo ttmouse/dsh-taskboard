@@ -279,12 +279,24 @@ export function subscribeAiChatThread(
 export interface AutomationStateView {
   enabled: boolean;
   intervalMinutes: number | null;
+  model: string | null;
   lastClaimAt: number | null;
 }
 
 export interface AutomationUpdateInput {
   enabled: boolean;
   intervalMinutes?: number;
+  automationModel?: string | null;
+}
+
+/** 认领模型目录（host 半从 ctx.llm 枚举全部 provider 写入 models.json）。 */
+export interface ClaimModelCatalog {
+  providers: { provider: string; models: string[] }[];
+  updatedAt: string;
+}
+
+export async function getClaimModels(signal?: AbortSignal): Promise<ClaimModelCatalog> {
+  return request<ClaimModelCatalog>("/api/automation/models", { signal });
 }
 
 /** 读取项目自动认领状态（配置存看板数据库，由 DSH 原生 claim-sweep 作业驱动）。 */

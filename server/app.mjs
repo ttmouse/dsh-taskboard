@@ -1763,7 +1763,7 @@ export function createTaskboardServer(options = {}) {
         }
         const body = await readJson(request);
         assertPlainObject(body);
-        assertAllowedKeys(body, new Set(["enabled", "intervalMinutes"]));
+        assertAllowedKeys(body, new Set(["enabled", "intervalMinutes", "automationModel"]));
         if (typeof body.enabled !== "boolean") {
           throw new ApiError(400, "INVALID_FIELD", "'enabled' must be a boolean");
         }
@@ -1777,9 +1777,27 @@ export function createTaskboardServer(options = {}) {
         if (enabled && !project.workspacePath) {
           throw new ApiError(400, "INVALID_FIELD", "workspacePath is required to enable automation (project must map to a DSH workspace)");
         }
-        const automation = database.setProjectAutomation(projectId, { enabled, intervalMinutes });
+        const automationModel = body.automationModel === undefined
+          ? undefined
+          : stringField(body.automationModel, "automationModel", { nullable: true, maxLength: 128 });
+        const automation = database.setProjectAutomation(projectId, { enabled, intervalMinutes, model: automationModel });
         events.emit("project.automation", { projectId, automation });
         return sendJson(response, 200, { automation });
+      }
+
+      // Claim model catalog: written by the host half from ctx.llm.listModels()
+      // into models.json in the data directory (fallback: empty catalog).
+      if (pathname === "/api/automation/models") {
+        if (request.method !== "GET") return methodNotAllowed(response, ["GET"]);
+        let catalog = { providers: [], updatedAt: null };
+        try {
+          const raw = await readFile(path.join(resolved.dataDirectory, "models.json"), "utf8");
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === "object" && Array.isArray(parsed.providers)) catalog = parsed;
+        } catch {
+          // models.json missing or unparsable: serve the empty catalog.
+        }
+        return sendJson(response, 200, catalog);
       }
 
       const claimRunRoute = pathname.match(/^\/api\/projects\/([^/]+)\/claim-run$/);

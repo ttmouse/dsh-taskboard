@@ -513,6 +513,9 @@ export class TaskboardDatabase {
     if (!projectColumns.some((column) => column.name === "last_claim_at")) {
       this.database.exec("ALTER TABLE projects ADD COLUMN last_claim_at INTEGER");
     }
+    if (!projectColumns.some((column) => column.name === "automation_model")) {
+      this.database.exec("ALTER TABLE projects ADD COLUMN automation_model TEXT");
+    }
 
     const taskColumns = this.database.prepare("PRAGMA table_info(tasks)").all();
     const hasThreadId = taskColumns.some((column) => column.name === "thread_id");
@@ -810,7 +813,7 @@ export class TaskboardDatabase {
   /** Read a project's claim-automation record (enabled flag + interval + last run). */
   getProjectAutomation(id) {
     const row = this.database.prepare(`
-      SELECT automation_enabled, automation_interval_minutes, last_claim_at
+      SELECT automation_enabled, automation_interval_minutes, automation_model, last_claim_at
       FROM projects WHERE id = ?
     `).get(id);
     if (!row) {
@@ -819,18 +822,20 @@ export class TaskboardDatabase {
     return {
       enabled: Boolean(row.automation_enabled),
       intervalMinutes: row.automation_interval_minutes,
+      model: row.automation_model ?? null,
       lastClaimAt: row.last_claim_at ?? null,
     };
   }
 
   /** Persist a project's claim-automation switch (config lives in the board DB). */
-  setProjectAutomation(id, { enabled, intervalMinutes }) {
+  setProjectAutomation(id, { enabled, intervalMinutes, model }) {
     const existing = this.getProjectAutomation(id);
+    const nextModel = model === undefined ? existing.model : (model || null);
     this.database.prepare(`
       UPDATE projects
-      SET automation_enabled = ?, automation_interval_minutes = ?, updated_at = ?
+      SET automation_enabled = ?, automation_interval_minutes = ?, automation_model = ?, updated_at = ?
       WHERE id = ?
-    `).run(enabled ? 1 : 0, intervalMinutes ?? existing.intervalMinutes, now(), id);
+    `).run(enabled ? 1 : 0, intervalMinutes ?? existing.intervalMinutes, nextModel, now(), id);
     return this.getProjectAutomation(id);
   }
 

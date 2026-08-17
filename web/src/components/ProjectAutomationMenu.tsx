@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { AutomationModel, AutomationReasoningEffort } from "../../../shared/taskboard-automation-options.mjs";
+import type { AutomationReasoningEffort } from "../../../shared/taskboard-automation-options.mjs";
 import { TaskboardIcon } from "./TaskboardIcon";
 import { useTaskboardI18n } from "../i18n";
 
@@ -11,7 +11,8 @@ interface AutomationOptions {
   enabledByUser: boolean;
   quotaAware: boolean;
   intervalMinutes: IntervalMinutes;
-  model: AutomationModel;
+  /** 认领模型：'' = 跟随 agent-default-model。 */
+  model: string;
   reasoningEffort: AutomationReasoningEffort;
 }
 
@@ -21,6 +22,8 @@ interface AutomationState extends AutomationOptions {
 
 interface ProjectAutomationMenuProps {
   automation?: Partial<AutomationState>;
+  /** 认领模型目录（来自 /api/automation/models）。 */
+  models: string[];
   pending: boolean;
   error: string | null;
   unavailableReason: string | null;
@@ -32,12 +35,13 @@ const DEFAULT_OPTIONS: AutomationOptions = {
   enabledByUser: false,
   quotaAware: false,
   intervalMinutes: 5,
-  model: "gpt-5.5",
+  model: "",
   reasoningEffort: "high",
 };
 
 export function ProjectAutomationMenu({
   automation,
+  models,
   pending,
   error,
   unavailableReason,
@@ -161,6 +165,26 @@ export function ProjectAutomationMenu({
           ))}
         </select>
       </label>
+      {models.length > 0 && (
+        <label className="project-automation-field">
+          <span>{text("认领模型", "Claim model")}</span>
+          <select
+            value={draft.model}
+            disabled={disabled}
+            onChange={(event) => submitChange({
+              ...draft,
+              model: event.target.value,
+            })}
+          >
+            <option value="">{text("跟随默认", "Follow default")}</option>
+            {models.map((choice) => (
+              <option key={choice} value={choice}>
+                {choice.includes("::") ? choice.slice(choice.indexOf("::") + 2) : choice}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       {unavailableReason && <p className="project-automation-note">{unavailableReason}</p>}
       {error && error !== unavailableReason && <p className="project-automation-error" role="alert">{error}</p>}
     </div>,

@@ -27,6 +27,7 @@ import {
   getWorkflowWorkspace,
   getTaskboardMetadata,
   getProjectAutomation,
+  getClaimModels,
   listArchivedTasks,
   listDevelopmentContexts,
   listDeviceWorkspaces,
@@ -179,7 +180,8 @@ interface ProjectAutomationRecord {
   quotaAware: boolean;
   quota?: AutomationQuotaStatus;
   intervalMinutes: AutomationIntervalMinutes;
-  model: AutomationModel;
+  /** 认领模型：'' = 跟随 agent-default-model，否则为模型 id。 */
+  model: string;
   reasoningEffort: AutomationReasoningEffort;
 }
 
@@ -638,6 +640,8 @@ export function App() {
   const [favoriteProjectIds, setFavoriteProjectIds] = useState(readFavoriteProjectIds);
   const [deviceWorkspacePaths, setDeviceWorkspacePaths] = useState(readDeviceWorkspacePaths);
   const [projectAutomations, setProjectAutomations] = useState(readProjectAutomations);
+  /** 认领模型目录：组合值 provider::model。 */
+  const [claimModelChoices, setClaimModelChoices] = useState<string[]>([]);
   const [automationPending, setAutomationPending] = useState(false);
   const [automationError, setAutomationError] = useState<string | null>(null);
   const [announcement, setAnnouncementValue] = useState("");
@@ -889,7 +893,7 @@ export function App() {
           intervalMinutes: isAutomationIntervalMinutes(result.intervalMinutes)
             ? result.intervalMinutes
             : previous?.intervalMinutes ?? DEFAULT_AUTOMATION_OPTIONS.intervalMinutes,
-          model: previous?.model ?? DEFAULT_AUTOMATION_OPTIONS.model,
+          model: result.model ?? previous?.model ?? "",
           reasoningEffort: previous?.reasoningEffort ?? DEFAULT_AUTOMATION_OPTIONS.reasoningEffort,
         });
       } catch (error) {
@@ -978,7 +982,7 @@ export function App() {
     enabledByUser: boolean;
     quotaAware: boolean;
     intervalMinutes: AutomationIntervalMinutes;
-    model: AutomationModel;
+    model: string;
     reasoningEffort: AutomationReasoningEffort;
   }) => {
     const stored = projectAutomations[selectedProjectId];
@@ -999,6 +1003,7 @@ export function App() {
         const result = await updateProjectAutomation(selectedProjectId, {
           enabled: options.enabledByUser,
           intervalMinutes: options.intervalMinutes,
+          automationModel: options.model || null,
         });
         writeProjectAutomation(selectedProjectId, {
           automationId: heartbeatTaskIdFor(selectedProjectId),
@@ -2271,10 +2276,18 @@ export function App() {
             {selectedProjectId && (
               <ProjectAutomationMenu
                 automation={selectedProjectAutomation}
+                models={claimModelChoices}
                 pending={automationPending}
                 error={automationError}
                 unavailableReason={automationProjectContext.unavailableReason}
-                onOpen={() => void reconcileProjectAutomation()}
+                onOpen={() => {
+                  void reconcileProjectAutomation();
+                  void getClaimModels().then((catalog) => {
+                    setClaimModelChoices(catalog.providers.flatMap((entry) =>
+                      entry.models.map((model) => `${entry.provider}::${model}`),
+                    ));
+                  }).catch(() => {});
+                }}
                 onChange={(options) => void saveProjectAutomation(options)}
               />
             )}
