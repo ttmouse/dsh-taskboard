@@ -55,6 +55,7 @@ export function ProjectAutomationMenu({
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState({ left: 0, top: 0, ready: false });
   const [draft, setDraft] = useState<AutomationOptions>(DEFAULT_OPTIONS);
+  const [modelFilter, setModelFilter] = useState("");
   const status = automation?.status ?? "PAUSED";
   const stateLabel = !automation?.enabledByUser
     ? text("已暂停", "Paused")
@@ -81,9 +82,28 @@ export function ProjectAutomationMenu({
     group[1].push(choice);
   }
 
+  /** 模型检索：按模型名或供应商名过滤；已选中的模型始终保留。 */
+  const normalizedModelFilter = modelFilter.trim().toLowerCase();
+  const modelMatchesFilter = (choice: string): boolean => {
+    if (!normalizedModelFilter) return true;
+    const separator = choice.indexOf("::");
+    const provider = separator >= 0 ? choice.slice(0, separator) : "";
+    const model = separator >= 0 ? choice.slice(separator + 2) : choice;
+    return model.toLowerCase().includes(normalizedModelFilter)
+      || provider.toLowerCase().includes(normalizedModelFilter);
+  };
+  const filteredModelGroups: Array<[string, string[]]> = modelGroups
+    .map(([provider, choices]) => [
+      provider,
+      choices.filter((choice) => modelMatchesFilter(choice) || choice === draft.model),
+    ] as [string, string[]])
+    .filter(([, choices]) => choices.length > 0);
+  const filteredPlainModels = plainModels.filter((choice) => modelMatchesFilter(choice) || choice === draft.model);
+
   useEffect(() => {
     if (!open) return;
     setDraft({ ...DEFAULT_OPTIONS, ...automation });
+    setModelFilter("");
   }, [open]);
 
   useEffect(() => {
@@ -186,6 +206,14 @@ export function ProjectAutomationMenu({
       {models.length > 0 && (
         <label className="project-automation-field">
           <span>{text("认领模型", "Claim model")}</span>
+          <input
+            type="search"
+            className="project-automation-model-filter"
+            value={modelFilter}
+            onChange={(event) => setModelFilter(event.target.value)}
+            placeholder={text("筛选模型…", "Filter models…")}
+            aria-label={text("筛选模型", "Filter models")}
+          />
           <select
             value={draft.model}
             disabled={disabled}
@@ -195,7 +223,7 @@ export function ProjectAutomationMenu({
             })}
           >
             <option value="">{text("跟随默认", "Follow default")}</option>
-            {modelGroups.map(([provider, choices]) => (
+            {filteredModelGroups.map(([provider, choices]) => (
               <optgroup key={provider} label={provider}>
                 {choices.map((choice) => (
                   <option key={choice} value={choice}>
@@ -204,7 +232,7 @@ export function ProjectAutomationMenu({
                 ))}
               </optgroup>
             ))}
-            {plainModels.map((choice) => (
+            {filteredPlainModels.map((choice) => (
               <option key={choice} value={choice}>{choice}</option>
             ))}
           </select>

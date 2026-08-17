@@ -1482,6 +1482,22 @@ kbd {
   font: inherit;
 }
 
+.project-automation-field .project-automation-model-filter {
+  height: 26px;
+  padding: 0 8px;
+  border: var(--border-hairline) solid var(--border);
+  border-radius: 5px;
+  outline: 0;
+  background: var(--surface);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12px;
+}
+
+.project-automation-field .project-automation-model-filter:focus {
+  border-color: var(--accent);
+}
+
 .project-automation-field select:focus-visible {
   outline: 0;
   box-shadow: none;
