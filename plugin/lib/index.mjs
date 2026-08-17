@@ -22,7 +22,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import z from 'schemastery'
 import { createTaskboardServer } from '../vendor/server/app.mjs'
-import { startClaimSweeper } from './claim-sweeper.mjs'
+import { reconcileClaimRoutine } from './claim-routines.mjs'
 
 /** Plugin root: the directory holding lib/ (package.json sits one level up). */
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -48,11 +48,11 @@ const DEFAULT_ROUTE_PREFIX = '/dsh-taskboard'
 /** Order of the announcement section within the tool-guidance band. */
 const SECTION_ORDER = 205
 
-/** Required services: webserver, system-prompt band, workspace registry, jobs, agents, sessions, the default-model service, and llm. */
-export const inject = ['webServer', 'systemPrompt', 'workspaceRegistry', 'jobs', 'agents', 'sessions', 'agentDefaultModel', 'llm']
+/** Required services: webserver, system-prompt band, workspace registry, and llm (model catalog). */
+export const inject = ['webServer', 'systemPrompt', 'workspaceRegistry', 'llm']
 
 /** Model-facing announcement: plugin presence, capabilities, and limits. */
-export const TASKBOARD_GUIDANCE = '本机已安装 dsh-taskboard 插件（DSH Web GUI 的完整任务看板）：侧边栏「任务看板」入口；完整能力来自本地 SQLite 服务——多视图（看板/列表/Gantt/工作流/仪表盘）、任务详情（关系/附件/标签/过滤器）、AI 对话、项目自动认领（DSH 原生 claim-sweep 后台作业驱动，认领/执行/回写全部通过本机看板 HTTP API 完成，无 taskctl、无外部心跳文件）。数据存 ~/.dsh/storages/dsh-taskboard/taskboard.sqlite（本机回环端口 47825）。任务可通过看板内「在对话中打开」直接驱动 DSH 会话执行并回写评论。用户提到「任务看板 / 看板 / 任务管理」时即指本插件，请据此协作。'
+export const TASKBOARD_GUIDANCE = '本机已安装 dsh-taskboard 插件（DSH Web GUI 的完整任务看板）：侧边栏「任务看板」入口；完整能力来自本地 SQLite 服务——多视图（看板/列表/Gantt/工作流/仪表盘）、任务详情（关系/附件/标签/过滤器）、AI 对话、项目自动认领（dsh-routines 例程驱动：认领开关生成 ~/.dsh/routines/taskboard-claim-*.yaml，由 ops profile 的 routines-scheduler 定时执行 headless 会话，认领/执行/回写全部通过本机看板 HTTP API 完成，无 taskctl、无心跳文件、无长驻作业）。数据存 ~/.dsh/storages/dsh-taskboard/taskboard.sqlite（本机回环端口 47825）。任务可通过看板内「在对话中打开」直接驱动 DSH 会话执行并回写评论。用户提到「任务看板 / 看板 / 任务管理」时即指本插件，请据此协作。'
 
 /** Plugin config, validated by the schemastery schema. */
 export const Config = z.object({
@@ -66,14 +66,12 @@ export const Config = z.object({
   port: z.natural().max(65535).default(47825),
   /** When true, a system-prompt section announces the plugin to every agent. */
   announceToAgent: z.boolean().default(true),
-  /** When true, the host half runs the DSH-native claim sweeper (auto-claim). */
-  claimSweeperEnabled: z.boolean().default(true),
-  /** Claim sweep poll interval in ms (clamped to >= 5000). */
-  claimSweepPollMs: z.natural().max(3_600_000).default(60_000),
   /** When true, DSH workspaces are synced into board projects (workspace = project). */
   syncWorkspaces: z.boolean().default(true),
   /** Workspace → project sync interval in ms (0 disables periodic re-sync). */
   syncIntervalMs: z.natural().max(3_600_000).default(60_000),
+  /** Whether the host half reconciles claim routines in $DSH_HOME/routines. */
+  routinesEnabled: z.boolean().default(true),
 })
 
 /**
@@ -208,6 +206,35 @@ async function refreshModelCatalog(ctx, dataDirectory, log) {
 }
 
 /**
+ * Reconcile claim routines for every board project: automation switch state
+ * mirrors into $DSH_HOME/routines/taskboard-claim-*.yaml, which the ops
+ * profile's routines-scheduler executes on cron.
+ * @param baseUrl - internal taskboard loopback base URL.
+ * @param log - logger callback.
+ * @returns summary string.
+ */
+async function reconcileAllRoutines(baseUrl, log) {
+  const listRes = await fetch(`${baseUrl}/api/projects`)
+  if (!listRes.ok) throw new Error(`list projects: HTTP ${listRes.status}`)
+  const { projects } = await listRes.json()
+  let written = 0
+  let removed = 0
+  for (const project of projects) {
+    let automation = { enabled: false, intervalMinutes: 10 }
+    try {
+      const res = await fetch(`${baseUrl}/api/projects/${encodeURIComponent(project.id)}/automation`)
+      if (res.ok) automation = (await res.json()).automation
+    } catch {
+      // keep defaults (disabled)
+    }
+    const result = await reconcileClaimRoutine(project, automation, baseUrl, log)
+    if (result === 'written') written++
+    else if (result === 'removed') removed++
+  }
+  return `claim routines: ${written} written, ${removed} removed (${projects.length} projects)`
+}
+
+/**
  * Start the taskboard server, register the proxy route, and announce the
  * plugin. Start failures are logged, never thrown.
  * @param ctx - context carrying webServer, systemPrompt, and workspaceRegistry.
@@ -224,7 +251,6 @@ export function apply(ctx, config) {
 
   let routeDisposer = undefined
   let app = undefined
-  let sweeper = undefined
   let syncTimer = undefined
   let baseUrl = undefined
 
@@ -261,6 +287,19 @@ export function apply(ctx, config) {
                 void pluginLog(summary)
                 ctx.logger.info(`dsh-taskboard: ${summary}`)
               }
+              if (config.routinesEnabled) {
+                return reconcileAllRoutines(baseUrl, (message) => {
+                  void pluginLog(message)
+                  ctx.logger.info(message)
+                })
+              }
+              return null
+            })
+            .then((routinesSummary) => {
+              if (routinesSummary) {
+                void pluginLog(routinesSummary)
+                ctx.logger.info(`dsh-taskboard: ${routinesSummary}`)
+              }
             })
             .catch((error) => {
               const message = `workspace sync: ${error instanceof Error ? error.message : String(error)}`
@@ -278,34 +317,10 @@ export function apply(ctx, config) {
     }
   }
 
-  const startClaimSweep = async () => {
-    if (config.claimSweeperEnabled === false) return
-    try {
-      sweeper = await startClaimSweeper({
-        ctx,
-        baseUrl,
-        pollMs: Math.max(5000, config.claimSweepPollMs),
-        log: (message) => {
-          void pluginLog(message)
-          ctx.logger.info(message)
-        },
-      })
-      if (!sweeper.running) sweeper = undefined
-    } catch (error) {
-      const message = `claim sweeper start failed: ${error instanceof Error ? error.message : String(error)}`
-      void pluginLog(message)
-      ctx.logger.error(`dsh-taskboard: ${message}`)
-    }
-  }
-
   const stop = async () => {
     if (syncTimer !== undefined) {
       clearInterval(syncTimer)
       syncTimer = undefined
-    }
-    if (sweeper !== undefined) {
-      await sweeper.stop()
-      sweeper = undefined
     }
     if (routeDisposer !== undefined) {
       routeDisposer()
@@ -317,9 +332,7 @@ export function apply(ctx, config) {
     }
   }
 
-  void start().then(() => {
-    void startClaimSweep()
-  })
+  void start()
   ctx.on('dispose', () => {
     void stop()
   })
