@@ -63,6 +63,24 @@ export function ProjectAutomationMenu({
       : text("已暂停", "Paused");
   const disabled = pending || Boolean(unavailableReason);
 
+  /** 认领模型目录按供应商分组（值仍是 "provider::model"，组标签显示供应商）。 */
+  const modelGroups: Array<[string, string[]]> = [];
+  const plainModels: string[] = [];
+  for (const choice of models) {
+    const separator = choice.indexOf("::");
+    if (separator < 0) {
+      plainModels.push(choice);
+      continue;
+    }
+    const provider = choice.slice(0, separator);
+    let group = modelGroups.find(([name]) => name === provider);
+    if (!group) {
+      group = [provider, []];
+      modelGroups.push(group);
+    }
+    group[1].push(choice);
+  }
+
   useEffect(() => {
     if (!open) return;
     setDraft({ ...DEFAULT_OPTIONS, ...automation });
@@ -177,10 +195,17 @@ export function ProjectAutomationMenu({
             })}
           >
             <option value="">{text("跟随默认", "Follow default")}</option>
-            {models.map((choice) => (
-              <option key={choice} value={choice}>
-                {choice.includes("::") ? choice.slice(choice.indexOf("::") + 2) : choice}
-              </option>
+            {modelGroups.map(([provider, choices]) => (
+              <optgroup key={provider} label={provider}>
+                {choices.map((choice) => (
+                  <option key={choice} value={choice}>
+                    {choice.slice(choice.indexOf("::") + 2)}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+            {plainModels.map((choice) => (
+              <option key={choice} value={choice}>{choice}</option>
             ))}
           </select>
         </label>

@@ -78,7 +78,7 @@ const DEFAULT_ROUTE_PREFIX = '/dsh-taskboard'
 const SECTION_ORDER = 205
 
 /** Required services: webserver, system-prompt band, workspace registry, and llm (model catalog). */
-export const inject = ['webServer', 'systemPrompt', 'workspaceRegistry', 'llm']
+export const inject = ['webServer', 'systemPrompt', 'workspaceRegistry', 'sessionPersistence', 'llm']
 
 /** Model-facing announcement: plugin presence, capabilities, and limits. */
 export const TASKBOARD_GUIDANCE = '本机已安装 dsh-taskboard 插件（DSH Web GUI 的完整任务看板）：侧边栏「任务看板」入口；完整能力来自本地 SQLite 服务——多视图（看板/列表/Gantt/工作流/仪表盘）、任务详情（关系/附件/标签/过滤器）、AI 对话、项目自动认领（dsh-routines 例程驱动：认领开关生成 ~/.dsh/routines/taskboard-claim-*.yaml，由 ops profile 的 routines-scheduler 定时执行 headless 会话，认领/执行/回写全部通过本机看板 HTTP API 完成，无 taskctl、无心跳文件、无长驻作业）。数据存 ~/.dsh/storages/dsh-taskboard/taskboard.sqlite（本机回环端口 47825）。任务可通过看板内「在对话中打开」直接驱动 DSH 会话执行并回写评论。用户提到「任务看板 / 看板 / 任务管理」时即指本插件，请据此协作。'
@@ -235,6 +235,38 @@ async function refreshModelCatalog(ctx, dataDirectory, log) {
 }
 
 /**
+ * Reindex workspace session accounting: sessions created by external headless
+ * runs (dsh-routines) never pass through this GUI process, so they stay out
+ * of the workspace registry and invisible in the sidebar. Enumerate every
+ * persisted session header and attach it to the workspace matching its cwd —
+ * attachSession validates the path and persists to workspace.json, so the
+ * sidebar picks them up within one sync tick (and they are clickable).
+ */
+async function reindexWorkspaceSessions(ctx, log) {
+  try {
+    const headers = await ctx.sessionPersistence.list()
+    const workspaces = ctx.workspaceRegistry.list()
+    const wsByPath = new Map(workspaces.map((ws) => [ws.path, ws]))
+    let attached = 0
+    for (const header of headers) {
+      if (!header?.id || typeof header.cwd !== 'string') continue
+      const ws = wsByPath.get(header.cwd)
+      if (!ws) continue
+      if (ws.sessionIds.includes(header.id)) continue
+      try {
+        await ws.attachSession(header.id)
+        attached++
+      } catch {
+        // cwd mismatch or unresolvable path: leave it unattached.
+      }
+    }
+    if (attached > 0) log(`workspace sessions: ${attached} newly attached`)
+  } catch (error) {
+    log(`workspace sessions failed: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
+/**
  * Reconcile claim routines for every board project: automation switch state
  * mirrors into $DSH_HOME/routines/taskboard-claim-*.yaml, which the ops
  * profile's routines-scheduler executes on cron.
@@ -334,7 +366,12 @@ export function apply(ctx, config) {
                 void pluginLog(routinesSummary)
                 ctx.logger.info(`dsh-taskboard: ${routinesSummary}`)
               }
+              return reindexWorkspaceSessions(ctx, (message) => {
+                void pluginLog(message)
+                ctx.logger.info(message)
+              })
             })
+            .then(() => {})
             .catch((error) => {
               const message = `workspace sync: ${error instanceof Error ? error.message : String(error)}`
               void pluginLog(message)
