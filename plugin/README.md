@@ -1,6 +1,6 @@
 # @ttmouse/dsh-taskboard
 
-独立版 DSH 双面插件（fork 自 [reasonix-taskboard](https://github.com/ttmouse/reasonix-taskboard) / [dashi-taskboard](https://github.com/chuspeeism/dashi-taskboard)）：把完整任务看板（看板/列表/Gantt/工作流/仪表盘/AI 对话）挂进 DSH Web GUI。
+DSH 双面插件（上游 fork 自 [dashi-taskboard](https://github.com/chuspeeism/dashi-taskboard) / Codex Taskboard；与 [reasonix-taskboard](https://github.com/ttmouse/reasonix-taskboard) 同源并行，后者为面向 Reasonix 的独立项目）：把完整任务看板（看板/列表/Gantt/工作流/仪表盘/AI 对话）挂进 DSH Web GUI。**仅支持 DSH**，不支持 Codex 嵌入。
 
 ## 架构
 
@@ -99,10 +99,10 @@ dsh web
 
 ## 对 fork 的修复
 
-插件化过程中发现并修复了 reasonix-taskboard 的子路径部署问题：
+插件化过程中发现并修复了上游看板代码的子路径部署问题：
 
 1. `web/src/App.tsx` 的 SSE 广播订阅用硬编码绝对路径 `new EventSource("/api/events")`，在 `/dsh-taskboard/` 子路径下丢前缀（改为 `resolveTaskboardUrl("/api/events")`）。其余 API 调用均已走 `resolveTaskboardUrl`（相对 `document.baseURI`）。
-2. 新增 `host=dsh` 宿主模式：把父窗口消息协议（主题同步等）与 Codex 自动化路由解耦，使 iframe 内嵌 DSH 时主题可跟随、自动化仍走独立直连。
+2. 新增 `host=dsh` 宿主模式：把父窗口消息协议（主题同步等）与上游遗留的 Codex 自动化路由解耦（插件版仅支持 DSH 宿主），使 iframe 内嵌 DSH 时主题可跟随、自动化走 DSH 会话直连。
 
 ## 阶段路线
 
