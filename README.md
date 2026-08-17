@@ -4,8 +4,6 @@
 
 A local-first issue board **plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`)**. It embeds a complete task board — Kanban / list / Gantt / workflow / dashboard views plus per-task AI chat — into the DSH Web GUI. Data lives in a local SQLite database (`~/.dsh/storages/dsh-taskboard/taskboard.sqlite`); no external service, no cloud dependency.
 
-> ⚠️ This version targets **DSH only**. The earlier Codex embedding path (CDP launcher / injection scripts) is **not supported** by the DSH plugin version.
-
 ## Install
 
 ```sh
@@ -35,10 +33,4 @@ cd plugin && npm install && npm run build
 
 ## Derivation & Credits
 
-This is an open-source derivative project:
-
-1. **[dashi-taskboard (Codex Taskboard)](https://github.com/chuspeeism/dashi-taskboard)** (`chuspeeism/dashi-taskboard`, Apache-2.0) — the upstream project; the Web UI, server, and data model originate from it.
-2. **[reasonix-taskboard](https://github.com/ttmouse/reasonix-taskboard)** (MIT) — a **parallel project by the same author** (a standalone version for Reasonix). It shares the same origin but is **not** an upstream of this repository.
-3. **dsh-taskboard (this repository)** (MIT) — the DSH plugin version: a cordis host half that starts the SQLite server in-process, plus a client half that mounts the board into the DSH Web GUI, adding DSH-native capabilities (claim routines via dsh-routines, task ↔ session links).
-
-Upstream Apache-2.0 portions remain under Apache License 2.0 (see [NOTICE](NOTICE)); new and modified portions are licensed under the MIT License (see [LICENSE](LICENSE)).
+This is an open-source derivative of **[dashi-taskboard (Codex Taskboard)](https://github.com/chuspeeism/dashi-taskboard)** (`chuspeeism/dashi-taskboard`, Apache-2.0); the Web UI, server, and data model originate from it. Upstream Apache-2.0 portions remain under Apache License 2.0 (see [NOTICE](NOTICE)); new and modified portions are licensed under the MIT License (see [LICENSE](LICENSE)).

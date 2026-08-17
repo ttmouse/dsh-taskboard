@@ -1,6 +1,6 @@
 # @ttmouse/dsh-taskboard
 
-DSH 双面插件（上游 fork 自 [dashi-taskboard](https://github.com/chuspeeism/dashi-taskboard) / Codex Taskboard；与 [reasonix-taskboard](https://github.com/ttmouse/reasonix-taskboard) 同源并行，后者为面向 Reasonix 的独立项目）：把完整任务看板（看板/列表/Gantt/工作流/仪表盘/AI 对话）挂进 DSH Web GUI。**仅支持 DSH**，不支持 Codex 嵌入。
+DSH 双面插件（上游 fork 自 [dashi-taskboard](https://github.com/chuspeeism/dashi-taskboard) / Codex Taskboard）：把完整任务看板（看板/列表/Gantt/工作流/仪表盘/AI 对话）挂进 DSH Web GUI。
 
 ## 架构
 
@@ -19,7 +19,7 @@ dsh web 宿主进程                         浏览器 GUI
                                       └───────────────────────────┘
 ```
 
-- **host 半**（`lib/index.mjs`）：cordis 插件，在宿主进程内以进程内方式启动 fork 自 reasonix-taskboard 的 server（`node:sqlite`，零 npm 依赖，随插件 vendored 到 `vendor/`），仅监听回环端口；通过 `ctx.webServer.register({ kind: 'prefix', path: '/dsh-taskboard' })` 把完整应用（静态资源 + `/api` + SSE）同源代理到 GUI webserver。
+- **host 半**（`lib/index.mjs`）：cordis 插件，在宿主进程内以进程内方式启动上游看板的 server（`node:sqlite`，零 npm 依赖，随插件 vendored 到 `vendor/`），仅监听回环端口；通过 `ctx.webServer.register({ kind: 'prefix', path: '/dsh-taskboard' })` 把完整应用（静态资源 + `/api` + SSE）同源代理到 GUI webserver。
 - **client 半**（`src/client/index.ts` → `lib/client.js`）：注入侧边栏「任务看板」入口，在中间列挂载同源 iframe。复用官方插件家族的挂载协议：`data-dsh-taskboard-active` 激活属性 + `dsh-panel-activate` 事件，与 SSH 面板互斥。
 - **数据**：`~/.dsh/storages/dsh-taskboard/taskboard.sqlite`（可配置）。
 - **工作区同步**：host 半通过 `ctx.workspaceRegistry.list()` 把 DSH 工作区自动同步为看板项目（项目 id = 工作区 id，`workspace_path` = 工作区路径），启动即同步 + 周期刷新；看板不再创建独立项目，「全局」保留为不挂工作区任务的收纳处。
@@ -102,7 +102,7 @@ dsh web
 插件化过程中发现并修复了上游看板代码的子路径部署问题：
 
 1. `web/src/App.tsx` 的 SSE 广播订阅用硬编码绝对路径 `new EventSource("/api/events")`，在 `/dsh-taskboard/` 子路径下丢前缀（改为 `resolveTaskboardUrl("/api/events")`）。其余 API 调用均已走 `resolveTaskboardUrl`（相对 `document.baseURI`）。
-2. 新增 `host=dsh` 宿主模式：把父窗口消息协议（主题同步等）与上游遗留的 Codex 自动化路由解耦（插件版仅支持 DSH 宿主），使 iframe 内嵌 DSH 时主题可跟随、自动化走 DSH 会话直连。
+2. 新增 `host=dsh` 宿主模式：把父窗口消息协议（主题同步等）与上游遗留的 Codex 自动化路由解耦，使 iframe 内嵌 DSH 时主题可跟随、自动化走 DSH 会话直连。
 
 ## 阶段路线
 
