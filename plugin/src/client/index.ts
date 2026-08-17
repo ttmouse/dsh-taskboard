@@ -150,7 +150,7 @@ function createEntry(
 ): { element: HTMLButtonElement; refreshLabel(): void } {
   const entry = document.createElement('button')
   entry.type = 'button'
-  entry.dataset.dshReasonixTaskboardEntry = ''
+  entry.dataset.dshTaskboardEntry = ''
   const labelSpan = document.createElement('span')
   const refreshLabel = (): void => {
     entry.setAttribute('aria-label', label())
@@ -253,7 +253,7 @@ function mountBoardView(frameRef: { current: HTMLIFrameElement | undefined }): {
     const column = conversationColumn()
     if (column === undefined) return
     container = document.createElement('div')
-    container.dataset.dshReasonixTaskboardView = ''
+    container.dataset.dshTaskboardView = ''
     frame = document.createElement('iframe')
     frameRef.current = frame
     const initialUrl = new URL(BOARD_URL, window.location.href)
