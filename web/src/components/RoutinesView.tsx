@@ -82,6 +82,7 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [runningName, setRunningName] = useState<string | null>(null);
   const [ranName, setRanName] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -165,6 +166,13 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
   const visibleRoutines: RoutineInfo[] = activeProject
     ? (routines ?? []).filter((routine) => routine.cwd === activeProject.workspacePath)
     : (routines ?? []);
+  const searchQuery = search.trim().toLowerCase();
+  const filteredRoutines = visibleRoutines.filter((routine) => {
+    if (!searchQuery) return true;
+    return routine.name.toLowerCase().includes(searchQuery)
+      || (routine.cwd ?? "").toLowerCase().includes(searchQuery)
+      || (routine.prompt ?? "").toLowerCase().includes(searchQuery);
+  });
 
   return (
     <div className="routines-view" aria-label={text("自动化", "Automation")}>
@@ -174,6 +182,14 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
           {directory && <p className="routines-directory" title={directory}>{directory}</p>}
         </div>
         <div className="routines-header-actions">
+          <input
+            type="search"
+            className="routines-search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder={text("搜索自动化任务…", "Search automations…")}
+            aria-label={text("搜索自动化任务", "Search automations")}
+          />
           <button type="button" className="routines-create" onClick={() => { setCreating(true); setError(null); }}>
             {text("新建自动化", "New automation")}
           </button>
@@ -215,13 +231,15 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
         <p className="routines-loading">{text("正在读取自动化…", "Loading automations…")}</p>
       ) : !routines || routines.length === 0 ? (
         <p className="routines-empty">{text("暂无自动化。在看板里开启某个项目的自动认领，或点「新建自动化」添加。", "No automations yet.")}</p>
-      ) : visibleRoutines.length === 0 ? (
+      ) : filteredRoutines.length === 0 ? (
         <p className="routines-empty">
-          {text("该项目暂无自动化任务。可在任务看板中开启自动认领。", "No automation tasks for this project.")}
+          {searchQuery
+            ? text("没有匹配的自动化任务。", "No matching automations.")
+            : text("该项目暂无自动化任务。可在任务看板中开启自动认领。", "No automation tasks for this project.")}
         </p>
       ) : (
         <div className="routines-grid">
-          {visibleRoutines.map((routine) => {
+          {filteredRoutines.map((routine) => {
             const status = statusInfo(routine.lastRun?.status ?? null, text);
             return (
               <article className="routine-card" key={routine.name}>

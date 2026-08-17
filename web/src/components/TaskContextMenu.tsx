@@ -412,7 +412,9 @@ export function TaskContextMenu({
           )}
         </MenuItem>
         <MenuItem
-          label={text("在对话中打开", "Open in conversation")}
+          label={task.threadId?.startsWith("dsh-")
+            ? text("打开会话", "Open session")
+            : text("让 AI 执行", "Run with AI")}
           icon={<LinearIcon name="link" />}
           onPointerEnter={closeSubmenu}
           onClick={() => closeThen(() => onOpenInThread(task))}

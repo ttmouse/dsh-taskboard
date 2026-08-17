@@ -13,6 +13,27 @@
   align-items: flex-end;
   justify-content: space-between;
   gap: 12px;
+  flex-wrap: wrap;
+}
+
+.routines-search {
+  flex: none;
+  width: 220px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border, var(--dsw-alias-border-strong, #8883));
+  background: var(--surface, var(--dsw-alias-bg-input, #ffffff10));
+  color: var(--text-primary, var(--dsw-alias-label-primary, #fff));
+  font-size: 12px;
+  outline: none;
+}
+
+.routines-search::placeholder {
+  color: var(--text-tertiary, var(--dsw-alias-label-tertiary, #888));
+}
+
+.routines-search:focus {
+  border-color: var(--accent, #4f8cff);
 }
 
 .routines-header h2 {
