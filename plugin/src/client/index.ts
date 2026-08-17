@@ -515,9 +515,22 @@ export function apply(ctx: {
   ctx.effect(() => {
     const board = mountBoardView(frameRef)
     ensureBoard = () => board.ensure()
+    // Jump out on sidebar context clicks: clicking a session/workspace row
+    // (including the already-current one, which produces no session-change
+    // event) hands the center column back to the conversation. Capture phase,
+    // so the panel closes before the shell processes the click.
+    const SIDEBAR_ROW_SELECTOR = '[class*="sessionRow"], [class*="projectRow"], [class*="searchResultRow"], [class*="searchResultWorkspace"], [class*="newSession"]'
+    const onClickSidebarRow = (event: Event): void => {
+      if (!open) return
+      const target = event.target as HTMLElement | null
+      if (target === null) return
+      if (target.closest(SIDEBAR_ROW_SELECTOR) !== null) setOpen(false)
+    }
+    document.addEventListener('click', onClickSidebarRow, true)
     return () => {
       document.removeEventListener(ACTIVATE_EVENT, onOtherActivate)
       document.removeEventListener('dsh-taskboard-request-open', () => setOpen(true))
+      document.removeEventListener('click', onClickSidebarRow, true)
       board.dispose()
     }
   }, 'dsh-taskboard: board view')
