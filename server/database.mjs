@@ -782,6 +782,22 @@ export class TaskboardDatabase {
     return this.getProject(input.id);
   }
 
+  /** Update a project's mutable fields (workspace sync uses this as upsert). */
+  updateProject(id, input) {
+    const existing = this.getProject(id);
+    if (!existing) {
+      throw new ApiError(404, "PROJECT_NOT_FOUND", `Project '${id}' does not exist`);
+    }
+    const name = input.name ?? existing.name;
+    const workspacePath = input.workspacePath === undefined ? existing.workspacePath : input.workspacePath;
+    this.database.prepare(`
+      UPDATE projects
+      SET name = ?, workspace_path = ?, updated_at = ?
+      WHERE id = ?
+    `).run(name, workspacePath, now(), id);
+    return this.getProject(id);
+  }
+
   deleteProject(id) {
     const project = this.getProject(id);
     if (!project) {

@@ -22,7 +22,6 @@ import {
   ApiError,
   addTaskRelation,
   archiveTask as archiveTaskRequest,
-  createProject as createProjectRequest,
   createTask as createTaskRequest,
   getTaskboardRevision,
   getWorkflowWorkspace,
@@ -2138,19 +2137,15 @@ export function App() {
     try {
       let project = projects.find((candidate) => candidate.id === choice.id) ?? null;
       if (!project) {
-        try {
-          project = await createProjectRequest({
-            id: choice.id,
-            name: choice.name,
-            workspacePath: null,
-          });
-          setProjects((current) => [...current, project!]);
-        } catch (error) {
-          if (!(error instanceof ApiError) || error.code !== "PROJECT_EXISTS") throw error;
-          const nextProjects = await listProjects();
-          setProjects(nextProjects);
-          project = nextProjects.find((candidate) => candidate.id === choice.id) ?? null;
-          if (!project) throw error;
+        // Projects mirror DSH workspaces (the host half syncs them); never
+        // create a standalone project here. A missing row means the sync
+        // hasn't caught up yet — refresh and retry.
+        const nextProjects = await listProjects();
+        setProjects(nextProjects);
+        project = nextProjects.find((candidate) => candidate.id === choice.id) ?? null;
+        if (!project) {
+          setAnnouncement("项目尚未同步：请先在 DSH 中打开该目录（注册为工作区），看板会自动跟随。");
+          return;
         }
       }
       changeProject(project.id);
@@ -2601,7 +2596,7 @@ export function App() {
               <div className="project-home-empty">
                 <span className="empty-orbit" aria-hidden="true"><i /><i /></span>
                 <h2>还没有项目</h2>
-                <p>在 Codex 中创建项目后，再打开任务面板。</p>
+                <p>在 DSH 中打开文件夹（注册为工作区）后，任务看板会自动跟随出现。</p>
               </div>
             )}
           </section>

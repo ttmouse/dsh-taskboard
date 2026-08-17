@@ -22,6 +22,7 @@ dsh web 宿主进程                         浏览器 GUI
 - **host 半**（`lib/index.mjs`）：cordis 插件，在宿主进程内以进程内方式启动 fork 自 reasonix-taskboard 的 server（`node:sqlite`，零 npm 依赖，随插件 vendored 到 `vendor/`），仅监听回环端口；通过 `ctx.webServer.register({ kind: 'prefix', path: '/dsh-taskboard' })` 把完整应用（静态资源 + `/api` + SSE）同源代理到 GUI webserver。
 - **client 半**（`src/client/index.ts` → `lib/client.js`）：注入侧边栏「任务看板」入口，在中间列挂载同源 iframe。复用官方插件家族的挂载协议：`data-dsh-taskboard-active` 激活属性 + `dsh-panel-activate` 事件，与 SSH 面板互斥。
 - **数据**：`~/.dsh/storages/dsh-taskboard/taskboard.sqlite`（可配置）。
+- **工作区同步**：host 半通过 `ctx.workspaceRegistry.list()` 把 DSH 工作区自动同步为看板项目（项目 id = 工作区 id，`workspace_path` = 工作区路径），启动即同步 + 周期刷新；看板不再创建独立项目，「全局」保留为不挂工作区任务的收纳处。
 
 ## 构建
 
@@ -54,6 +55,8 @@ dsh web
 | `routePrefix` | `/dsh-taskboard` | GUI webserver 上的代理前缀 |
 | `port` | `0`（系统分配） | 内部回环端口 |
 | `announceToAgent` | `true` | 是否在 system-prompt 中向 agent 宣告本插件 |
+| `syncWorkspaces` | `true` | 是否把 DSH 工作区同步为看板项目（工作区 = 项目，自动增减） |
+| `syncIntervalMs` | `60000` | 工作区 → 项目同步间隔（ms，0 关闭周期同步） |
 
 ## 与官方 dsh-task-board 的关系
 

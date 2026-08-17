@@ -36,8 +36,8 @@ const DEFAULT_ROUTE_PREFIX = '/dsh-taskboard'
 /** Order of the announcement section within the tool-guidance band. */
 const SECTION_ORDER = 205
 
-/** Required services: the shared webserver and the system-prompt band. */
-export const inject = ['webServer', 'systemPrompt']
+/** Required services: the shared webserver, the system-prompt band, and the workspace registry. */
+export const inject = ['webServer', 'systemPrompt', 'workspaceRegistry']
 
 /** Model-facing announcement: plugin presence, capabilities, and limits. */
 export const TASKBOARD_GUIDANCE = '本机已安装 dsh-taskboard 插件（DSH Web GUI 的完整任务看板）：侧边栏「任务看板」入口；完整能力来自本地 SQLite 服务——多视图（看板/列表/Gantt/工作流/仪表盘）、任务详情（关系/附件/标签/过滤器）、AI 对话、项目自动认领（reasonix/dsh 双宿主心跳，dsh 心跳 runner 由插件随宿主进程托管）。数据存 ~/.dsh/storages/dsh-taskboard/taskboard.sqlite（端口仅回环）。任务可通过看板内「在对话中打开」直接驱动 DSH 会话执行并回写评论。用户提到「任务看板 / 看板 / 任务管理」时即指本插件，请据此协作。'
@@ -58,6 +58,10 @@ export const Config = z.object({
   heartbeatEnabled: z.boolean().default(true),
   /** Heartbeat poll interval in ms (clamped to >= 1000). */
   heartbeatPollMs: z.natural().max(3_600_000).default(30_000),
+  /** When true, DSH workspaces are synced into board projects (workspace = project). */
+  syncWorkspaces: z.boolean().default(true),
+  /** Workspace → project sync interval in ms (0 disables periodic re-sync). */
+  syncIntervalMs: z.natural().max(3_600_000).default(60_000),
 })
 
 /**
@@ -96,9 +100,62 @@ function makeProxy(port, prefix) {
 }
 
 /**
+ * Sync DSH workspaces into board projects: every workspace becomes (or
+ * updates) a project keyed by the workspace id, with `workspace_path` set to
+ * the workspace path. The workspace registry is the single source of truth —
+ * the board's own independent project creation is removed from the UI, so
+ * projects mirror the DSH workspace list (plus the legacy 'local' 全局 catch-all).
+ * @param registry - the injected `workspaceRegistry` service.
+ * @param baseUrl - internal taskboard loopback base URL.
+ * @param log - logger callback.
+ * @returns summary string, or null when the registry is unavailable.
+ */
+async function syncWorkspacesFromRegistry(registry, baseUrl, log) {
+  let workspaces
+  try {
+    workspaces = registry.list().map((entity) => ({
+      id: entity.id,
+      name: (entity.title ?? '').trim() || path.basename(entity.path || ''),
+      path: entity.path ?? null,
+    })).filter((ws) => ws.id && ws.name)
+  } catch (error) {
+    log(`workspace sync: registry unavailable: ${error instanceof Error ? error.message : String(error)}`)
+    return null
+  }
+  if (workspaces.length === 0) return 'workspace sync: no workspaces'
+  const listRes = await fetch(`${baseUrl}/api/projects`)
+  if (!listRes.ok) throw new Error(`list projects: HTTP ${listRes.status}`)
+  const { projects } = await listRes.json()
+  const existing = new Map(projects.map((project) => [project.id, project]))
+  let created = 0
+  let updated = 0
+  for (const ws of workspaces) {
+    const current = existing.get(ws.id)
+    if (current === undefined) {
+      const res = await fetch(`${baseUrl}/api/projects`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id: ws.id, name: ws.name, workspacePath: ws.path }),
+      })
+      if (res.ok) created++
+      else log(`workspace sync: create '${ws.id}' failed: HTTP ${res.status}`)
+    } else if (current.name !== ws.name || current.workspacePath !== ws.path) {
+      const res = await fetch(`${baseUrl}/api/projects/${encodeURIComponent(ws.id)}`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: ws.name, workspacePath: ws.path }),
+      })
+      if (res.ok) updated++
+      else log(`workspace sync: update '${ws.id}' failed: HTTP ${res.status}`)
+    }
+  }
+  return `workspace sync: ${workspaces.length} workspaces, ${created} created, ${updated} updated`
+}
+
+/**
  * Start the taskboard server, register the proxy route, and announce the
  * plugin. Start failures are logged, never thrown.
- * @param ctx - context carrying webServer and systemPrompt.
+ * @param ctx - context carrying webServer, systemPrompt, and workspaceRegistry.
  * @param config - resolved plugin config.
  */
 export function apply(ctx, config) {
@@ -113,6 +170,8 @@ export function apply(ctx, config) {
   let routeDisposer = undefined
   let app = undefined
   let ticker = undefined
+  let syncTimer = undefined
+  let baseUrl = undefined
 
   const start = async () => {
     try {
@@ -129,7 +188,19 @@ export function apply(ctx, config) {
         path: config.routePrefix,
         handler: makeProxy(address.port, config.routePrefix),
       })
+      baseUrl = `http://127.0.0.1:${address.port}`
       ctx.logger.info(`dsh-taskboard: serving ${config.routePrefix} (internal loopback port ${address.port}, data ${dataDirectory})`)
+      if (config.syncWorkspaces) {
+        const runSync = () => {
+          void syncWorkspacesFromRegistry(ctx.workspaceRegistry, baseUrl, (message) => ctx.logger.info(message))
+            .then((summary) => {
+              if (summary) ctx.logger.info(`dsh-taskboard: ${summary}`)
+            })
+            .catch((error) => ctx.logger.error(`dsh-taskboard: workspace sync: ${error instanceof Error ? error.message : String(error)}`))
+        }
+        runSync()
+        if (config.syncIntervalMs > 0) syncTimer = setInterval(runSync, config.syncIntervalMs)
+      }
     } catch (error) {
       ctx.logger.error(`dsh-taskboard: start failed: ${error instanceof Error ? error.message : String(error)}`)
     }
@@ -151,6 +222,10 @@ export function apply(ctx, config) {
   }
 
   const stop = async () => {
+    if (syncTimer !== undefined) {
+      clearInterval(syncTimer)
+      syncTimer = undefined
+    }
     if (ticker !== undefined) {
       await ticker.stop()
       ticker = undefined

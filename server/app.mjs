@@ -494,6 +494,27 @@ function parseProjectCreate(body) {
   return { id, name, workspacePath };
 }
 
+/** Parse a project update body (PUT /api/projects/:id): name and/or workspacePath. */
+function parseProjectUpdate(body) {
+  assertPlainObject(body);
+  assertAllowedKeys(body, new Set(["name", "workspacePath"]));
+  const result = {};
+  if (body.name !== undefined) {
+    result.name = stringField(body.name, "name", { required: true, maxLength: 120 });
+  }
+  if (body.workspacePath !== undefined) {
+    const workspacePath = stringField(body.workspacePath, "workspacePath", { nullable: true, maxLength: 4096 });
+    if (workspacePath === "") {
+      throw new ApiError(400, "INVALID_FIELD", "'workspacePath' cannot be empty");
+    }
+    if (workspacePath?.includes("\0")) {
+      throw new ApiError(400, "INVALID_FIELD", "'workspacePath' cannot contain null bytes");
+    }
+    result.workspacePath = workspacePath;
+  }
+  return result;
+}
+
 function parseThreadId(value) {
   if (value === undefined) return undefined;
   return stringField(value, "threadId", { required: true, maxLength: 256 });
@@ -1632,6 +1653,22 @@ export function createTaskboardServer(options = {}) {
           return sendJson(response, 201, { project });
         }
         return methodNotAllowed(response, ["GET", "POST"]);
+      }
+
+      const projectByIdRoute = pathname.match(/^\/api\/projects\/([^/]+)$/);
+      if (projectByIdRoute && request.method === "PUT") {
+        if ([...url.searchParams.keys()].length > 0) {
+          throw new ApiError(400, "UNKNOWN_QUERY_PARAMETER", "PUT /api/projects/:id does not accept query parameters");
+        }
+        let projectId;
+        try {
+          projectId = decodeURIComponent(projectByIdRoute[1]);
+        } catch {
+          throw new ApiError(400, "INVALID_FIELD", "Invalid project id in URL path");
+        }
+        const project = database.updateProject(validateProjectId(projectId), parseProjectUpdate(await readJson(request)));
+        events.emit("project.updated", { project });
+        return sendJson(response, 200, { project });
       }
 
       const workflowWorkspaceRoute = pathname.match(/^\/api\/projects\/([^/]+)\/workflow-workspace$/);
