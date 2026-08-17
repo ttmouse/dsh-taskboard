@@ -7,6 +7,21 @@ description: Manage taskboard projects, issues, comments, and status transitions
 
 Use the dsh-taskboard HTTP API for every project, issue, and comment operation. Base URL: `http://127.0.0.1:47825` (loopback, no auth). Read [references/api.md](references/api.md) before choosing an endpoint or field.
 
+## Attribution rule
+
+Every mutation (move, comment, relation) must declare its actor — otherwise
+the board records the change as the local user (本地用户). Send the agent
+identity headers on every write:
+
+```sh
+-H "X-Taskboard-Client: taskctl" \
+-H "X-Taskboard-Agent-Id: ${TASKCTL_AGENT_ID:-dsh-agent}" \
+-H "X-Taskboard-Agent-Name: ${TASKCTL_AGENT_NAME:-DSH Agent}"
+```
+
+Reads may omit them. The recorded actor becomes the AI Agent, and the change
+is attributed correctly in the activity feed.
+
 ## Concurrency rule (non-negotiable)
 
 Every write response returns the task's current `version`. Every mutation must carry the version from the **latest read** (`GET /api/tasks/<id>`). A `version` mismatch means someone else updated the task — re-read, reconcile, and retry with the fresh version. Never write without a version; never overwrite a newer state.

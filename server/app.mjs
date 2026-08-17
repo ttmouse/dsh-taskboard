@@ -46,8 +46,8 @@ const PROJECT_ID_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
 const TRUSTED_EMBED_ORIGINS = new Set(["app://-"]);
 const CODEX_AGENT_ACTOR = {
   type: "agent",
-  id: "codex-agent",
-  name: "Reasonix Agent",
+  id: "dsh-agent",
+  name: "AI Agent",
   avatarUrl: null,
 };
 const CONTENT_TYPES = new Map([

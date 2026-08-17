@@ -43,16 +43,23 @@ Status flow: `todo` → (claim) → `in_progress` → (verify + comment) → `in
 
 ```sh
 BASE=http://127.0.0.1:47825
+# Agent identity for write attribution (otherwise the board records 本地用户):
+AGENT_HEADERS=(-H "X-Taskboard-Client: taskctl" \
+  -H "X-Taskboard-Agent-Id: ${TASKCTL_AGENT_ID:-dsh-agent}" \
+  -H "X-Taskboard-Agent-Name: ${TASKCTL_AGENT_NAME:-DSH Agent}")
 # List open todos of a project
 curl -s "$BASE/api/tasks?projectId=<projectId>&status=todo"
 # Read one task (get its latest version)
 curl -s "$BASE/api/tasks/<taskId>"
-# Claim it
-curl -s -X POST "$BASE/api/tasks/<taskId>/move" -H 'Content-Type: application/json' \
+# Claim it (write -> agent headers)
+curl -s -X POST "$BASE/api/tasks/<taskId>/move" "${AGENT_HEADERS[@]}" \
+  -H 'Content-Type: application/json' \
   -d '{"version": <latestVersion>, "status": "in_progress"}'
 # Comment + move to review
-curl -s -X POST "$BASE/api/tasks/<taskId>/comments" -H 'Content-Type: application/json' \
+curl -s -X POST "$BASE/api/tasks/<taskId>/comments" "${AGENT_HEADERS[@]}" \
+  -H 'Content-Type: application/json' \
   -d '{"body": "关键改动/验证结果/剩余风险"}'
-curl -s -X POST "$BASE/api/tasks/<taskId>/move" -H 'Content-Type: application/json' \
+curl -s -X POST "$BASE/api/tasks/<taskId>/move" "${AGENT_HEADERS[@]}" \
+  -H 'Content-Type: application/json' \
   -d '{"version": <newLatestVersion>, "status": "in_review"}'
 ```
