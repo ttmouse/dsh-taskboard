@@ -299,6 +299,84 @@ export async function getClaimModels(signal?: AbortSignal): Promise<ClaimModelCa
   return request<ClaimModelCatalog>("/api/automation/models", { signal });
 }
 
+/** 最近一次例程运行记录（来自 dsh-routines 的 runs/ 目录）。 */
+export interface RoutineRunInfo {
+  status: string | null;
+  startedAt: number | null;
+  finishedAt: number | null;
+  durationMs: number | null;
+  exitCode: number | null;
+  error: string | null;
+  digest: string | null;
+  sessionId: string | null;
+}
+
+/** 一条例程：YAML 字段 + 最近运行。 */
+export interface RoutineInfo {
+  name: string;
+  schedule?: string;
+  timezone?: string;
+  prompt?: string;
+  cwd?: string;
+  profile?: string;
+  overlap?: string;
+  timeoutMin?: string;
+  deliver?: string[];
+  paused?: boolean;
+  source?: string;
+  nextRunAt?: number | null;
+  raw?: string;
+  unknownKeys?: string[];
+  lastRun?: RoutineRunInfo | null;
+}
+
+export interface RoutineCreateInput {
+  name: string;
+  schedule: string;
+  timezone?: string;
+  prompt: string;
+  cwd?: string;
+  profile?: string;
+  overlap?: string;
+  timeoutMin?: number;
+  deliver?: string[];
+}
+
+/** 新建例程（写入 ~/.dsh/routines/<name>.yaml）。 */
+export async function createRoutine(input: RoutineCreateInput): Promise<{ name: string }> {
+  const data = await request<{ routine: { name: string } }>("/api/routines", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return data.routine;
+}
+
+/** 更新例程：传 raw（全文）或结构化字段。 */
+export async function updateRoutine(
+  name: string,
+  input: { raw: string } | Partial<Omit<RoutineCreateInput, "name">>,
+): Promise<{ updated: string }> {
+  return request(`/api/routines/${encodeURIComponent(name)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+/** 删除例程文件。 */
+export async function deleteRoutine(name: string): Promise<{ deleted: string }> {
+  return request(`/api/routines/${encodeURIComponent(name)}`, { method: "DELETE" });
+}
+
+/** 读取 dsh-routines 列表（例程 YAML + 最近运行记录）。 */
+export async function getRoutines(signal?: AbortSignal): Promise<{
+  routinesDirectory: string | null;
+  routines: RoutineInfo[];
+}> {
+  return request("/api/routines", { signal });
+}
+
 /** 读取项目自动认领状态（配置存看板数据库，由 DSH 原生 claim-sweep 作业驱动）。 */
 export async function getProjectAutomation(
   projectId: string,

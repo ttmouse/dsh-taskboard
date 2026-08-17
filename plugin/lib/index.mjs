@@ -16,7 +16,7 @@
  * agents know the plugin exists.
  */
 import { request as httpRequest } from 'node:http'
-import { appendFile, mkdir, writeFile } from 'node:fs/promises'
+import { appendFile, cp, mkdir, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -39,6 +39,35 @@ async function pluginLog(message) {
     await appendFile(PLUGIN_LOG_FILE, `${new Date().toISOString()} ${message}\n`)
   } catch {
     // Never let diagnostics break the host.
+  }
+}
+
+/** Shared agents skill root scanned by skill-filesystem in every profile. */
+function agentsSkillRoot() {
+  return process.env.DSH_AGENTS_HOME
+    ? path.join(process.env.DSH_AGENTS_HOME, 'skills')
+    : path.join(os.homedir(), '.agents', 'skills')
+}
+
+/**
+ * Sync the vendored manage-taskboard skill into the shared agents skill root,
+ * replacing any stale copy or symlink (e.g. the original dashi-taskboard
+ * taskctl skill). Every profile (web / headless / ops) scans this root, so
+ * routine sessions and GUI agents load the current HTTP-API skill by name.
+ * Idempotent; failures are logged, never thrown.
+ * @param log - logger callback.
+ */
+async function syncAgentSkill(log) {
+  const source = path.join(PLUGIN_ROOT, 'vendor', 'skills', 'manage-taskboard')
+  const target = path.join(agentsSkillRoot(), 'manage-taskboard')
+  try {
+    // fs.rm on a symlink removes the link itself, never the link target.
+    await rm(target, { recursive: true, force: true })
+    await mkdir(path.dirname(target), { recursive: true })
+    await cp(source, target, { recursive: true })
+    log(`agent skill: manage-taskboard synced -> ${target}`)
+  } catch (error) {
+    log(`agent skill sync failed: ${error instanceof Error ? error.message : String(error)}`)
   }
 }
 
@@ -258,10 +287,15 @@ export function apply(ctx, config) {
     try {
       const dataDirectory = path.resolve(config.dataDirectory)
       await mkdir(dataDirectory, { recursive: true })
+      await syncAgentSkill((message) => {
+        void pluginLog(message)
+        ctx.logger.info(message)
+      })
       app = createTaskboardServer({
         dataDirectory,
         staticDirectory: path.join(PLUGIN_ROOT, 'vendor', 'web'),
         skillPath: path.join(PLUGIN_ROOT, 'vendor', 'skills', 'manage-taskboard', 'SKILL.md'),
+        routinesDirectory: path.join(process.env.DSH_HOME ?? path.join(os.homedir(), '.dsh'), 'routines'),
       })
       const address = await app.listen({ host: '127.0.0.1', port: config.port })
       routeDisposer = ctx.webServer.register({

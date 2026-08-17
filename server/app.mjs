@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { execFile, spawn } from "node:child_process";
-import { mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat, unlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { isIP } from "node:net";
 import os from "node:os";
@@ -16,6 +16,7 @@ import {
   isTaskStatus,
 } from "../shared/domain.mjs";
 import { normalizeWorkflowSnapshot } from "../shared/workflow-control-flow.mjs";
+import { computeNextRun, parseRoutineYaml, serializeRoutine } from "../shared/routines-yaml.mjs";
 import { AiChatService } from "./ai-chat.mjs";
 import { createCloudConfigStore } from "./cloud-config.mjs";
 import {
@@ -1325,6 +1326,7 @@ export function resolveServerOptions(options = {}) {
     cloudConfigPath: options.cloudConfigPath ?? path.join(dataDirectory, "cloud-companion.json"),
     staticDirectory: options.staticDirectory ?? path.join(PROJECT_ROOT, "dist", "web"),
     skillPath: options.skillPath ?? path.join(PROJECT_ROOT, "skills", "manage-taskboard", "SKILL.md"),
+    routinesDirectory: options.routinesDirectory ?? process.env.CODEX_TASKBOARD_ROUTINES_DIR ?? null,
     codexExecutable: options.codexExecutable ?? process.env.CODEX_EXECUTABLE ?? "codex",
     codexStatePath: options.codexStatePath
       ?? path.join(codexHome, ".codex-global-state.json"),
@@ -1347,6 +1349,99 @@ export function resolveHost(value = process.env.CODEX_TASKBOARD_HOST ?? "0.0.0.0
     throw new Error("CODEX_TASKBOARD_HOST must be 127.0.0.1 or 0.0.0.0");
   }
   return host;
+}
+
+/** Latest run record per routine name, from the routines `runs/` directory. */
+async function readRoutineRuns(runsDirectory) {
+  const byRoutine = new Map();
+  let files;
+  try {
+    files = await readdir(runsDirectory);
+  } catch {
+    return byRoutine;
+  }
+  for (const file of files) {
+    if (!file.startsWith("run-") || !file.endsWith(".json")) continue;
+    try {
+      const record = JSON.parse(await readFile(path.join(runsDirectory, file), "utf8"));
+      if (typeof record.routine !== "string" || record.routine === "") continue;
+      const existing = byRoutine.get(record.routine);
+      if (!existing || (record.startedAt ?? 0) > (existing.startedAt ?? 0)) {
+        byRoutine.set(record.routine, record);
+      }
+    } catch {
+      // Skip unparsable run records.
+    }
+  }
+  return byRoutine;
+}
+
+/** List routines: parsed YAML fields plus the latest run record per routine. */
+async function listRoutines(routinesDirectory) {
+  if (!routinesDirectory) return { routinesDirectory: null, routines: [] };
+  let files;
+  try {
+    files = await readdir(routinesDirectory);
+  } catch {
+    return { routinesDirectory, routines: [] };
+  }
+  const runs = await readRoutineRuns(path.join(routinesDirectory, "runs"));
+  const now = Date.now();
+  const routines = [];
+  for (const file of files) {
+    if (!file.endsWith(".yaml")) continue;
+    try {
+      const text = await readFile(path.join(routinesDirectory, file), "utf8");
+      const parsed = parseRoutineYaml(text);
+      if (!parsed.name) continue;
+      const run = runs.get(parsed.name) ?? null;
+      const { raw, unknownKeys, ...fields } = parsed;
+      routines.push({
+        ...fields,
+        nextRunAt: computeNextRun(parsed.schedule, now),
+        lastRun: run ? {
+          status: run.status ?? null,
+          startedAt: run.startedAt ?? null,
+          finishedAt: run.finishedAt ?? null,
+          durationMs: run.durationMs ?? null,
+          exitCode: run.exitCode ?? null,
+          error: run.error ?? null,
+          digest: run.digest ?? null,
+          sessionId: run.sessionId ?? null,
+        } : null,
+        raw,
+        unknownKeys,
+      });
+    } catch {
+      // Skip unparsable routine files.
+    }
+  }
+  routines.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  return { routinesDirectory, routines };
+}
+
+/** Validate a routine name (safe filename stem). */
+function parseRoutineName(value) {
+  const name = stringField(value, "name", { required: true, maxLength: 64 });
+  if (!/^[a-z0-9][a-z0-9_-]*$/.test(name)) {
+    throw new ApiError(400, "INVALID_FIELD", "'name' must be a lowercase slug of letters, numbers, hyphens, or underscores");
+  }
+  return name;
+}
+
+/** Parse a deliver list (strings like "file" / "chatnode"). */
+function parseDeliverList(value) {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new ApiError(400, "INVALID_FIELD", "'deliver' must be a non-empty array of strings");
+  }
+  const out = [];
+  for (const item of value) {
+    if (typeof item !== "string" || item.length === 0 || item.length > 32) {
+      throw new ApiError(400, "INVALID_FIELD", "'deliver' entries must be short strings");
+    }
+    out.push(item);
+  }
+  return out;
 }
 
 export function createTaskboardServer(options = {}) {
@@ -1805,6 +1900,100 @@ export function createTaskboardServer(options = {}) {
           // models.json missing or unparsable: serve the empty catalog.
         }
         return sendJson(response, 200, catalog);
+      }
+
+      // dsh-routines store listing: routine YAMLs plus the latest run record
+      // per routine (the routines view in the board reads this).
+      if (pathname === "/api/routines") {
+        if (request.method === "GET") {
+          if ([...url.searchParams.keys()].length > 0) {
+            throw new ApiError(400, "UNKNOWN_QUERY_PARAMETER", "GET /api/routines does not accept query parameters");
+          }
+          return sendJson(response, 200, await listRoutines(resolved.routinesDirectory));
+        }
+        if (request.method === "POST") {
+          if (!resolved.routinesDirectory) {
+            throw new ApiError(400, "ROUTINES_UNAVAILABLE", "No routines directory configured");
+          }
+          const body = await readJson(request);
+          assertPlainObject(body);
+          assertAllowedKeys(body, new Set([
+            "name", "schedule", "timezone", "prompt", "cwd", "profile",
+            "overlap", "timeoutMin", "deliver",
+          ]));
+          const name = parseRoutineName(body.name);
+          const routine = {
+            name,
+            schedule: stringField(body.schedule, "schedule", { required: true, maxLength: 128 }),
+            timezone: stringField(body.timezone ?? "", "timezone", { nullable: true, maxLength: 64 }) ?? "",
+            prompt: stringField(body.prompt, "prompt", { required: true, maxLength: 100_000 }),
+            cwd: stringField(body.cwd ?? "", "cwd", { nullable: true, maxLength: 4096 }) ?? "",
+            profile: stringField(body.profile ?? "", "profile", { nullable: true, maxLength: 64 }) ?? "",
+            overlap: stringField(body.overlap ?? "", "overlap", { nullable: true, maxLength: 32 }) ?? "",
+            timeoutMin: body.timeoutMin === undefined ? "" : String(body.timeoutMin),
+            deliver: body.deliver === undefined ? ["file"] : parseDeliverList(body.deliver),
+          };
+          const file = path.join(resolved.routinesDirectory, `${name}.yaml`);
+          try {
+            await stat(file);
+            throw new ApiError(409, "ROUTINE_EXISTS", `Routine '${name}' already exists`);
+          } catch (error) {
+            if (error instanceof ApiError) throw error;
+          }
+          await mkdir(resolved.routinesDirectory, { recursive: true });
+          await writeFile(file, serializeRoutine(routine), "utf8");
+          return sendJson(response, 201, { routine: { name, file } });
+        }
+        return methodNotAllowed(response, ["GET", "POST"]);
+      }
+
+      const routineByNameRoute = pathname.match(/^\/api\/routines\/([^/]+)$/);
+      if (routineByNameRoute && resolved.routinesDirectory) {
+        const name = parseRoutineName(decodeURIComponent(routineByNameRoute[1]));
+        const file = path.join(resolved.routinesDirectory, `${name}.yaml`);
+        if (request.method === "PUT") {
+          const body = await readJson(request);
+          assertPlainObject(body);
+          if (typeof body.raw === "string") {
+            // Full-text edit: preserve whatever the user wrote.
+            await writeFile(file, body.raw, "utf8");
+            return sendJson(response, 200, { updated: name });
+          }
+          assertAllowedKeys(body, new Set([
+            "schedule", "timezone", "prompt", "cwd", "profile",
+            "overlap", "timeoutMin", "deliver",
+          ]));
+          const current = parseRoutineYaml(await readFile(file, "utf8").catch(() => ""));
+          const routine = {
+            name,
+            schedule: stringField(body.schedule ?? current.schedule, "schedule", { required: true, maxLength: 128 }),
+            timezone: stringField(body.timezone ?? current.timezone ?? "", "timezone", { nullable: true, maxLength: 64 }) ?? "",
+            prompt: stringField(body.prompt ?? current.prompt, "prompt", { required: true, maxLength: 100_000 }),
+            cwd: stringField(body.cwd ?? current.cwd ?? "", "cwd", { nullable: true, maxLength: 4096 }) ?? "",
+            profile: stringField(body.profile ?? current.profile ?? "", "profile", { nullable: true, maxLength: 64 }) ?? "",
+            overlap: stringField(body.overlap ?? current.overlap ?? "", "overlap", { nullable: true, maxLength: 32 }) ?? "",
+            timeoutMin: body.timeoutMin === undefined
+              ? String(current.timeoutMin ?? "")
+              : String(body.timeoutMin),
+            deliver: body.deliver === undefined
+              ? (Array.isArray(current.deliver) ? current.deliver : ["file"])
+              : parseDeliverList(body.deliver),
+          };
+          await writeFile(file, serializeRoutine(routine), "utf8");
+          return sendJson(response, 200, { updated: name });
+        }
+        if (request.method === "DELETE") {
+          try {
+            await unlink(file);
+          } catch (error) {
+            if (error.code === "ENOENT") {
+              throw new ApiError(404, "ROUTINE_NOT_FOUND", `Routine '${name}' does not exist`);
+            }
+            throw error;
+          }
+          return sendJson(response, 200, { deleted: name });
+        }
+        return methodNotAllowed(response, ["PUT", "DELETE"]);
       }
 
       const claimRunRoute = pathname.match(/^\/api\/projects\/([^/]+)\/claim-run$/);

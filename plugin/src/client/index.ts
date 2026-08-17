@@ -18,22 +18,47 @@
 
 import { TaskboardSettingsCard } from './settings-card'
 
-/** Stable data attribute identifying the injected entry row. */
-const ENTRY_SELECTOR = '[data-dsh-taskboard-entry]'
-
-/** The html attribute toggling the board view (shared with the ssh sibling panel protocol). */
-const ACTIVE_ATTR = 'data-dsh-taskboard-active'
-
-/** The sibling panel's activation attribute (ssh), removed when this panel opens. */
-const OTHER_ACTIVE_ATTR = 'data-dsh-ssh-active'
-
 /** Cross-plugin activation event; detail is the activating panel name. */
 const ACTIVATE_EVENT = 'dsh-panel-activate'
 
-const PANEL_NAME = 'taskboard'
+/** One side panel: sidebar entry row + center-column iframe view, exclusive with siblings. */
+interface PanelSpec {
+  /** Panel name carried in the cross-plugin activation event. */
+  name: string
+  /** Data attribute identifying the injected sidebar entry row. */
+  entrySelector: string
+  /** html attribute toggling this panel's center view. */
+  activeAttr: string
+  /** data attribute on the panel's view container. */
+  viewAttr: string
+  /** App URL (proxied by the host half on the shared webserver). */
+  url: string
+  /** Locale key for the entry label. */
+  entryLabelKey: string
+}
 
-/** The taskboard app URL, proxied by the host half on the shared webserver. */
-const BOARD_URL = '/dsh-taskboard/'
+/** The taskboard panel: the full board app. */
+const TASKBOARD_PANEL: PanelSpec = {
+  name: 'taskboard',
+  entrySelector: '[data-dsh-taskboard-entry]',
+  activeAttr: 'data-dsh-taskboard-active',
+  viewAttr: 'data-dsh-taskboard-view',
+  url: '/dsh-taskboard/',
+  entryLabelKey: 'entry.label',
+}
+
+/** The automation panel: the global routines list page (standalone mode). */
+const AUTOMATION_PANEL: PanelSpec = {
+  name: 'automation',
+  entrySelector: '[data-dsh-automation-entry]',
+  activeAttr: 'data-dsh-automation-active',
+  viewAttr: 'data-dsh-automation-view',
+  url: '/dsh-taskboard/?view=routines&host=dsh',
+  entryLabelKey: 'entry.automation',
+}
+
+/** All panels owned by this plugin, in sidebar order. */
+const PANELS: PanelSpec[] = [TASKBOARD_PANEL, AUTOMATION_PANEL]
 
 /** GUI theme attribute (ui-theme writes it on <body>); absence means light. */
 const GUI_THEME_ATTR = 'data-ds-dark-theme'
@@ -60,29 +85,32 @@ function currentGuiTheme(): 'dark' | 'light' {
 const ICON = `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="1.5"/><path d="M2 6.5h12M6.5 6.5v7"/></svg>`
 
 /** Theme-following styles, scoped by plugin data attributes (rides --dsw-* tokens). */
-const STYLE_TEXT = `
-[data-dsh-taskboard-view] {
+function buildStyleText(): string {
+  const viewRules = PANELS.map((panel) => `
+[${panel.viewAttr}] {
   position: absolute;
   inset: 0;
   display: none;
   z-index: 60;
   background: var(--dsw-alias-bg-base);
 }
-[data-dsh-taskboard-view] iframe {
+[${panel.viewAttr}] iframe {
   display: block;
   width: 100%;
   height: 100%;
   border: 0;
 }
-html[data-dsh-taskboard-active]:not([data-dsh-ssh-active]) [data-pane='conversation'] > div[data-dsh-taskboard-view],
-html[data-dsh-taskboard-active]:not([data-dsh-ssh-active]) [class*='centerCol'] > div[data-dsh-taskboard-view] {
+html[${panel.activeAttr}]:not([data-dsh-ssh-active]) [data-pane='conversation'] > div[${panel.viewAttr}],
+html[${panel.activeAttr}]:not([data-dsh-ssh-active]) [class*='centerCol'] > div[${panel.viewAttr}] {
   display: block !important;
 }
-html[data-dsh-taskboard-active]:not([data-dsh-ssh-active]) [data-pane='conversation'] > :not([data-dsh-taskboard-view]),
-html[data-dsh-taskboard-active]:not([data-dsh-ssh-active]) [class*='centerCol'] > :not([data-dsh-taskboard-view]) {
+html[${panel.activeAttr}]:not([data-dsh-ssh-active]) [data-pane='conversation'] > :not([${panel.viewAttr}]),
+html[${panel.activeAttr}]:not([data-dsh-ssh-active]) [class*='centerCol'] > :not([${panel.viewAttr}]) {
   display: none !important;
 }
-[data-dsh-taskboard-entry] {
+`)
+  const entryRules = PANELS.map((panel) => `
+[${panel.entrySelector}] {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -97,22 +125,24 @@ html[data-dsh-taskboard-active]:not([data-dsh-ssh-active]) [class*='centerCol'] 
   font-size: 13px;
   white-space: nowrap;
 }
-[data-dsh-taskboard-entry]:hover {
+[${panel.entrySelector}]:hover {
   background: var(--dsw-specific-sidebar-nav-item-hover);
   color: var(--dsw-alias-label-primary);
 }
-[data-dsh-taskboard-entry][data-active] {
+[${panel.entrySelector}][data-active] {
   background: var(--dsw-specific-sidebar-nav-item-active);
   color: var(--dsw-alias-label-primary);
   font-weight: 600;
 }
-[data-dsh-taskboard-entry] span {
+[${panel.entrySelector}] span {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: none;
 }
-`.trim()
+`)
+  return `${viewRules.join('')}${entryRules.join('')}`.trim()
+}
 
 /** Inject the theme-following stylesheet once (plugin-owned tag). */
 function ensureStyle(): void {
@@ -120,7 +150,7 @@ function ensureStyle(): void {
   if (document.querySelector(`style[data-taskboard-shell-css="${tagId}"]`) !== null) return
   const tag = document.createElement('style')
   tag.dataset.taskboardShellCss = tagId
-  tag.textContent = STYLE_TEXT
+  tag.textContent = buildStyleText()
   document.head.appendChild(tag)
 }
 
@@ -178,9 +208,11 @@ function placeEntry(root: HTMLElement, entry: HTMLButtonElement): boolean {
     const row = button.closest('[class*="logoRow"]')
     const base = (row !== null && row.parentElement === root) ? row : button
     const family = Array.from(root.children).filter(
-      (el): el is HTMLElement => el instanceof HTMLElement && el.matches('[data-dsh-taskboard-entry], [data-dsh-ssh-entry]'),
+      (el): el is HTMLElement => el instanceof HTMLElement
+        && el.matches('[data-dsh-taskboard-entry], [data-dsh-automation-entry], [data-dsh-ssh-entry]'),
     )
-    const anchor = family.length > 0 ? family[0] : base.nextElementSibling
+    // Entries keep sidebar order: each new entry lands after the last plugin row.
+    const anchor = family.length > 0 ? family[family.length - 1].nextElementSibling : base.nextElementSibling
     root.insertBefore(entry, anchor)
   }
   return true
@@ -228,21 +260,33 @@ function conversationColumn(): HTMLElement | undefined {
     ?? undefined
 }
 
+/** dataset key for a data attribute (data-dsh-automation-view -> dshAutomationView). */
+function datasetKeyFor(attr: string): string {
+  return attr.replace(/^data-/, '').replace(/-([a-z])/g, (_, letter: string) => letter.toUpperCase())
+}
+
+/** Panel title per spec (the iframe's accessible name). */
+function panelTitle(spec: PanelSpec): string {
+  return spec.name === 'taskboard' ? '任务看板' : '自动化'
+}
+
 /**
- * Mount the board iframe container into the center column. The container is
+ * Mount one panel's iframe container into the center column. The container is
  * hidden by CSS unless the html activation attribute is present, so the app
  * stays mounted and stateful across toggles. The GUI theme is pushed into the
- * iframe (initial via query, then live via postMessage), so the board follows
+ * iframe (initial via query, then live via postMessage), so the panel follows
  * the shell's light/dark switch.
+ * @param spec - the panel definition (view attribute + app URL).
+ * @param frameRef - holder for the live iframe (execution bridge targets it).
  * @returns ensure (create the container once the column exists) and dispose.
  */
-function mountBoardView(frameRef: { current: HTMLIFrameElement | undefined }): { ensure(): void; dispose(): void } {
+function mountPanelView(spec: PanelSpec, frameRef: { current: HTMLIFrameElement | undefined }): { ensure(): void; dispose(): void } {
   ensureStyle()
   let container: HTMLDivElement | undefined
   let frame: HTMLIFrameElement | undefined
   let retryTimer: ReturnType<typeof setTimeout> | undefined
 
-  /** Push the current GUI theme into the board once its window is ready. */
+  /** Push the current GUI theme into the panel once its window is ready. */
   const syncTheme = (): void => {
     if (frame === undefined || frame.contentWindow === null) return
     frame.contentWindow.postMessage({ type: THEME_MESSAGE, theme: currentGuiTheme() }, '*')
@@ -253,14 +297,14 @@ function mountBoardView(frameRef: { current: HTMLIFrameElement | undefined }): {
     const column = conversationColumn()
     if (column === undefined) return
     container = document.createElement('div')
-    container.dataset.dshTaskboardView = ''
+    container.dataset[datasetKeyFor(spec.viewAttr)] = ''
     frame = document.createElement('iframe')
     frameRef.current = frame
-    const initialUrl = new URL(BOARD_URL, window.location.href)
+    const initialUrl = new URL(spec.url, window.location.href)
     initialUrl.searchParams.set(THEME_QUERY, currentGuiTheme())
     initialUrl.searchParams.set(HOST_QUERY, HOST_VALUE)
     frame.src = initialUrl.href
-    frame.title = '任务看板'
+    frame.title = panelTitle(spec)
     frame.addEventListener('load', () => {
       // The app registers its message listener after the React mount, which
       // can lag the load event; retry once shortly after to cover the gap.
@@ -350,6 +394,7 @@ const NS = 'dsh-taskboard'
 const DICTIONARIES = {
   zh: {
     'entry.label': '任务看板',
+    'entry.automation': '自动化',
     'execute.started': '已交给 DeepSeek Harness 执行：{prompt}',
     'execute.failed': '已打开 DSH 会话，但提示词未能入队，请查看会话状态。',
     'card.title': '任务看板（dsh-taskboard）',
@@ -359,6 +404,7 @@ const DICTIONARIES = {
   },
   en: {
     'entry.label': 'Taskboard',
+    'entry.automation': 'Automation',
     'execute.started': 'Handed off to DeepSeek Harness: {prompt}',
     'execute.failed': 'DSH session opened, but the prompt could not be queued. Check the session.',
     'card.title': 'Taskboard (dsh-taskboard)',
@@ -464,81 +510,94 @@ export function apply(ctx: {
   locale: LocaleService
   slots: SlotsService
 }): void {
-  let open = false
-  let ensureBoard: (() => void) | undefined
-  const frameRef: { current: HTMLIFrameElement | undefined } = { current: undefined }
+  const open = new Map<string, boolean>(PANELS.map((panel) => [panel.name, false]))
+  const frameRefs = new Map<string, { current: HTMLIFrameElement | undefined }>(
+    PANELS.map((panel) => [panel.name, { current: undefined }]),
+  )
+  const ensures = new Map<string, () => void>()
 
   // i18n: register the owned namespace, then translate shell strings through
-  // the bound function (re-bound on locale changes; the entry label refreshes).
+  // the bound function (re-bound on locale changes; the entry labels refresh).
   ctx.effect(() => ctx.locale.register(NS, DICTIONARIES), 'dsh-taskboard: dictionaries')
   let t = ctx.locale.bind(NS)
 
-  const setOpen = (value: boolean): void => {
-    if (open === value) return
-    open = value
-    ensureBoard?.()
-    if (open) {
-      // Single-occupant center column: opening this panel must evict the
-      // sibling panel (ssh), both its html attribute and its controller
-      // state, otherwise the two panels' visibility rules fight.
-      document.documentElement.removeAttribute(OTHER_ACTIVE_ATTR)
-      document.documentElement.setAttribute(ACTIVE_ATTR, '')
-      document.dispatchEvent(new CustomEvent(ACTIVATE_EVENT, { detail: PANEL_NAME }))
+  const setOpen = (panel: PanelSpec, value: boolean): void => {
+    if (open.get(panel.name) === value) return
+    open.set(panel.name, value)
+    ensures.get(panel.name)?.()
+    if (value) {
+      // Single-occupant center column: opening this panel must evict every
+      // sibling (ssh and our other panels), both their html attributes and
+      // controller states, otherwise the visibility rules fight.
+      document.documentElement.removeAttribute('data-dsh-ssh-active')
+      for (const other of PANELS) document.documentElement.removeAttribute(other.activeAttr)
+      document.documentElement.setAttribute(panel.activeAttr, '')
+      document.dispatchEvent(new CustomEvent(ACTIVATE_EVENT, { detail: panel.name }))
     } else {
-      document.documentElement.removeAttribute(ACTIVE_ATTR)
+      document.documentElement.removeAttribute(panel.activeAttr)
     }
-    const entry = document.querySelector<HTMLElement>(ENTRY_SELECTOR)
-    if (entry !== null) refreshEntryState(entry, () => open)
+    const entry = document.querySelector<HTMLElement>(panel.entrySelector)
+    if (entry !== null) refreshEntryState(entry, () => open.get(panel.name) === true)
   }
 
   const onOtherActivate = (event: Event): void => {
-    if ((event as CustomEvent<string>).detail !== PANEL_NAME) setOpen(false)
+    const detail = (event as CustomEvent<string>).detail
+    for (const panel of PANELS) {
+      if (detail !== panel.name && open.get(panel.name) === true) setOpen(panel, false)
+    }
   }
   document.addEventListener(ACTIVATE_EVENT, onOtherActivate)
   // The settings card asks to open the board.
-  document.addEventListener('dsh-taskboard-request-open', () => setOpen(true))
+  document.addEventListener('dsh-taskboard-request-open', () => setOpen(TASKBOARD_PANEL, true))
 
   ctx.effect(() => {
-    const mounted = mountSidebarEntry(
-      () => setOpen(!open),
-      () => open,
-      () => t('entry.label'),
-    )
+    const mounted = PANELS.map((panel) => mountSidebarEntry(
+      () => setOpen(panel, !(open.get(panel.name) === true)),
+      () => open.get(panel.name) === true,
+      () => t(panel.entryLabelKey),
+    ))
     const onLocaleChange = (): void => {
       t = ctx.locale.bind(NS)
-      mounted.refreshLabel()
+      for (const entry of mounted) entry.refreshLabel()
     }
     ctx.on('locale/change', onLocaleChange)
-    return mounted.dispose
-  }, 'dsh-taskboard: sidebar entry')
+    return () => {
+      for (const entry of mounted) entry.dispose()
+    }
+  }, 'dsh-taskboard: sidebar entries')
 
   ctx.effect(() => {
-    const board = mountBoardView(frameRef)
-    ensureBoard = () => board.ensure()
+    const panels = PANELS.map((panel) => {
+      const view = mountPanelView(panel, frameRefs.get(panel.name)!)
+      ensures.set(panel.name, () => view.ensure())
+      return view
+    })
     // Jump out on sidebar context clicks: clicking a session/workspace row
     // (including the already-current one, which produces no session-change
     // event) hands the center column back to the conversation. Capture phase,
     // so the panel closes before the shell processes the click.
     const SIDEBAR_ROW_SELECTOR = '[class*="sessionRow"], [class*="projectRow"], [class*="searchResultRow"], [class*="searchResultWorkspace"], [class*="newSession"]'
     const onClickSidebarRow = (event: Event): void => {
-      if (!open) return
+      if (!PANELS.some((panel) => open.get(panel.name) === true)) return
       const target = event.target as HTMLElement | null
       if (target === null) return
-      if (target.closest(SIDEBAR_ROW_SELECTOR) !== null) setOpen(false)
+      if (target.closest(SIDEBAR_ROW_SELECTOR) !== null) {
+        for (const panel of PANELS) setOpen(panel, false)
+      }
     }
     document.addEventListener('click', onClickSidebarRow, true)
     return () => {
       document.removeEventListener(ACTIVATE_EVENT, onOtherActivate)
-      document.removeEventListener('dsh-taskboard-request-open', () => setOpen(true))
+      document.removeEventListener('dsh-taskboard-request-open', () => setOpen(TASKBOARD_PANEL, true))
       document.removeEventListener('click', onClickSidebarRow, true)
-      board.dispose()
+      for (const view of panels) view.dispose()
     }
-  }, 'dsh-taskboard: board view')
+  }, 'dsh-taskboard: panel views')
 
   ctx.effect(() => mountExecutionBridge(
     ctx.sessions,
     ctx.workspaces,
-    () => frameRef.current,
+    () => frameRefs.get(TASKBOARD_PANEL.name)?.current,
     (key, params) => t(key, params),
   ), 'dsh-taskboard: dsh execution bridge')
 
