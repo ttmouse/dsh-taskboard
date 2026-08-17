@@ -1,11 +1,11 @@
 ---
 name: manage-taskboard
-description: Manage taskboard projects, issues, comments, and status transitions through the dsh-taskboard HTTP API (localhost:47824). Use when the agent needs to track a new requirement, inspect project work, create or update issues, add progress notes, claim a task, record completion, or coordinate concurrent updates. The API is the single interface of the dsh-taskboard plugin — no taskctl, no CLI.
+description: Manage taskboard projects, issues, comments, and status transitions through the dsh-taskboard HTTP API (localhost:47825). Use when the agent needs to track a new requirement, inspect project work, create or update issues, add progress notes, claim a task, record completion, or coordinate concurrent updates. The API is the single interface of the dsh-taskboard plugin — no taskctl, no CLI.
 ---
 
 # Manage Taskboard
 
-Use the dsh-taskboard HTTP API for every project, issue, and comment operation. Base URL: `http://127.0.0.1:47824` (loopback, no auth). Read [references/api.md](references/api.md) before choosing an endpoint or field.
+Use the dsh-taskboard HTTP API for every project, issue, and comment operation. Base URL: `http://127.0.0.1:47825` (loopback, no auth). Read [references/api.md](references/api.md) before choosing an endpoint or field.
 
 ## Concurrency rule (non-negotiable)
 

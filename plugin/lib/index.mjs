@@ -16,7 +16,7 @@
  * agents know the plugin exists.
  */
 import { request as httpRequest } from 'node:http'
-import { mkdir } from 'node:fs/promises'
+import { appendFile, mkdir } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -30,17 +30,29 @@ const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 /** Default data directory under the DSH home (mirrors ~/.dsh/storages layout). */
 const DEFAULT_DATA_DIR = path.join(os.homedir(), '.dsh', 'storages', 'dsh-taskboard')
 
+/** Plugin diagnostic log (the harness logger is not observable from files). */
+const PLUGIN_LOG_FILE = path.join(DEFAULT_DATA_DIR, 'plugin.log')
+
+/** Append a line to the plugin diagnostic log; failures are swallowed. */
+async function pluginLog(message) {
+  try {
+    await appendFile(PLUGIN_LOG_FILE, `${new Date().toISOString()} ${message}\n`)
+  } catch {
+    // Never let diagnostics break the host.
+  }
+}
+
 /** Default webserver route prefix proxying the taskboard. */
 const DEFAULT_ROUTE_PREFIX = '/dsh-taskboard'
 
 /** Order of the announcement section within the tool-guidance band. */
 const SECTION_ORDER = 205
 
-/** Required services: webserver, system-prompt band, workspace registry, jobs, and agents. */
-export const inject = ['webServer', 'systemPrompt', 'workspaceRegistry', 'jobs', 'agents']
+/** Required services: webserver, system-prompt band, workspace registry, jobs, agents, sessions, and the default-model service. */
+export const inject = ['webServer', 'systemPrompt', 'workspaceRegistry', 'jobs', 'agents', 'sessions', 'agentDefaultModel']
 
 /** Model-facing announcement: plugin presence, capabilities, and limits. */
-export const TASKBOARD_GUIDANCE = '本机已安装 dsh-taskboard 插件（DSH Web GUI 的完整任务看板）：侧边栏「任务看板」入口；完整能力来自本地 SQLite 服务——多视图（看板/列表/Gantt/工作流/仪表盘）、任务详情（关系/附件/标签/过滤器）、AI 对话、项目自动认领（DSH 原生 claim-sweep 后台作业驱动，认领/执行/回写全部通过本机看板 HTTP API 完成，无 taskctl、无外部心跳文件）。数据存 ~/.dsh/storages/dsh-taskboard/taskboard.sqlite（本机回环端口 47824）。任务可通过看板内「在对话中打开」直接驱动 DSH 会话执行并回写评论。用户提到「任务看板 / 看板 / 任务管理」时即指本插件，请据此协作。'
+export const TASKBOARD_GUIDANCE = '本机已安装 dsh-taskboard 插件（DSH Web GUI 的完整任务看板）：侧边栏「任务看板」入口；完整能力来自本地 SQLite 服务——多视图（看板/列表/Gantt/工作流/仪表盘）、任务详情（关系/附件/标签/过滤器）、AI 对话、项目自动认领（DSH 原生 claim-sweep 后台作业驱动，认领/执行/回写全部通过本机看板 HTTP API 完成，无 taskctl、无外部心跳文件）。数据存 ~/.dsh/storages/dsh-taskboard/taskboard.sqlite（本机回环端口 47825）。任务可通过看板内「在对话中打开」直接驱动 DSH 会话执行并回写评论。用户提到「任务看板 / 看板 / 任务管理」时即指本插件，请据此协作。'
 
 /** Plugin config, validated by the schemastery schema. */
 export const Config = z.object({
@@ -51,7 +63,7 @@ export const Config = z.object({
   /** Webserver route prefix proxying the taskboard (browser half mounts here). */
   routePrefix: z.string().default(DEFAULT_ROUTE_PREFIX),
   /** Internal loopback listen port; 0 requests an OS-assigned port. */
-  port: z.natural().max(65535).default(47824),
+  port: z.natural().max(65535).default(47825),
   /** When true, a system-prompt section announces the plugin to every agent. */
   announceToAgent: z.boolean().default(true),
   /** When true, the host half runs the DSH-native claim sweeper (auto-claim). */
@@ -189,20 +201,33 @@ export function apply(ctx, config) {
         handler: makeProxy(address.port, config.routePrefix),
       })
       baseUrl = `http://127.0.0.1:${address.port}`
+      void pluginLog(`dsh-taskboard: serving ${config.routePrefix} (internal loopback port ${address.port}, data ${dataDirectory})`)
       ctx.logger.info(`dsh-taskboard: serving ${config.routePrefix} (internal loopback port ${address.port}, data ${dataDirectory})`)
       if (config.syncWorkspaces) {
         const runSync = () => {
-          void syncWorkspacesFromRegistry(ctx.workspaceRegistry, baseUrl, (message) => ctx.logger.info(message))
+          void syncWorkspacesFromRegistry(ctx.workspaceRegistry, baseUrl, (message) => {
+            void pluginLog(message)
+            ctx.logger.info(message)
+          })
             .then((summary) => {
-              if (summary) ctx.logger.info(`dsh-taskboard: ${summary}`)
+              if (summary) {
+                void pluginLog(summary)
+                ctx.logger.info(`dsh-taskboard: ${summary}`)
+              }
             })
-            .catch((error) => ctx.logger.error(`dsh-taskboard: workspace sync: ${error instanceof Error ? error.message : String(error)}`))
+            .catch((error) => {
+              const message = `workspace sync: ${error instanceof Error ? error.message : String(error)}`
+              void pluginLog(message)
+              ctx.logger.error(`dsh-taskboard: ${message}`)
+            })
         }
         runSync()
         if (config.syncIntervalMs > 0) syncTimer = setInterval(runSync, config.syncIntervalMs)
       }
     } catch (error) {
-      ctx.logger.error(`dsh-taskboard: start failed: ${error instanceof Error ? error.message : String(error)}`)
+      const message = `start failed: ${error instanceof Error ? error.message : String(error)}`
+      void pluginLog(message)
+      ctx.logger.error(`dsh-taskboard: ${message}`)
     }
   }
 
@@ -213,11 +238,16 @@ export function apply(ctx, config) {
         ctx,
         baseUrl,
         pollMs: Math.max(5000, config.claimSweepPollMs),
-        log: (message) => ctx.logger.info(message),
+        log: (message) => {
+          void pluginLog(message)
+          ctx.logger.info(message)
+        },
       })
       if (!sweeper.running) sweeper = undefined
     } catch (error) {
-      ctx.logger.error(`dsh-taskboard: claim sweeper start failed: ${error instanceof Error ? error.message : String(error)}`)
+      const message = `claim sweeper start failed: ${error instanceof Error ? error.message : String(error)}`
+      void pluginLog(message)
+      ctx.logger.error(`dsh-taskboard: ${message}`)
     }
   }
 
@@ -240,8 +270,9 @@ export function apply(ctx, config) {
     }
   }
 
-  void start()
-  void startClaimSweep()
+  void start().then(() => {
+    void startClaimSweep()
+  })
   ctx.on('dispose', () => {
     void stop()
   })

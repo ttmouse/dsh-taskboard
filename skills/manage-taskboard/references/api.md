@@ -1,6 +1,6 @@
 # dsh-taskboard HTTP API reference
 
-Base URL: `http://127.0.0.1:47824` — loopback only, no auth, JSON in/out.
+Base URL: `http://127.0.0.1:47825` — loopback only, no auth, JSON in/out.
 
 Every task carries a `version` integer. **All mutations must include the version from the latest read** (optimistic concurrency). A failed write reports a conflict — re-read, retry with the fresh version.
 
@@ -42,7 +42,7 @@ Status flow: `todo` → (claim) → `in_progress` → (verify + comment) → `in
 ## Examples
 
 ```sh
-BASE=http://127.0.0.1:47824
+BASE=http://127.0.0.1:47825
 # List open todos of a project
 curl -s "$BASE/api/tasks?projectId=<projectId>&status=todo"
 # Read one task (get its latest version)

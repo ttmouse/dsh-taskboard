@@ -49,6 +49,28 @@ function sleep(ms) {
 }
 
 /**
+ * Wait until the claim session's durable log records a turn/end (the claim
+ * run actually finished). `agent.running` is a drain interval and can be
+ * false between queued turns, so disposing on it alone aborts the fresh turn.
+ * @returns {Promise<boolean>} true when a turn ended before the deadline.
+ */
+async function waitForClaimTurn({ ctx, sessionId, log }) {
+  const deadline = Date.now() + 30 * 60 * 1000
+  while (Date.now() < deadline) {
+    try {
+      const session = ctx.sessions.get(sessionId)
+      const events = session?.events ?? []
+      if (events.some((event) => event.type === 'turn/end')) return true
+    } catch (error) {
+      log(`[claim] ${sessionId}: session probe failed: ${error instanceof Error ? error.message : String(error)}`)
+      return false
+    }
+    await sleep(2000)
+  }
+  return false
+}
+
+/**
  * Kick one claim agent session for a project and wait for it to settle.
  * @returns {Promise<boolean>} true when the agent finished (or was skipped).
  */
@@ -57,9 +79,25 @@ async function kickClaimSession({ ctx, project, baseUrl, log }) {
   const sessionId = `claim-${project.id.slice(0, 8)}-${randomUUID().slice(0, 8)}`
   let handle
   try {
+    // Programmatic agents get no automatic model: resolve the deployment
+    // default (settings.yaml agent-default-model) and pass it explicitly.
+    let agentOptions = {}
+    try {
+      const selection = ctx.agentDefaultModel?.currentSelection?.() ?? {}
+      if (selection.provider && selection.model) {
+        agentOptions = {
+          provider: selection.provider,
+          model: selection.model,
+          ...(selection.reasoningEffort ? { reasoningEffort: selection.reasoningEffort } : {}),
+        }
+      }
+    } catch (error) {
+      log(`[claim] ${project.id}: default model unavailable: ${error instanceof Error ? error.message : String(error)}`)
+    }
     handle = await ctx.agents.create({
       sessionId,
-      meta: { cwd: project.workspacePath, origin: 'dsh-taskboard' },
+      meta: { cwd: project.workspacePath, agentPreset: 'standard' },
+      agentOptions,
     })
   } catch (error) {
     log(`[claim] ${project.id}: agent create failed: ${error instanceof Error ? error.message : String(error)}`)
@@ -68,12 +106,10 @@ async function kickClaimSession({ ctx, project, baseUrl, log }) {
   try {
     handle.agent.followup(buildClaimPrompt(project, baseUrl))
     log(`[claim] ${project.id}: kicked session ${sessionId} (${project.name})`)
-    // Wait for the driver to drain (turn finished), then dispose cleanly.
-    const deadline = Date.now() + 30 * 60 * 1000
-    while (handle.agent.running && Date.now() < deadline) {
-      await sleep(2000)
-    }
-    return true
+    // Wait for the claim turn to actually end (durable log), then dispose.
+    const finished = await waitForClaimTurn({ ctx, sessionId, log })
+    if (!finished) log(`[claim] ${sessionId}: claim turn did not end within 30min (disposing anyway)`)
+    return finished
   } catch (error) {
     log(`[claim] ${project.id}: run failed: ${error instanceof Error ? error.message : String(error)}`)
     return false
@@ -122,7 +158,12 @@ export async function startClaimSweeper({ ctx, baseUrl, pollMs = 60_000, log = (
       }
       if (!automation?.enabled) continue
       const intervalMs = (automation.intervalMinutes ?? 10) * 60_000
-      const last = typeof automation.lastClaimAt === 'number' ? automation.lastClaimAt : 0
+      // lastClaimAt is stored as an ISO string by the board DB (now() format).
+      const last = typeof automation.lastClaimAt === 'number'
+        ? automation.lastClaimAt
+        : typeof automation.lastClaimAt === 'string'
+          ? Date.parse(automation.lastClaimAt) || 0
+          : 0
       if (now - last < intervalMs) continue
 
       inFlight.add(project.id)
