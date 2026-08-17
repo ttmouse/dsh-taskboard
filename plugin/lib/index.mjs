@@ -141,6 +141,7 @@ async function syncWorkspacesFromRegistry(registry, baseUrl, log) {
   const existing = new Map(projects.map((project) => [project.id, project]))
   let created = 0
   let updated = 0
+  let removed = 0
   for (const ws of workspaces) {
     const current = existing.get(ws.id)
     if (current === undefined) {
@@ -161,7 +162,16 @@ async function syncWorkspacesFromRegistry(registry, baseUrl, log) {
       else log(`workspace sync: update '${ws.id}' failed: HTTP ${res.status}`)
     }
   }
-  return `workspace sync: ${workspaces.length} workspaces, ${created} created, ${updated} updated`
+  // Mirror removals: workspace-managed projects whose workspace is gone are
+  // deleted (the board route refuses 'local' and temp-* projects).
+  const currentIds = new Set(workspaces.map((ws) => ws.id))
+  for (const project of projects) {
+    if (!project.workspacePath || currentIds.has(project.id)) continue
+    const res = await fetch(`${baseUrl}/api/projects/${encodeURIComponent(project.id)}`, { method: 'DELETE' })
+    if (res.ok) removed++
+    else log(`workspace sync: remove '${project.id}' failed: HTTP ${res.status}`)
+  }
+  return `workspace sync: ${workspaces.length} workspaces, ${created} created, ${updated} updated, ${removed} removed`
 }
 
 /**

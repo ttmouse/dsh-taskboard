@@ -1646,15 +1646,22 @@ export function createTaskboardServer(options = {}) {
       }
 
       const projectByIdRoute = pathname.match(/^\/api\/projects\/([^/]+)$/);
-      if (projectByIdRoute && request.method === "PUT") {
+      if (projectByIdRoute && (request.method === "PUT" || request.method === "DELETE")) {
         if ([...url.searchParams.keys()].length > 0) {
-          throw new ApiError(400, "UNKNOWN_QUERY_PARAMETER", "PUT /api/projects/:id does not accept query parameters");
+          throw new ApiError(400, "UNKNOWN_QUERY_PARAMETER", `${request.method} /api/projects/:id does not accept query parameters`);
         }
         let projectId;
         try {
           projectId = decodeURIComponent(projectByIdRoute[1]);
         } catch {
           throw new ApiError(400, "INVALID_FIELD", "Invalid project id in URL path");
+        }
+        if (request.method === "DELETE") {
+          // Workspace-sync removal: only workspace-managed projects (guarded
+          // inside deleteWorkspaceProject); 'local' and temp-* are refused.
+          const removed = database.deleteWorkspaceProject(validateProjectId(projectId));
+          events.emit("project.deleted", { project: removed });
+          return sendJson(response, 200, { deleted: removed.id });
         }
         const project = database.updateProject(validateProjectId(projectId), parseProjectUpdate(await readJson(request)));
         events.emit("project.updated", { project });

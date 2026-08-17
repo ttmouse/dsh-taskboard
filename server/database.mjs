@@ -846,6 +846,36 @@ export class TaskboardDatabase {
     `).run(timestamp, timestamp, id);
   }
 
+  /**
+   * Delete a workspace-managed project (mirror of a DSH workspace that is
+   * gone). Workspace sync uses this to mirror removals; only projects with a
+   * workspace_path are eligible ('local' 全局 and manual temp-* projects are
+   * never touched). Tasks are removed too — the workspace registry is the
+   * single source of truth, so a removed workspace removes its mirror.
+   */
+  deleteWorkspaceProject(id) {
+    const project = this.getProject(id);
+    if (!project) {
+      throw new ApiError(404, "PROJECT_NOT_FOUND", `Project '${id}' does not exist`);
+    }
+    if (!project.workspacePath) {
+      throw new ApiError(403, "PROJECT_DELETE_FORBIDDEN", "Only workspace-managed projects can be removed by workspace sync");
+    }
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      // tasks cascade to comments/attachments/activities/relations; threads
+      // have no FK (origin_project_id), so remove them explicitly.
+      this.database.prepare("DELETE FROM tasks WHERE project_id = ?").run(id);
+      this.database.prepare("DELETE FROM ai_chat_threads WHERE origin_project_id = ?").run(id);
+      this.database.prepare("DELETE FROM projects WHERE id = ?").run(id);
+      this.database.exec("COMMIT");
+    } catch (error) {
+      this.database.exec("ROLLBACK");
+      throw error;
+    }
+    return project;
+  }
+
   deleteProject(id) {
     const project = this.getProject(id);
     if (!project) {
