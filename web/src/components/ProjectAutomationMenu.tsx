@@ -24,6 +24,8 @@ interface ProjectAutomationMenuProps {
   automation?: Partial<AutomationState>;
   /** 认领模型目录（来自 /api/automation/models）。 */
   models: string[];
+  /** 供应商 id → 显示名（如 opencode、DeepSeek）。 */
+  modelLabels?: Record<string, string>;
   pending: boolean;
   error: string | null;
   unavailableReason: string | null;
@@ -45,6 +47,7 @@ export function ProjectAutomationMenu({
   pending,
   error,
   unavailableReason,
+  modelLabels,
   onOpen,
   onChange,
 }: ProjectAutomationMenuProps) {
@@ -105,6 +108,9 @@ export function ProjectAutomationMenu({
     .filter(([, choices]) => choices.length > 0);
   const filteredPlainModels = plainModels.filter((choice) => modelMatchesFilter(choice) || choice === draft.model);
 
+  /** 供应商显示名：优先 label（如 opencode），退回路由 id。 */
+  const providerLabel = (provider: string): string => modelLabels?.[provider] ?? provider;
+
   /** 扁平化的列表项（组标签 + 可选项），用于渲染和键盘导航。 */
   const listItems: Array<
     { kind: "group"; label: string }
@@ -114,7 +120,7 @@ export function ProjectAutomationMenu({
     let counter = 0;
     listItems.push({ kind: "option", value: "", label: text("跟随默认", "Follow default"), index: counter++ });
     for (const [provider, choices] of filteredModelGroups) {
-      listItems.push({ kind: "group", label: provider });
+      listItems.push({ kind: "group", label: providerLabel(provider) });
       for (const choice of choices) {
         listItems.push({
           kind: "option",
@@ -168,11 +174,11 @@ export function ProjectAutomationMenu({
     }
   };
 
-  /** 展示名：供应商 / 模型（与筛选查询区分）。 */
+  /** 展示名：供应商显示名 / 模型。 */
   const modelDisplayName = (choice: string): string => {
     const separator = choice.indexOf("::");
     return separator >= 0
-      ? `${choice.slice(0, separator)} / ${choice.slice(separator + 2)}`
+      ? `${providerLabel(choice.slice(0, separator))} / ${choice.slice(separator + 2)}`
       : choice;
   };
 

@@ -22,7 +22,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import z from 'schemastery'
 import { createTaskboardServer } from '../vendor/server/app.mjs'
-import { reconcileClaimRoutine } from './claim-routines.mjs'
+import { buildClaimPrompt, reconcileClaimRoutine } from './claim-routines.mjs'
+import { activeClaimSessions, executeClaimInProcess, stopClaimSession } from './claim-executor.mjs'
 
 /** Plugin root: the directory holding lib/ (package.json sits one level up). */
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -78,7 +79,7 @@ const DEFAULT_ROUTE_PREFIX = '/dsh-taskboard'
 const SECTION_ORDER = 205
 
 /** Required services: webserver, system-prompt band, workspace registry, and llm (model catalog). */
-export const inject = ['webServer', 'systemPrompt', 'workspaceRegistry', 'sessionPersistence', 'llm']
+export const inject = ['webServer', 'systemPrompt', 'workspaceRegistry', 'sessionPersistence', 'agents', 'sessions', 'agentDefaultModel', 'llm']
 
 /** Model-facing announcement: plugin presence, capabilities, and limits. */
 export const TASKBOARD_GUIDANCE = '本机已安装 dsh-taskboard 插件（DSH Web GUI 的完整任务看板）：侧边栏「任务看板」入口；完整能力来自本地 SQLite 服务——多视图（看板/列表/Gantt/工作流/仪表盘）、任务详情（关系/附件/标签/过滤器）、AI 对话、项目自动认领（dsh-routines 例程驱动：认领开关生成 ~/.dsh/routines/taskboard-claim-*.yaml，由 ops profile 的 routines-scheduler 定时执行 headless 会话，认领/执行/回写全部通过本机看板 HTTP API 完成，无 taskctl、无心跳文件、无长驻作业）。数据存 ~/.dsh/storages/dsh-taskboard/taskboard.sqlite（本机回环端口 47825）。任务可通过看板内「在对话中打开」直接驱动 DSH 会话执行并回写评论。用户提到「任务看板 / 看板 / 任务管理」时即指本插件，请据此协作。'
@@ -101,6 +102,8 @@ export const Config = z.object({
   syncIntervalMs: z.natural().max(3_600_000).default(60_000),
   /** Whether the host half reconciles claim routines in $DSH_HOME/routines. */
   routinesEnabled: z.boolean().default(true),
+  /** In-process claim scheduler poll interval in ms (min 5000). */
+  claimPollMs: z.natural().max(3_600_000).default(30_000),
 })
 
 /**
@@ -201,6 +204,91 @@ async function syncWorkspacesFromRegistry(registry, baseUrl, log) {
   return `workspace sync: ${workspaces.length} workspaces, ${created} created, ${updated} updated, ${removed} removed`
 }
 
+
+/**
+ * Resolve the project id behind a claim routine name (taskboard-claim-<12>).
+ */
+async function resolveClaimProject(name, baseUrl) {
+  const res = await fetch(`${baseUrl}/api/projects`)
+  if (!res.ok) return null
+  const { projects } = await res.json()
+  const project = projects.find((p) => name === `taskboard-claim-${p.id.slice(0, 12)}`)
+  return project ?? null
+}
+
+/**
+ * Kick an in-process claim session for one project (used by the scheduler
+ * and by the 立即运行 button for claim routines).
+ */
+async function runInProcessClaim(ctx, project, baseUrl, log) {
+  let automation = { enabled: false, intervalMinutes: 10, model: null }
+  try {
+    const res = await fetch(`${baseUrl}/api/projects/${encodeURIComponent(project.id)}/automation`)
+    if (res.ok) automation = (await res.json()).automation
+  } catch {
+    // keep defaults
+  }
+  return executeClaimInProcess({
+    ctx,
+    project,
+    model: automation.model ?? null,
+    prompt: buildClaimPrompt(project),
+    log,
+  })
+}
+
+/**
+ * Start the in-process claim scheduler: every claimPollMs, sweep projects
+ * whose automation switch is enabled and due, and run them in-process so the
+ * GUI streams the conversation live.
+ */
+function startClaimScheduler(ctx, baseUrl, pollMs, log) {
+  const inFlight = new Set()
+  const sweep = async () => {
+    let projects = []
+    try {
+      const res = await fetch(`${baseUrl}/api/projects`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      projects = (await res.json()).projects ?? []
+    } catch (error) {
+      log(`[claim] sweep list failed: ${error instanceof Error ? error.message : String(error)}`)
+      return
+    }
+    const now = Date.now()
+    for (const project of projects) {
+      if (!project.workspacePath || inFlight.has(project.id)) continue
+      let automation
+      try {
+        const res = await fetch(`${baseUrl}/api/projects/${encodeURIComponent(project.id)}/automation`)
+        if (!res.ok) continue
+        automation = (await res.json()).automation
+      } catch {
+        continue
+      }
+      if (!automation?.enabled) continue
+      const intervalMs = (automation.intervalMinutes ?? 10) * 60_000
+      const last = typeof automation.lastClaimAt === 'number'
+        ? automation.lastClaimAt
+        : typeof automation.lastClaimAt === 'string'
+          ? Date.parse(automation.lastClaimAt) || 0
+          : 0
+      if (now - last < intervalMs) continue
+      inFlight.add(project.id)
+      try {
+        await fetch(`${baseUrl}/api/projects/${encodeURIComponent(project.id)}/claim-run`, { method: 'POST' })
+          .catch(() => {})
+        log(`[claim] scheduled: ${project.name}`)
+        await runInProcessClaim(ctx, project, baseUrl, log)
+      } finally {
+        inFlight.delete(project.id)
+      }
+    }
+  }
+  const timer = setInterval(() => void sweep(), pollMs)
+  void sweep()
+  return () => clearInterval(timer)
+}
+
 /**
  * Refresh the claim model catalog: enumerate every registered provider's
  * models via ctx.llm and write them to models.json in the data directory,
@@ -221,6 +309,10 @@ async function refreshModelCatalog(ctx, dataDirectory, log) {
         const models = await ctx.llm.listModels(providerId)
         catalog.providers.push({
           provider: providerId,
+          // Human-readable provider name from the adapter (e.g. "DeepSeek",
+          // or the settings.yaml displayName for configurable routes) — the
+          // raw route key is machine-facing and confusing in selectors.
+          label: typeof provider?.name === 'string' && provider.name !== '' ? provider.name : providerId,
           models: models.map((entry) => (typeof entry === 'string' ? entry : entry?.id)).filter(Boolean),
         })
       } catch (error) {
@@ -334,6 +426,7 @@ export function apply(ctx, config) {
   let routeDisposer = undefined
   let app = undefined
   let syncTimer = undefined
+  let claimTimer = undefined
   let baseUrl = undefined
 
   const start = async () => {
@@ -349,6 +442,18 @@ export function apply(ctx, config) {
         staticDirectory: path.join(PLUGIN_ROOT, 'vendor', 'web'),
         skillPath: path.join(PLUGIN_ROOT, 'vendor', 'skills', 'manage-taskboard', 'SKILL.md'),
         routinesDirectory: path.join(process.env.DSH_HOME ?? path.join(os.homedir(), '.dsh'), 'routines'),
+        routinesRunHandler: async (name) => {
+          // Claim routines execute in-process (visible/interactive GUI session);
+          // everything else falls back to the external ops runner.
+          const projectId = name.startsWith('taskboard-claim-') ? (await resolveClaimProject(name)) : null
+          if (projectId) return runInProcessClaim(projectId)
+          return false
+        },
+        routinesStopHandler: async (name) => {
+          const sessionId = name.startsWith('claim-') ? name : null
+          if (sessionId) return stopClaimSession(sessionId, (message) => ctx.logger.info(`dsh-taskboard: ${message}`))
+          return false
+        },
       })
       const address = await app.listen({ host: '127.0.0.1', port: config.port })
       routeDisposer = ctx.webServer.register({
@@ -410,6 +515,10 @@ export function apply(ctx, config) {
   }
 
   const stop = async () => {
+    if (claimTimer !== undefined) {
+      claimTimer()
+      claimTimer = undefined
+    }
     if (syncTimer !== undefined) {
       clearInterval(syncTimer)
       syncTimer = undefined
@@ -424,7 +533,20 @@ export function apply(ctx, config) {
     }
   }
 
-  void start()
+  void start().then(() => {
+    if (config.claimPollMs > 0) {
+      claimTimer = startClaimScheduler(
+        ctx,
+        baseUrl,
+        Math.max(5000, config.claimPollMs),
+        (message) => {
+          void pluginLog(message)
+          ctx.logger.info(message)
+        },
+      )
+      pluginLog(`claim scheduler started (poll=${Math.max(5000, config.claimPollMs)}ms)`)
+    }
+  })
   ctx.on('dispose', () => {
     void stop()
   })

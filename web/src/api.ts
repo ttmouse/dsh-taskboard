@@ -291,7 +291,7 @@ export interface AutomationUpdateInput {
 
 /** 认领模型目录（host 半从 ctx.llm 枚举全部 provider 写入 models.json）。 */
 export interface ClaimModelCatalog {
-  providers: { provider: string; models: string[] }[];
+  providers: { provider: string; label?: string; models: string[] }[];
   updatedAt: string;
 }
 
@@ -374,6 +374,11 @@ export async function runRoutine(name: string): Promise<{ started: string }> {
 }
 
 /** 删除例程文件。 */
+/** 停止正在运行的例程（认领例程走进程内 handler）。 */
+export async function stopRoutine(name: string): Promise<{ stopped: string | null }> {
+  return request(`/api/routines/${encodeURIComponent(name)}/stop`, { method: "POST" });
+}
+
 export async function deleteRoutine(name: string): Promise<{ deleted: string }> {
   return request(`/api/routines/${encodeURIComponent(name)}`, { method: "DELETE" });
 }

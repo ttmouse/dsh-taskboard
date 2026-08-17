@@ -87,8 +87,9 @@ export async function reconcileClaimRoutine(project, automation, apiBase, log) {
     }
   }
   const currentText = await readFile(file, 'utf8').catch(() => '')
-  const paused = /^paused:\s*true\s*$/m.test(currentText)
-  const next = buildRoutineYaml(project, automation, apiBase, paused)
+  // Claim routines are always marked paused: the external ops runner must
+  // skip them — execution happens in-process so the GUI streams the session.
+  const next = buildRoutineYaml(project, automation, apiBase, true)
   try {
     if (currentText === next) return 'unchanged'
     await mkdir(routinesDir(), { recursive: true })

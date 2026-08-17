@@ -643,6 +643,7 @@ export function App() {
   const [projectAutomations, setProjectAutomations] = useState(readProjectAutomations);
   /** 认领模型目录：组合值 provider::model。 */
   const [claimModelChoices, setClaimModelChoices] = useState<string[]>([]);
+  const [claimModelLabels, setClaimModelLabels] = useState<Record<string, string>>({});
   const [automationPending, setAutomationPending] = useState(false);
   const [automationError, setAutomationError] = useState<string | null>(null);
   const [announcement, setAnnouncementValue] = useState("");
@@ -2278,6 +2279,7 @@ export function App() {
               <ProjectAutomationMenu
                 automation={selectedProjectAutomation}
                 models={claimModelChoices}
+                modelLabels={claimModelLabels}
                 pending={automationPending}
                 error={automationError}
                 unavailableReason={automationProjectContext.unavailableReason}
@@ -2286,6 +2288,9 @@ export function App() {
                   void getClaimModels().then((catalog) => {
                     setClaimModelChoices(catalog.providers.flatMap((entry) =>
                       entry.models.map((model) => `${entry.provider}::${model}`),
+                    ));
+                    setClaimModelLabels(Object.fromEntries(
+                      catalog.providers.map((entry) => [entry.provider, entry.label ?? entry.provider]),
                     ));
                   }).catch(() => {});
                 }}

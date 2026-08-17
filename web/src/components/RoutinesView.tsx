@@ -7,6 +7,7 @@ import {
   getRoutines,
   listProjects,
   runRoutine,
+  stopRoutine,
   updateRoutine,
   type RoutineCreateInput,
   type RoutineInfo,
@@ -46,6 +47,7 @@ function statusInfo(status: string | null, text: (zh: string, en: string) => str
     case "failed": return { label: text("失败", "Failed"), tone: "failed" };
     case "running": return { label: text("运行中", "Running"), tone: "running" };
     case "canceled": return { label: text("已取消", "Canceled"), tone: "idle" };
+    case "skipped": return { label: text("已跳过", "Skipped"), tone: "idle" };
     default: return { label: text("从未运行", "Never"), tone: "idle" };
   }
 }
@@ -162,6 +164,17 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
 
   const isClaimRoutine = (name: string) => name.startsWith("taskboard-claim-");
 
+  /** 停止运行中的认领例程（进程内会话 dispose）。 */
+  const submitStop = async (name: string) => {
+    try {
+      await stopRoutine(name);
+      setError(null);
+      await load();
+    } catch (stopError) {
+      setError(stopError instanceof Error ? stopError.message : text("停止失败", "Stop failed"));
+    }
+  };
+
   const activeProject = projects.find((project) => project.id === activeProjectId) ?? null;
   const visibleRoutines: RoutineInfo[] = activeProject
     ? (routines ?? []).filter((routine) => routine.cwd === activeProject.workspacePath)
@@ -271,7 +284,13 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
                   <span className="routine-row-value">{formatTime(routine.nextRunAt)}</span>
                 </div>
                 {routine.lastRun?.digest && <p className="routine-digest">{routine.lastRun.digest}</p>}
-                {routine.lastRun?.error && <p className="routine-error" title={routine.lastRun.error}>{routine.lastRun.error}</p>}
+                {routine.lastRun?.error && (
+                  <p className="routine-error" title={routine.lastRun.error}>
+                    {routine.lastRun.status === "skipped"
+                      ? text("上次运行未结束，本次到点已自动跳过。", "Previous run still in progress; this run was skipped.")
+                      : routine.lastRun.error}
+                  </p>
+                )}
                 <div className="routine-switch-row">
                   <span>{routine.paused ? text("已暂停", "Paused") : text("启用中", "Enabled")}</span>
                   <button
@@ -303,6 +322,11 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
                         ? text("已触发 ✓", "Triggered ✓")
                         : text("测试执行", "Run now")}
                   </button>
+                  {routine.lastRun?.status === "running" && (
+                    <button type="button" className="is-danger" onClick={() => void submitStop(routine.name)}>
+                      {text("停止", "Stop")}
+                    </button>
+                  )}
                   <button type="button" onClick={() => { setEditing(routine); setRawEdit(routine.raw ?? ""); setError(null); }}>
                     {text("编辑", "Edit")}
                   </button>

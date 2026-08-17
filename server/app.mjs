@@ -1977,6 +1977,28 @@ export function createTaskboardServer(options = {}) {
         return methodNotAllowed(response, ["GET", "POST"]);
       }
 
+      const routineRunRoute = pathname.match(/^\/api\/routines\/([^/]+)\/run$/);
+      if (routineRunRoute && request.method === "POST") {
+        const name = parseRoutineName(decodeURIComponent(routineRunRoute[1]));
+        if (options.routinesRunHandler) {
+          // In-process handler (claim routines execute in the GUI host).
+          const handled = await options.routinesRunHandler(name);
+          if (handled) return sendJson(response, 202, { started: name, mode: "in-process" });
+        }
+        spawnRoutineRun(name);
+        return sendJson(response, 202, { started: name, mode: "external" });
+      }
+
+      const routineStopRoute = pathname.match(/^\/api\/routines\/([^/]+)\/stop$/);
+      if (routineStopRoute && request.method === "POST") {
+        const name = parseRoutineName(decodeURIComponent(routineStopRoute[1]));
+        if (options.routinesStopHandler) {
+          const stopped = await options.routinesStopHandler(name);
+          return sendJson(response, 200, { stopped: stopped || null });
+        }
+        return sendJson(response, 404, { error: "No stop handler" });
+      }
+
       const routineByNameRoute = pathname.match(/^\/api\/routines\/([^/]+)$/);
       if (routineByNameRoute && resolved.routinesDirectory) {
         const name = parseRoutineName(decodeURIComponent(routineByNameRoute[1]));
@@ -2028,20 +2050,6 @@ export function createTaskboardServer(options = {}) {
       }
 
       // 测试执行：manual trigger through the ops-profile routines CLI,
-      // fire-and-forget — the run record lands in the runs/ directory.
-      const routineRunRoute = pathname.match(/^\/api\/routines\/([^/]+)\/run$/);
-      if (routineRunRoute && request.method === "POST") {
-        const name = parseRoutineName(decodeURIComponent(routineRunRoute[1]));
-        const file = path.join(resolved.routinesDirectory, `${name}.yaml`);
-        try {
-          await stat(file);
-        } catch {
-          throw new ApiError(404, "ROUTINE_NOT_FOUND", `Routine '${name}' does not exist`);
-        }
-        spawnRoutineRun(name);
-        return sendJson(response, 202, { started: name });
-      }
-
       const claimRunRoute = pathname.match(/^\/api\/projects\/([^/]+)\/claim-run$/);
       if (claimRunRoute && request.method === "POST") {
         if ([...url.searchParams.keys()].length > 0) {
