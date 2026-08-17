@@ -3,8 +3,7 @@
 本仓库衍生自以下开源项目，代码与设计沿用其贡献：
 
 - **Codex Taskboard / dashi-taskboard**（[chuspeeism/dashi-taskboard](https://github.com/chuspeeism/dashi-taskboard)），Apache License 2.0，Copyright chuspeeism 及原作者。原始 Web UI、server、数据模型源自该仓库，本仓库（DSH 插件版）以此为上游。
-- **reasonix-taskboard**（[ttmouse/reasonix-taskboard](https://github.com/ttmouse/reasonix-taskboard)），MIT，Copyright Reasonix contributors。这是与本仓库同源并行的独立项目（面向 Reasonix），非本仓库上游；其 MIT 版权声明同时保留在本仓库 [LICENSE](LICENSE) 中。
 
 Apache License 2.0 全文见 <https://www.apache.org/licenses/LICENSE-2.0>。上游 Apache-2.0 部分的副本、修改与再分发须遵守 Apache License 2.0 条款（保留本 NOTICE 与致谢）；本项目新增与改造部分以 [LICENSE](LICENSE)（MIT License）授权。
 
-English: This repository derives from the open-source projects listed above. Portions derived from the Apache-2.0 upstream remain under Apache License 2.0 (see https://www.apache.org/licenses/LICENSE-2.0); new and modified portions are licensed under the MIT License (see LICENSE). reasonix-taskboard is a parallel project by the same author, not an upstream of this repository.
+English: This repository derives from the open-source projects listed above. Portions derived from the Apache-2.0 upstream remain under Apache License 2.0 (see https://www.apache.org/licenses/LICENSE-2.0); new and modified portions are licensed under the MIT License (see LICENSE).
