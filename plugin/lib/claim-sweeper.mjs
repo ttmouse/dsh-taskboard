@@ -121,7 +121,13 @@ async function kickClaimSession({ ctx, project, baseUrl, model, log }) {
     return false
   }
   try {
-    handle.agent.followup(buildClaimPrompt(project, baseUrl))
+    // followup expects a full message object (a bare string has no `source`,
+    // which crashes pre-step listeners like dsh-repeat-tool-reminder).
+    handle.agent.followup({
+      role: 'user',
+      content: [{ type: 'text', text: buildClaimPrompt(project, baseUrl) }],
+      source: { kind: 'user' },
+    })
     log(`[claim] ${project.id}: kicked session ${sessionId} (${project.name})`)
     // Wait for the claim turn to actually end (durable log), then dispose.
     const finished = await waitForClaimTurn({ ctx, sessionId, log })
