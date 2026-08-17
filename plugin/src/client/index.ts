@@ -21,6 +21,12 @@ import { TaskboardSettingsCard } from './settings-card'
 /** Cross-plugin activation event; detail is the activating panel name. */
 const ACTIVATE_EVENT = 'dsh-panel-activate'
 
+/** Inline icon for the taskboard entry (matches the shell's 16px nav-icon look). */
+const ICON = `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="1.5"/><path d="M2 6.5h12M6.5 6.5v7"/></svg>`
+
+/** Inline icon for the automation entry: a lightning bolt (scheduled triggers). */
+const AUTOMATION_ICON = `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 1.5 3 9.5h3.5L7 14.5 13 6.5H9.5z"/></svg>`
+
 /** One side panel: sidebar entry row + center-column iframe view, exclusive with siblings. */
 interface PanelSpec {
   /** Panel name carried in the cross-plugin activation event. */
@@ -37,6 +43,8 @@ interface PanelSpec {
   url: string
   /** Locale key for the entry label. */
   entryLabelKey: string
+  /** Inline SVG for the sidebar entry row. */
+  icon: string
 }
 
 /** The taskboard panel: the full board app. */
@@ -48,6 +56,7 @@ const TASKBOARD_PANEL: PanelSpec = {
   viewAttr: 'data-dsh-taskboard-view',
   url: '/dsh-taskboard/',
   entryLabelKey: 'entry.label',
+  icon: ICON,
 }
 
 /** The automation panel: the global routines list page (standalone mode). */
@@ -59,6 +68,7 @@ const AUTOMATION_PANEL: PanelSpec = {
   viewAttr: 'data-dsh-automation-view',
   url: '/dsh-taskboard/?view=routines&host=dsh',
   entryLabelKey: 'entry.automation',
+  icon: AUTOMATION_ICON,
 }
 
 /** All panels owned by this plugin, in sidebar order. */
@@ -85,11 +95,18 @@ function currentGuiTheme(): 'dark' | 'light' {
   return document.body.hasAttribute(GUI_THEME_ATTR) ? 'dark' : 'light'
 }
 
-/** Inline icon (matches the shell's 16px nav-icon look). */
-const ICON = `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="1.5"/><path d="M2 6.5h12M6.5 6.5v7"/></svg>`
-
 /** Theme-following styles, scoped by plugin data attributes (rides --dsw-* tokens). */
 function buildStyleText(): string {
+  // The center column is the positioning context for the absolute-mounted
+  // views. The linxin shell emitted `data-pane` attributes plus the official
+  // plugin's `position: relative` rule; with the family uninstalled (official
+  // shell), neither exists — anchor on the column class instead.
+  const anchorRules = `
+[data-pane='conversation'],
+[class*='centerCol'] {
+  position: relative;
+}
+`
   const viewRules = PANELS.map((panel) => `
 [${panel.viewAttr}] {
   position: absolute;
@@ -145,7 +162,7 @@ html[${panel.activeAttr}]:not([data-dsh-ssh-active]) [class*='centerCol'] > :not
   flex: none;
 }
 `)
-  return `${viewRules.join('')}${entryRules.join('')}`.trim()
+  return `${anchorRules}${viewRules.join('')}${entryRules.join('')}`.trim()
 }
 
 /** Inject the theme-following stylesheet once (plugin-owned tag). */
@@ -182,6 +199,7 @@ function createEntry(
   isOpen: () => boolean,
   label: () => string,
   entryAttr: string,
+  icon: string,
 ): { element: HTMLButtonElement; refreshLabel(): void } {
   const entry = document.createElement('button')
   entry.type = 'button'
@@ -192,7 +210,7 @@ function createEntry(
     labelSpan.textContent = label()
   }
   refreshLabel()
-  entry.innerHTML = `<span>${ICON}</span>`
+  entry.innerHTML = `<span>${icon}</span>`
   entry.appendChild(labelSpan)
   entry.addEventListener('click', () => toggle())
   refreshEntryState(entry, isOpen)
@@ -233,9 +251,10 @@ function mountSidebarEntry(
   isOpen: () => boolean,
   label: () => string,
   entryAttr: string,
+  icon: string,
 ): { dispose(): void; refreshLabel(): void } {
   ensureStyle()
-  const created = createEntry(toggle, isOpen, label, entryAttr)
+  const created = createEntry(toggle, isOpen, label, entryAttr, icon)
   const entry = created.element
   let root: HTMLElement | undefined
   const place = (): void => {
@@ -562,6 +581,7 @@ export function apply(ctx: {
       () => open.get(panel.name) === true,
       () => t(panel.entryLabelKey),
       panel.entryAttr,
+      panel.icon,
     ))
     const onLocaleChange = (): void => {
       t = ctx.locale.bind(NS)

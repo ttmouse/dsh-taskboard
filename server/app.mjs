@@ -1351,7 +1351,7 @@ export function resolveHost(value = process.env.CODEX_TASKBOARD_HOST ?? "0.0.0.0
   return host;
 }
 
-/** Latest run record per routine name, from the routines `runs/` directory. */
+/** Latest run record per routine name, from a routines `runs/` directory. */
 async function readRoutineRuns(runsDirectory) {
   const byRoutine = new Map();
   let files;
@@ -1376,6 +1376,13 @@ async function readRoutineRuns(runsDirectory) {
   return byRoutine;
 }
 
+/** Latest run record for one routine from its cwd-local runs dir, or null. */
+async function latestRoutineRun(cwd, name) {
+  if (typeof cwd !== "string" || cwd === "") return null;
+  const byName = await readRoutineRuns(path.join(cwd, ".dsh", "routines", "runs"));
+  return byName.get(name) ?? null;
+}
+
 /** List routines: parsed YAML fields plus the latest run record per routine. */
 async function listRoutines(routinesDirectory) {
   if (!routinesDirectory) return { routinesDirectory: null, routines: [] };
@@ -1394,7 +1401,10 @@ async function listRoutines(routinesDirectory) {
       const text = await readFile(path.join(routinesDirectory, file), "utf8");
       const parsed = parseRoutineYaml(text);
       if (!parsed.name) continue;
-      const run = runs.get(parsed.name) ?? null;
+      // dsh-routines writes run records under <routine cwd>/.dsh/routines/runs
+      // (per-project), so fall back there for project-scoped routines.
+      const run = runs.get(parsed.name)
+        ?? await latestRoutineRun(parsed.cwd, parsed.name);
       const { raw, unknownKeys, ...fields } = parsed;
       routines.push({
         ...fields,
