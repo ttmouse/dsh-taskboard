@@ -56,6 +56,24 @@ dsh web
 
 两种方式装完都需重启 `dsh web`。
 
+## 权限与数据
+
+插件运行在 DSH 宿主进程内，访问以下本地资源：
+
+| 资源 | 用途 |
+| --- | --- |
+| `~/.dsh/storages/dsh-taskboard/` | SQLite 数据库、附件、配置（可经 `dataDirectory` 重定向） |
+| `~/.dsh/routines/taskboard-claim-*.yaml` | 认领例程开关文件（由看板 DB 开关驱动，恒 `paused: true`） |
+| 回环端口 `47825` | 内部 HTTP API（认领 prompt / skill 写死的基址，可经 `port` 修改） |
+| DSH 工作区注册表 / 会话 API | 工作区 → 项目同步、「在对话中打开」驱动 DSH 会话执行 |
+
+不上传任何数据到外部网络；所有 API 仅监听 `127.0.0.1`。
+
+## 关闭与卸载
+
+- **临时关闭**：设置 `enabled: false`（cordis.yml 或插件设置），或关闭「自动化」面板中的项目认领开关。
+- **卸载**：`dsh plugin --profile web remove @ttmouse/dsh-taskboard`（link 安装则 remove 对应 link 包名），然后删除 `~/.dsh/storages/dsh-taskboard/`（连同数据）并重启 `dsh web`。
+
 ## 配置（cordis.yml / 设置）
 
 | 键 | 默认 | 说明 |

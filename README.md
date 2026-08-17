@@ -16,6 +16,16 @@ dsh plugin --profile web add @ttmouse/dsh-taskboard
 
 详见 [`plugin/README.md`](plugin/README.md)。
 
+## 衍生与致谢（Derivation & Credits）
+
+本项目是开源衍生项目，代码谱系如下：
+
+1. **[Codex Taskboard](https://github.com/chuspeeism/dashi-taskboard)**（`chuspeeism/dashi-taskboard`，Apache-2.0）——原作者以浏览器内嵌方式把任务看板挂进 Codex 桌面应用（CDP 启动器 + 注入脚本），本仓库的 Web UI / server / 数据模型即源自于此。
+2. **[reasonix-taskboard](https://github.com/ttmouse/reasonix-taskboard)**（MIT）——fork 自 Codex Taskboard，改造为 Reasonix/DSH 环境的独立服务。
+3. **本仓库 `dsh-taskboard`**（MIT）——在 reasonix-taskboard 基础上插件化：host 半以 cordis 插件形式在 DSH 宿主进程内拉起 SQLite server，client 半把完整看板挂进 DSH Web GUI 中间列；新增认领例程（dsh-routines 驱动）、任务-会话链接等 DSH 原生能力。
+
+上游原始代码以 Apache-2.0 授权（详见 [LICENSE](LICENSE) 中的致谢说明），改动与新增部分以 MIT 授权。
+
 ## Requirements
 
 - Node.js 22.5 or newer

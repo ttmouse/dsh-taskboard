@@ -24,6 +24,23 @@
   "engines": {
     "node": ">=22.5"
   },
+  "main": "plugin/lib/index.mjs",
+  "exports": {
+    ".": "./plugin/lib/index.mjs",
+    "./client": "./plugin/lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./plugin/cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime"
+      ],
+      "platform": "web"
+    }
+  },
   "scripts": {
     "dev:server": "node --watch server/index.mjs --dev",
     "dev:web": "vite --config web/vite.config.ts",
