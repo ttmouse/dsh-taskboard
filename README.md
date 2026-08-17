@@ -6,6 +6,16 @@ A local-first issue board that runs in a browser and can be embedded in Codex th
 
 ![Codex Taskboard product screenshot](docs/assets/codex-taskboard.png)
 
+## DSH 插件（推荐）
+
+本仓库同时是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（`dsh`）插件 [`@ttmouse/dsh-taskboard`](https://www.npmjs.com/package/@ttmouse/dsh-taskboard) 的源码：把完整任务看板（看板/列表/Gantt/工作流/仪表盘/AI 对话）挂进 DSH Web GUI，数据存本地 SQLite（`~/.dsh/storages/dsh-taskboard/taskboard.sqlite`）。
+
+```sh
+dsh plugin --profile web add @ttmouse/dsh-taskboard
+```
+
+详见 [`plugin/README.md`](plugin/README.md)。
+
 ## Requirements
 
 - Node.js 22.5 or newer

@@ -3,6 +3,24 @@
   "version": "0.1.0",
   "description": "Local-first issue board for DSH — standalone plugin version, forked from reasonix-taskboard (dashi-taskboard).",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ttmouse/dsh-taskboard.git"
+  },
+  "homepage": "https://github.com/ttmouse/dsh-taskboard",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek",
+    "deepseek-harness",
+    "taskboard",
+    "kanban",
+    "issue-tracker",
+    "project-management",
+    "cordis",
+    "sqlite",
+    "ai-agent"
+  ],
   "engines": {
     "node": ">=22.5"
   },

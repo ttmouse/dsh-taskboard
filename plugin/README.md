@@ -33,7 +33,15 @@ npm run build
 cd plugin && npm install && npm run build
 ```
 
-## 安装（本地 profile）
+## 安装
+
+### 方式一：npm 发布版（推荐）
+
+```sh
+dsh plugin --profile web add @ttmouse/dsh-taskboard
+```
+
+### 方式二：本地 link（开发）
 
 ```sh
 # 1) 加入 profile 依赖（link 形式）
@@ -45,6 +53,8 @@ dsh plugin --profile web add link:/Users/douba/Projects/dsh-taskboard/plugin
 # 3) 重启 dsh web
 dsh web
 ```
+
+两种方式装完都需重启 `dsh web`。
 
 ## 配置（cordis.yml / 设置）
 
