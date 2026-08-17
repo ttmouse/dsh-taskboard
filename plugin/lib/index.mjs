@@ -22,7 +22,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import z from 'schemastery'
 import { createTaskboardServer } from '../vendor/server/app.mjs'
-import { buildClaimPrompt, reconcileClaimRoutine } from './claim-routines.mjs'
+import { buildClaimPrompt, cleanupStaleClaimRoutines, reconcileClaimRoutine } from './claim-routines.mjs'
 import { activeClaimSessions, executeClaimInProcess, stopClaimSession } from './claim-executor.mjs'
 
 /** Plugin root: the directory holding lib/ (package.json sits one level up). */
@@ -380,9 +380,10 @@ async function reindexWorkspaceSessions(ctx, log) {
 }
 
 /**
- * Reconcile claim routines for every board project: automation switch state
- * mirrors into $DSH_HOME/routines/taskboard-claim-*.yaml, which the ops
- * profile's routines-scheduler executes on cron.
+ * Reconcile claim routines for every board project. Claim routines are
+ * virtual: the YAML always exists for workspace-mapped projects (card stays
+ * on the automation page), and the automation switch in the board DB — shown
+ * on the routines page as the card's on/off state — is the only control.
  * @param baseUrl - internal taskboard loopback base URL.
  * @param log - logger callback.
  * @returns summary string.
@@ -405,7 +406,8 @@ async function reconcileAllRoutines(baseUrl, log) {
     if (result === 'written') written++
     else if (result === 'removed') removed++
   }
-  return `claim routines: ${written} written, ${removed} removed (${projects.length} projects)`
+  const cleaned = await cleanupStaleClaimRoutines(projects.map((p) => p.id), log)
+  return `claim routines: ${written} written, ${removed} removed, ${cleaned} stale cleaned (${projects.length} projects)`
 }
 
 /**
@@ -445,14 +447,26 @@ export function apply(ctx, config) {
         routinesRunHandler: async (name) => {
           // Claim routines execute in-process (visible/interactive GUI session);
           // everything else falls back to the external ops runner.
-          const projectId = name.startsWith('taskboard-claim-') ? (await resolveClaimProject(name)) : null
-          if (projectId) return runInProcessClaim(projectId)
+          const project = name.startsWith('taskboard-claim-')
+            ? (await resolveClaimProject(name, baseUrl))
+            : null
+          if (project) {
+            return runInProcessClaim(ctx, project, baseUrl, (message) =>
+              ctx.logger.info(`dsh-taskboard: ${message}`),
+            )
+          }
           return false
         },
         routinesStopHandler: async (name) => {
-          const sessionId = name.startsWith('claim-') ? name : null
-          if (sessionId) return stopClaimSession(sessionId, (message) => ctx.logger.info(`dsh-taskboard: ${message}`))
-          return false
+          // The stop button passes the routine name (taskboard-claim-<prefix>),
+          // not the claim session id — map it to the live session for that
+          // project before stopping.
+          if (!name.startsWith('taskboard-claim-')) return false
+          const project = await resolveClaimProject(name, baseUrl)
+          if (!project) return false
+          const active = activeClaimSessions().find((entry) => entry.projectId === project.id)
+          if (!active) return false
+          return stopClaimSession(active.sessionId, (message) => ctx.logger.info(`dsh-taskboard: ${message}`))
         },
       })
       const address = await app.listen({ host: '127.0.0.1', port: config.port })

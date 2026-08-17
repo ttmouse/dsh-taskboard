@@ -1383,8 +1383,14 @@ async function latestRoutineRun(cwd, name) {
   return byName.get(name) ?? null;
 }
 
-/** List routines: parsed YAML fields plus the latest run record per routine. */
-async function listRoutines(routinesDirectory) {
+/**
+ * List routines: parsed YAML fields plus the latest run record per routine.
+ * Claim routines are virtual — their on/off state lives in the board DB, so
+ * `paused` is reported as the inverse of the claim automation switch (the
+ * YAML itself is always paused so the external ops runner skips it).
+ * @param claimSwitch - optional (routineName) => automation.enabled lookup.
+ */
+async function listRoutines(routinesDirectory, claimSwitch) {
   if (!routinesDirectory) return { routinesDirectory: null, routines: [] };
   let files;
   try {
@@ -1406,7 +1412,7 @@ async function listRoutines(routinesDirectory) {
       const run = runs.get(parsed.name)
         ?? await latestRoutineRun(parsed.cwd, parsed.name);
       const { raw, unknownKeys, ...fields } = parsed;
-      routines.push({
+      const entry = {
         ...fields,
         nextRunAt: computeNextRun(parsed.schedule, now),
         lastRun: run ? {
@@ -1421,7 +1427,12 @@ async function listRoutines(routinesDirectory) {
         } : null,
         raw,
         unknownKeys,
-      });
+      };
+      if (claimSwitch) {
+        const claimEnabled = claimSwitch(parsed.name);
+        if (claimEnabled !== undefined) entry.paused = !claimEnabled;
+      }
+      routines.push(entry);
     } catch {
       // Skip unparsable routine files.
     }
@@ -1457,6 +1468,32 @@ function parseRoutineName(value) {
     throw new ApiError(400, "INVALID_FIELD", "'name' must be a lowercase slug of letters, numbers, hyphens, or underscores");
   }
   return name;
+}
+
+/** Reserved stem of claim-routine names (taskboard-claim-<projectId prefix>). */
+const CLAIM_ROUTINE_PREFIX = "taskboard-claim-";
+
+/** Resolve a claim-routine name to its project record, or null. */
+function claimProjectByName(database, name) {
+  if (!name.startsWith(CLAIM_ROUTINE_PREFIX)) return null;
+  const prefix = name.slice(CLAIM_ROUTINE_PREFIX.length);
+  return database.listProjects().find((p) => p.id.startsWith(prefix)) ?? null;
+}
+
+/**
+ * The claim automation switch state for a routine name, or undefined when the
+ * name is not a claim routine (or its project is gone). Claim routines are
+ * virtual: the YAML is always paused (external runner skips it) and the
+ * switch lives in the board DB, so the routines page must read it from here.
+ */
+function claimAutomationEnabled(database, name) {
+  const project = claimProjectByName(database, name);
+  if (!project) return undefined;
+  try {
+    return database.getProjectAutomation(project.id).enabled;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Parse a deliver list (strings like "file" / "chatnode"). */
@@ -1939,7 +1976,10 @@ export function createTaskboardServer(options = {}) {
           if ([...url.searchParams.keys()].length > 0) {
             throw new ApiError(400, "UNKNOWN_QUERY_PARAMETER", "GET /api/routines does not accept query parameters");
           }
-          return sendJson(response, 200, await listRoutines(resolved.routinesDirectory));
+          return sendJson(response, 200, await listRoutines(
+            resolved.routinesDirectory,
+            (name) => claimAutomationEnabled(database, name),
+          ));
         }
         if (request.method === "POST") {
           if (!resolved.routinesDirectory) {
@@ -1952,6 +1992,9 @@ export function createTaskboardServer(options = {}) {
             "overlap", "timeoutMin", "deliver",
           ]));
           const name = parseRoutineName(body.name);
+          if (name.startsWith(CLAIM_ROUTINE_PREFIX)) {
+            throw new ApiError(409, "RESERVED_NAME", "Routine names starting with 'taskboard-claim-' are reserved for claim automations");
+          }
           const routine = {
             name,
             schedule: stringField(body.schedule, "schedule", { required: true, maxLength: 128 }),
@@ -2003,9 +2046,27 @@ export function createTaskboardServer(options = {}) {
       if (routineByNameRoute && resolved.routinesDirectory) {
         const name = parseRoutineName(decodeURIComponent(routineByNameRoute[1]));
         const file = path.join(resolved.routinesDirectory, `${name}.yaml`);
+        const claimProject = claimProjectByName(database, name);
         if (request.method === "PUT") {
           const body = await readJson(request);
           assertPlainObject(body);
+          if (claimProject) {
+            // Virtual routine: its on/off switch IS the claim automation
+            // switch. A direct YAML write would be reverted by the next
+            // reconcile (and paused:false would let the external ops runner
+            // double-execute the claim), so translate the toggle into the
+            // project automation record.
+            if (typeof body.raw === "string") {
+              throw new ApiError(409, "CLAIM_ROUTINE_READONLY",
+                "Claim routines are controlled by the project's claim switch; use the automation menu instead");
+            }
+            assertAllowedKeys(body, new Set(["paused"]));
+            const current = database.getProjectAutomation(claimProject.id);
+            const enabled = body.paused === undefined ? !current.enabled : !Boolean(body.paused);
+            const automation = database.setProjectAutomation(claimProject.id, { enabled });
+            events.emit("project.automation", { projectId: claimProject.id, automation });
+            return sendJson(response, 200, { updated: name });
+          }
           if (typeof body.raw === "string") {
             // Full-text edit: preserve whatever the user wrote.
             await writeFile(file, body.raw, "utf8");
@@ -2036,6 +2097,10 @@ export function createTaskboardServer(options = {}) {
           return sendJson(response, 200, { updated: name });
         }
         if (request.method === "DELETE") {
+          if (claimProject) {
+            throw new ApiError(409, "CLAIM_ROUTINE_READONLY",
+              "Claim routines are managed by the board's claim switch; turn the switch off instead");
+          }
           try {
             await unlink(file);
           } catch (error) {

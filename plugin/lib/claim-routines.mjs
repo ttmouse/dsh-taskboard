@@ -2,12 +2,17 @@
  * dsh-taskboard — claim routines manager (host half).
  *
  * Auto-claim is implemented with dsh-routines (the third-party cron bundle
- * installed in the ops profile) instead of a long-running job: the automation
- * switch writes/removes a routine YAML under $DSH_HOME/routines, and the ops
- * profile's routines-scheduler ticks every 30s and runs due routines as
- * headless one-shot sessions. No heartbeat files, no taskctl, no daemon loop.
+ * installed in the ops profile): each workspace-mapped project owns a virtual
+ * claim routine YAML under $DSH_HOME/routines. The routine file is *always*
+ * present (the card in the automation panel stays visible), and the board's
+ * automation switch — stored in the taskboard DB, toggled from the project
+ * automation menu or from the routines page itself — is the only on/off
+ * control. The YAML is always written with `paused: true` so the external
+ * ops scheduler skips it: execution happens in-process, gated on the switch
+ * by the board's claim scheduler, so the GUI streams the session. No
+ * heartbeat files, no taskctl, no daemon loop.
  */
-import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, unlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { serializeRoutine } from '../vendor/shared/routines-yaml.mjs'
@@ -67,19 +72,21 @@ export function buildRoutineYaml(project, automation, apiBase, paused = false) {
 }
 
 /**
- * Reconcile one project's claim routine: enabled + workspacePath -> write,
- * otherwise remove. The automation menu is the only writer of these files.
- * A user-set `paused` flag on the existing file is preserved across rewrites
- * (the automation page toggles it).
+ * Reconcile one project's claim routine. Claim routines are virtual: the file
+ * is always written for projects mapped to a workspace, regardless of the
+ * automation switch — the switch lives in the board DB and the routines page
+ * reports it via /api/routines (paused == "switch off"). The YAML is always
+ * paused so the external ops runner skips it; the in-process scheduler gates
+ * on automation.enabled. Only a project without a workspace path gets its
+ * file removed (nothing to claim in-process).
  * @returns 'written' | 'removed' | 'unchanged'.
  */
 export async function reconcileClaimRoutine(project, automation, apiBase, log) {
   const file = routineFileFor(project.id)
-  const enabled = automation.enabled && Boolean(project.workspacePath)
-  if (!enabled) {
+  if (!project.workspacePath) {
     try {
       await unlink(file)
-      log(`routine ${routineNameFor(project.id)}: removed`)
+      log(`routine ${routineNameFor(project.id)}: removed (no workspace path)`)
       return 'removed'
     } catch (error) {
       if (error.code !== 'ENOENT') log(`routine remove failed: ${String(error)}`)
@@ -89,6 +96,7 @@ export async function reconcileClaimRoutine(project, automation, apiBase, log) {
   const currentText = await readFile(file, 'utf8').catch(() => '')
   // Claim routines are always marked paused: the external ops runner must
   // skip them — execution happens in-process so the GUI streams the session.
+  // The on/off switch state lives in the automation record, not in this file.
   const next = buildRoutineYaml(project, automation, apiBase, true)
   try {
     if (currentText === next) return 'unchanged'
@@ -100,4 +108,36 @@ export async function reconcileClaimRoutine(project, automation, apiBase, log) {
     log(`routine write failed: ${error instanceof Error ? error.message : String(error)}`)
     return 'unchanged'
   }
+}
+
+/**
+ * Remove claim-routine YAMLs whose project no longer exists. Since routine
+ * files are never deleted on switch-off, orphans would otherwise linger on
+ * the automation page forever. Called by the host after reconciling every
+ * current project.
+ * @param projectIds - full ids of all current projects.
+ * @returns number of stale files removed.
+ */
+export async function cleanupStaleClaimRoutines(projectIds, log) {
+  const valid = new Set(projectIds.map((id) => routineNameFor(id)))
+  let removed = 0
+  let files
+  try {
+    files = await readdir(routinesDir())
+  } catch {
+    return 0
+  }
+  for (const file of files) {
+    if (!file.startsWith('taskboard-claim-') || !file.endsWith('.yaml')) continue
+    const stem = file.slice(0, -'.yaml'.length)
+    if (valid.has(stem)) continue
+    try {
+      await unlink(path.join(routinesDir(), file))
+      removed++
+      log(`routine ${stem}: removed (project gone)`)
+    } catch (error) {
+      if (error.code !== 'ENOENT') log(`routine remove failed: ${String(error)}`)
+    }
+  }
+  return removed
 }

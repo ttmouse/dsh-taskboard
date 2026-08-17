@@ -9043,13 +9043,35 @@ kbd {
 
   .primary-nav,
   .project-nav,
-  .connection,
-  .nav-footer {
+  .connection {
     display: none;
   }
 
   .nav-spacer {
     display: block;
+  }
+
+  /* 窄屏：左侧栏只保留图标（品牌 + 主题切换），隐藏所有文字 */
+  .brand-row > span:last-child {
+    display: none;
+  }
+
+  .nav-footer {
+    display: flex;
+    align-items: center;
+    margin-left: auto;
+    padding: 0;
+    border-top: 0;
+  }
+
+  .theme-toggle {
+    width: auto;
+    margin-top: 0;
+    padding: 4px;
+  }
+
+  .theme-toggle-label {
+    display: none;
   }
 
 }

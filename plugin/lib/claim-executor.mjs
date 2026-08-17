@@ -101,10 +101,34 @@ export async function executeClaimInProcess({ ctx, project, model, prompt, log }
     sessionId,
   }).catch(() => null)
 
+  // Resolve the agent preset BEFORE the session exists (the session header
+  // snapshots `meta`, so a preset discovered during setup could never reach
+  // it), then mount it in the setup callback — mirroring dsh-host-apiproxy's
+  // composeAgent(). Without the mount the claim session's tools resolve
+  // against the empty global layer (browser-bridge tools only), so the
+  // manage-taskboard skill's bash+curl workflow has no bash to run.
+  let claimPreset = null
+  try {
+    const presets = ctx.get('agentPresets')
+    if (presets !== undefined) claimPreset = await presets.resolve('standard')
+  } catch (error) {
+    log(`[claim] ${project.id}: preset resolve failed, falling back to unmounted agent: ${error instanceof Error ? error.message : String(error)}`)
+  }
+
   try {
     handle = await ctx.agents.create({
       sessionId,
-      meta: { cwd: project.workspacePath, agentPreset: 'standard' },
+      meta: {
+        cwd: project.workspacePath,
+        ...(claimPreset !== null ? { agentPreset: claimPreset.id } : {}),
+      },
+      ...(claimPreset !== null
+        ? {
+            setup: async (agentCtx) => {
+              await ctx.get('agentPresets').mount(agentCtx, claimPreset.id)
+            },
+          }
+        : {}),
       agentOptions: resolveAgentOptions(ctx, model, log),
     })
   } catch (error) {
@@ -125,7 +149,13 @@ export async function executeClaimInProcess({ ctx, project, model, prompt, log }
 
   ACTIVE.set(sessionId, { handle, projectId: project.id, startedAt })
   try {
+    // The prompt message MUST carry a stable id: dsh-session persists
+    // user/message events with the message verbatim and validates on load
+    // that every message event has an identified message (`Message.id` is
+    // required). Omitting it writes a session that later fails history
+    // replay with "session event at seq N lacks an identified message".
     handle.agent.followup({
+      id: randomUUID(),
       role: 'user',
       content: [{ type: 'text', text: prompt }],
       source: { kind: 'user' },

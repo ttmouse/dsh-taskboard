@@ -161,6 +161,20 @@ html[${panel.activeAttr}]:not([data-dsh-ssh-active]) [class*='centerCol'] > :not
   justify-content: center;
   flex: none;
 }
+[${panel.entryAttr}][data-icon-only] {
+  gap: 0;
+  justify-content: center;
+  padding: 0;
+  height: 36px;
+  margin-bottom: 12px;
+}
+[${panel.entryAttr}][data-icon-only] > span:last-child {
+  display: none;
+}
+[${panel.entryAttr}][data-icon-only] svg {
+  width: 18px;
+  height: 18px;
+}
 `)
   return `${anchorRules}${viewRules.join('')}${entryRules.join('')}`.trim()
 }
@@ -200,13 +214,14 @@ function createEntry(
   label: () => string,
   entryAttr: string,
   icon: string,
-): { element: HTMLButtonElement; refreshLabel(): void } {
+): { element: HTMLButtonElement; refreshLabel(): void; refreshCollapsed(collapsed: boolean): void } {
   const entry = document.createElement('button')
   entry.type = 'button'
   entry.setAttribute(entryAttr, '')
   const labelSpan = document.createElement('span')
   const refreshLabel = (): void => {
     entry.setAttribute('aria-label', label())
+    entry.title = label()
     labelSpan.textContent = label()
   }
   refreshLabel()
@@ -214,7 +229,22 @@ function createEntry(
   entry.appendChild(labelSpan)
   entry.addEventListener('click', () => toggle())
   refreshEntryState(entry, isOpen)
-  return { element: entry, refreshLabel }
+  const refreshCollapsed = (collapsed: boolean): void => {
+    // Folded sidebar: keep only the icon (the label row would overflow the
+    // narrow rail). The title/aria-label stay, so the entry is still
+    // discoverable by hover/AT in rail mode.
+    if (collapsed) entry.dataset.iconOnly = ''
+    else delete entry.dataset.iconOnly
+  }
+  return { element: entry, refreshLabel, refreshCollapsed }
+}
+
+/** True when the shell sidebar is folded to its narrow icon rail. */
+function sidebarIsCollapsed(root: HTMLElement): boolean {
+  // The official sidebar root carries a CSS-module class whose semantic name
+  // survives minification (e.g. `hHd-Xa_collapsed`); the hash prefix varies
+  // across builds, so match on the `collapsed` token only.
+  return Array.from(root.classList).some((name) => /collapsed/i.test(name))
 }
 
 /** Apply the entry row's active styling to match the current open state. */
@@ -257,11 +287,27 @@ function mountSidebarEntry(
   const created = createEntry(toggle, isOpen, label, entryAttr, icon)
   const entry = created.element
   let root: HTMLElement | undefined
+  let collapseObserver: MutationObserver | undefined
+
+  /** Sync the entry's icon-only state with the shell sidebar fold state. */
+  const syncCollapsed = (): void => {
+    created.refreshCollapsed(root !== undefined && sidebarIsCollapsed(root))
+  }
+
   const place = (): void => {
     const candidate = sidebarRoot()
     if (candidate === undefined || candidate === root) return
     root = candidate
-    if (!placeEntry(root, entry)) root = undefined
+    if (!placeEntry(root, entry)) {
+      root = undefined
+      return
+    }
+    // The shell sidebar toggles its collapsed class in place; watch it so the
+    // entry narrows to an icon exactly when the rail folds.
+    collapseObserver?.disconnect()
+    collapseObserver = new MutationObserver(syncCollapsed)
+    collapseObserver.observe(root, { attributes: true, attributeFilter: ['class'] })
+    syncCollapsed()
   }
   place()
   const observer = new MutationObserver(() => place())
@@ -269,6 +315,7 @@ function mountSidebarEntry(
   return {
     dispose: () => {
       observer.disconnect()
+      collapseObserver?.disconnect()
       entry.remove()
     },
     refreshLabel: created.refreshLabel,
@@ -364,6 +411,12 @@ function mountPanelView(spec: PanelSpec, frameRef: { current: HTMLIFrameElement 
 /** The taskboard app's execute command (iframe → shell), enabled by host=dsh. */
 const DSH_EXECUTE_MESSAGE = 'taskboard:dsh-execute'
 
+/** The taskboard app's open-conversation command (iframe → shell). */
+const OPEN_THREAD_MESSAGE = 'taskboard:open-thread'
+
+/** Deep link fallback when a session is outside the current workspace list. */
+const DSH_WEB_URL = 'http://127.0.0.1:3080'
+
 /** Taskboard route prefix proxied by the host half on the shared webserver. */
 const BOARD_API_PREFIX = '/dsh-taskboard'
 
@@ -388,6 +441,8 @@ interface SessionPromptFace {
 interface SessionsService {
   list: { getSnapshot(): { current?: string | null; ids: string[] } }
   binding(id: string): { session: SessionPromptFace } | undefined
+  /** Select a session as current (the same selection the sidebar click performs). */
+  open(id: string): void
 }
 interface WorkspacesService {
   create(input: { path: string }): Promise<{ id: string }>
@@ -521,6 +576,39 @@ function mountExecutionBridge(
 }
 
 /**
+ * Bridge for the app's open-conversation command: close every panel and focus
+ * the requested session in this GUI (same page, no new tab). Sessions outside
+ * the current workspace list are unknown to the service and fail loud — fall
+ * back to the standalone deep link rather than dropping the click silently.
+ * @param sessions - injected sessions service.
+ * @param frame - current board iframe (messages must come from it).
+ * @param closePanels - closes every board panel so the conversation shows.
+ */
+function mountOpenThreadBridge(
+  sessions: SessionsService,
+  frame: () => HTMLIFrameElement | undefined,
+  closePanels: () => void,
+): () => void {
+  const onMessage = (event: MessageEvent): void => {
+    const target = frame()
+    if (target === undefined || event.source !== target.contentWindow) return
+    const data = event.data as { type?: string; payload?: unknown }
+    if (data.type !== OPEN_THREAD_MESSAGE) return
+    const threadId = (data.payload as { threadId?: unknown } | undefined)?.threadId
+    if (typeof threadId !== 'string' || threadId === '') return
+    closePanels()
+    try {
+      sessions.open(threadId)
+    } catch {
+      window.open(`${DSH_WEB_URL}/?session=${encodeURIComponent(threadId)}`, '_blank', 'noopener,noreferrer')
+    }
+  }
+
+  window.addEventListener('message', onMessage)
+  return () => window.removeEventListener('message', onMessage)
+}
+
+/**
  * Mount the taskboard shell (sidebar entry, board view, execution bridge,
  * locale dictionaries, and the settings card).
  * @param ctx - client root context with sessions/workspaces/locale/slots.
@@ -627,6 +715,14 @@ export function apply(ctx: {
     () => frameRefs.get(TASKBOARD_PANEL.name)?.current,
     (key, params) => t(key, params),
   ), 'dsh-taskboard: dsh execution bridge')
+
+  ctx.effect(() => mountOpenThreadBridge(
+    ctx.sessions,
+    () => frameRefs.get(TASKBOARD_PANEL.name)?.current,
+    () => {
+      for (const panel of PANELS) setOpen(panel, false)
+    },
+  ), 'dsh-taskboard: open-thread bridge')
 
   // Settings card: fill the plugin item hole in the settings panel.
   ctx.effect(() => {

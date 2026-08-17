@@ -1923,6 +1923,16 @@ export function App() {
     // headless 会话 id 与线程 id 一致（runner 每次运行生成 dsh-<uuid> 并注入
     // DSH_SESSION_ID），因此用 ?session= 深链直达该次执行的真实会话。
     if (isDshThreadId(trimmed)) {
+      // 宿主（codex/dsh）内嵌时交给宿主在当前页面内切换会话，不新开页面；
+      // 独立模式回退到 dsh 深链新标签。
+      if (hostMessaging && window.parent !== window) {
+        window.parent.postMessage({
+          type: "taskboard:open-thread",
+          payload: { threadId: trimmed },
+        }, "*");
+        setAnnouncement(`已切换到 DeepSeek Harness 会话 ${trimmed}。`);
+        return;
+      }
       window.open(`${DSH_WEB_URL}/?session=${encodeURIComponent(trimmed)}`, "_blank", "noopener,noreferrer");
       setAnnouncement(`${trimmed} 由 DeepSeek Harness 执行，已打开对应会话。`);
       return;
@@ -1956,6 +1966,16 @@ export function App() {
     const threadId = task.threadId?.trim() ?? "";
     // dsh 心跳线程：直接打开该次执行的 dsh 会话，而不是在 Reasonix 新建对话。
     if (isDshThreadId(threadId)) {
+      // 宿主（codex/dsh）内嵌时交给宿主在当前页面内切换会话，不新开页面；
+      // 独立模式回退到 dsh 深链新标签。
+      if (hostMessaging && window.parent !== window) {
+        window.parent.postMessage({
+          type: "taskboard:open-thread",
+          payload: { threadId },
+        }, "*");
+        setAnnouncement(`已切换到 DeepSeek Harness 会话 ${threadId}。`);
+        return;
+      }
       window.open(`${DSH_WEB_URL}/?session=${encodeURIComponent(threadId)}`, "_blank", "noopener,noreferrer");
       setAnnouncement(`已打开 DeepSeek Harness 会话 ${threadId}。`);
       return;
@@ -2156,7 +2176,7 @@ export function App() {
               aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
             >
               <span aria-hidden="true"><LinearIcon name={theme === "dark" ? "sun" : "moon"} /></span>
-              {theme === "dark" ? "浅色模式" : "深色模式"}
+              <span className="theme-toggle-label">{theme === "dark" ? "浅色模式" : "深色模式"}</span>
             </button>
           </div>
         </aside>

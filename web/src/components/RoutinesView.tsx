@@ -281,7 +281,9 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
                 </div>
                 <div className="routine-row">
                   <span className="routine-row-label">{text("下次运行", "Next run")}</span>
-                  <span className="routine-row-value">{formatTime(routine.nextRunAt)}</span>
+                  <span className="routine-row-value">
+                    {routine.paused ? text("已关闭", "Off") : formatTime(routine.nextRunAt)}
+                  </span>
                 </div>
                 {routine.lastRun?.digest && <p className="routine-digest">{routine.lastRun.digest}</p>}
                 {routine.lastRun?.error && (
@@ -292,11 +294,20 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
                   </p>
                 )}
                 <div className="routine-switch-row">
-                  <span>{routine.paused ? text("已暂停", "Paused") : text("启用中", "Enabled")}</span>
+                  <span>
+                    {isClaimRoutine(routine.name)
+                      ? (routine.paused
+                        ? text("认领已关闭", "Claim off")
+                        : text("认领已开启", "Claim on"))
+                      : (routine.paused ? text("已暂停", "Paused") : text("启用中", "Enabled"))}
+                  </span>
                   <button
                     type="button"
                     role="switch"
                     aria-checked={!routine.paused}
+                    aria-label={isClaimRoutine(routine.name)
+                      ? text("自动认领开关", "Auto-claim switch")
+                      : text("启用开关", "Enable switch")}
                     className={`routine-switch${routine.paused ? "" : " is-on"}`}
                     onClick={() => void togglePaused(routine)}
                   >
@@ -327,12 +338,16 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
                       {text("停止", "Stop")}
                     </button>
                   )}
-                  <button type="button" onClick={() => { setEditing(routine); setRawEdit(routine.raw ?? ""); setError(null); }}>
-                    {text("编辑", "Edit")}
-                  </button>
-                  <button type="button" className="is-danger" onClick={() => setConfirmDelete(routine.name)}>
-                    {text("删除", "Delete")}
-                  </button>
+                  {!isClaimRoutine(routine.name) && (
+                    <>
+                      <button type="button" onClick={() => { setEditing(routine); setRawEdit(routine.raw ?? ""); setError(null); }}>
+                        {text("编辑", "Edit")}
+                      </button>
+                      <button type="button" className="is-danger" onClick={() => setConfirmDelete(routine.name)}>
+                        {text("删除", "Delete")}
+                      </button>
+                    </>
+                  )}
                 </div>
               </article>
             );
