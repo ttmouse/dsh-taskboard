@@ -352,15 +352,24 @@ export async function createRoutine(input: RoutineCreateInput): Promise<{ name: 
   return data.routine;
 }
 
-/** 更新例程：传 raw（全文）或结构化字段。 */
+/** 更新例程：传 raw（全文）或结构化字段（含 paused 开关）。 */
 export async function updateRoutine(
   name: string,
-  input: { raw: string } | Partial<Omit<RoutineCreateInput, "name">>,
+  input: { raw: string } | (Partial<Omit<RoutineCreateInput, "name">> & { paused?: boolean }),
 ): Promise<{ updated: string }> {
   return request(`/api/routines/${encodeURIComponent(name)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
+  });
+}
+
+/** 测试执行：立即手动触发一次该例程（不等待完成，运行记录稍后出现在列表中）。 */
+export async function runRoutine(name: string): Promise<{ started: string }> {
+  return request(`/api/routines/${encodeURIComponent(name)}/run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
   });
 }
 

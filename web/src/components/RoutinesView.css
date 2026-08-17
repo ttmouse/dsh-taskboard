@@ -43,6 +43,37 @@
   cursor: pointer;
 }
 
+.routines-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.routines-tab {
+  padding: 4px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.routines-tab:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.routines-tab.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+
 .routines-refresh:hover {
   background: var(--surface-hover);
 }
@@ -222,7 +253,14 @@
 .routine-actions { display: flex; gap: 8px; margin-top: 8px; }
 .routine-actions button { padding: 4px 10px; border-radius: 6px; border: 1px solid var(--dsw-alias-border-strong, #8883); background: transparent; color: inherit; cursor: pointer; font-size: 12px; }
 .routine-actions button:hover { background: var(--dsw-alias-bg-hover, #8882); }
+.routine-actions button:disabled { opacity: 0.55; cursor: default; }
 .routine-actions button.is-danger { color: #e5534b; border-color: #e5534b66; }
+.routine-actions button.is-primary { background: #4f8cff; border-color: #4f8cff; color: #fff; }
+.routine-switch-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--text-secondary, var(--dsw-alias-label-secondary, #aaa)); }
+.routine-switch { position: relative; flex: none; width: 34px; height: 20px; padding: 0; border-radius: 999px; border: 1px solid var(--border-strong, var(--dsw-alias-border-strong, #8883)); background: var(--surface-muted, #8882); cursor: pointer; transition: background 0.12s, border-color 0.12s; }
+.routine-switch > span { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: left 0.12s; }
+.routine-switch.is-on { background: #4f8cff; border-color: #4f8cff; }
+.routine-switch.is-on > span { left: 16px; }
 .routine-badge { font-size: 11px; padding: 1px 6px; border-radius: 8px; background: #4f8cff22; color: #4f8cff; margin-left: 6px; }
 .routines-modal { position: fixed; inset: 0; background: #000a; display: flex; align-items: center; justify-content: center; z-index: 1000; }
 .routines-modal-box { background: var(--dsw-alias-bg-base, #1c1c1e); border: 1px solid var(--dsw-alias-border-strong, #8883); border-radius: 12px; padding: 20px; width: min(560px, 92vw); max-height: 86vh; overflow: auto; display: flex; flex-direction: column; gap: 10px; }

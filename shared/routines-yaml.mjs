@@ -81,11 +81,16 @@ function normalizeScalar(value) {
   return text
 }
 
-/** Quote a scalar when it needs YAML quoting (colons, leading digits, etc.). */
+/**
+ * Quote a scalar when it needs YAML quoting. Plain scalars must not start
+ * with an indicator char (`*` `&` `!` `|` `>` `%` `@` backtick), contain `:`
+ * or ` #`, or carry spaces — cron strings like `*\/10 * * * *` start with `*`
+ * and would otherwise parse as an alias.
+ */
 function yamlScalar(value) {
   const text = String(value)
   if (text === '') return '""'
-  if (/^["'\-?:\s]|[#:]\s|:\s|^[\d.]+$/.test(text) || text.includes(' #')) {
+  if (!/^[A-Za-z0-9_][A-Za-z0-9_.\-/]*$/.test(text) || /[\s:#]/.test(text)) {
     return `"${text.replaceAll('"', '\\"')}"`
   }
   return text
@@ -101,6 +106,7 @@ export function serializeRoutine(routine) {
   if (routine.name !== undefined) lines.push(`name: ${yamlScalar(routine.name)}`)
   if (routine.schedule !== undefined) lines.push(`schedule: ${yamlScalar(routine.schedule)}`)
   if (routine.timezone !== undefined && routine.timezone !== '') lines.push(`timezone: ${yamlScalar(routine.timezone)}`)
+  if (routine.paused !== undefined) lines.push(`paused: ${routine.paused ? 'true' : 'false'}`)
   if (routine.prompt !== undefined) {
     lines.push('prompt: |')
     for (const line of String(routine.prompt).split('\n')) lines.push(`  ${line}`)

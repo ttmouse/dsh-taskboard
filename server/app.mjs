@@ -1420,6 +1420,26 @@ async function listRoutines(routinesDirectory) {
   return { routinesDirectory, routines };
 }
 
+/**
+ * Fire-and-forget manual run: the ops-profile `dsh routines run` CLI executes
+ * the routine as a one-shot (its own scheduler instance only launches this
+ * run, never ticks), so the board's 「测试执行」 stays non-blocking. The run
+ * record lands in the routines runs/ directory.
+ * @param name - the routine name to run now.
+ */
+function spawnRoutineRun(name) {
+  try {
+    const child = spawn("dsh", ["--profile", "ops", "routines", "run", name], {
+      detached: true,
+      stdio: "ignore",
+      env: process.env,
+    });
+    child.unref();
+  } catch {
+    // Spawn failures surface via the missing run record; never break the API.
+  }
+}
+
 /** Validate a routine name (safe filename stem). */
 function parseRoutineName(value) {
   const name = stringField(value, "name", { required: true, maxLength: 64 });
@@ -1961,7 +1981,7 @@ export function createTaskboardServer(options = {}) {
           }
           assertAllowedKeys(body, new Set([
             "schedule", "timezone", "prompt", "cwd", "profile",
-            "overlap", "timeoutMin", "deliver",
+            "overlap", "timeoutMin", "deliver", "paused",
           ]));
           const current = parseRoutineYaml(await readFile(file, "utf8").catch(() => ""));
           const routine = {
@@ -1978,6 +1998,7 @@ export function createTaskboardServer(options = {}) {
             deliver: body.deliver === undefined
               ? (Array.isArray(current.deliver) ? current.deliver : ["file"])
               : parseDeliverList(body.deliver),
+            paused: body.paused === undefined ? Boolean(current.paused) : Boolean(body.paused),
           };
           await writeFile(file, serializeRoutine(routine), "utf8");
           return sendJson(response, 200, { updated: name });
@@ -1994,6 +2015,21 @@ export function createTaskboardServer(options = {}) {
           return sendJson(response, 200, { deleted: name });
         }
         return methodNotAllowed(response, ["PUT", "DELETE"]);
+      }
+
+      // 测试执行：manual trigger through the ops-profile routines CLI,
+      // fire-and-forget — the run record lands in the runs/ directory.
+      const routineRunRoute = pathname.match(/^\/api\/routines\/([^/]+)\/run$/);
+      if (routineRunRoute && request.method === "POST") {
+        const name = parseRoutineName(decodeURIComponent(routineRunRoute[1]));
+        const file = path.join(resolved.routinesDirectory, `${name}.yaml`);
+        try {
+          await stat(file);
+        } catch {
+          throw new ApiError(404, "ROUTINE_NOT_FOUND", `Routine '${name}' does not exist`);
+        }
+        spawnRoutineRun(name);
+        return sendJson(response, 202, { started: name });
       }
 
       const claimRunRoute = pathname.match(/^\/api\/projects\/([^/]+)\/claim-run$/);

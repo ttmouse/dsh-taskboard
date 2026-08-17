@@ -5,10 +5,13 @@ import {
   createRoutine,
   deleteRoutine,
   getRoutines,
+  listProjects,
+  runRoutine,
   updateRoutine,
   type RoutineCreateInput,
   type RoutineInfo,
 } from "../api";
+import type { Project } from "../types";
 import { useTaskboardI18n } from "../i18n";
 
 /** 人类可读的 cron 描述；识别 dsh-routines 常用的步进模式。 */
@@ -67,6 +70,8 @@ interface RoutinesViewProps {
 export function RoutinesView({ onClose }: RoutinesViewProps) {
   const { text } = useTaskboardI18n();
   const [routines, setRoutines] = useState<RoutineInfo[] | null>(null);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [directory, setDirectory] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -75,15 +80,18 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
   const [editing, setEditing] = useState<RoutineInfo | null>(null);
   const [rawEdit, setRawEdit] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [runningName, setRunningName] = useState<string | null>(null);
+  const [ranName, setRanName] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const result = await getRoutines();
+      const [result, projectList] = await Promise.all([getRoutines(), listProjects()]);
       setRoutines(result.routines);
       setDirectory(result.routinesDirectory);
+      setProjects(projectList);
       setError(null);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : text("读取例程失败", "Failed to load routines"));
+      setError(loadError instanceof Error ? loadError.message : text("读取自动化失败", "Failed to load automations"));
     } finally {
       setLoading(false);
     }
@@ -127,7 +135,36 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
     }
   };
 
+  /** 开启/关闭：写 paused 字段，调度器热重载后即生效。 */
+  const togglePaused = async (routine: RoutineInfo) => {
+    try {
+      await updateRoutine(routine.name, { paused: !routine.paused });
+      await load();
+    } catch (toggleError) {
+      setError(toggleError instanceof Error ? toggleError.message : text("切换失败", "Toggle failed"));
+    }
+  };
+
+  /** 测试执行：手动触发一次，不等待完成。 */
+  const submitRun = async (name: string) => {
+    setRunningName(name);
+    setRanName(null);
+    try {
+      await runRoutine(name);
+      setRanName(name);
+    } catch (runError) {
+      setError(runError instanceof Error ? runError.message : text("触发失败", "Trigger failed"));
+    } finally {
+      setRunningName(null);
+    }
+  };
+
   const isClaimRoutine = (name: string) => name.startsWith("taskboard-claim-");
+
+  const activeProject = projects.find((project) => project.id === activeProjectId) ?? null;
+  const visibleRoutines: RoutineInfo[] = activeProject
+    ? (routines ?? []).filter((routine) => routine.cwd === activeProject.workspacePath)
+    : (routines ?? []);
 
   return (
     <div className="routines-view" aria-label={text("自动化", "Automation")}>
@@ -138,7 +175,7 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
         </div>
         <div className="routines-header-actions">
           <button type="button" className="routines-create" onClick={() => { setCreating(true); setError(null); }}>
-            {text("新建例程", "New routine")}
+            {text("新建自动化", "New automation")}
           </button>
           <button type="button" className="routines-refresh" onClick={() => void load()} disabled={loading}>
             {text("刷新", "Refresh")}
@@ -148,14 +185,43 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
           )}
         </div>
       </div>
+      {routines && projects.length > 0 && (
+        <div className="routines-tabs" role="tablist" aria-label={text("按项目筛选", "Filter by project")}>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeProjectId === null}
+            className={`routines-tab${activeProjectId === null ? " is-active" : ""}`}
+            onClick={() => setActiveProjectId(null)}
+          >
+            {text("全部", "All")}
+          </button>
+          {projects.filter((project) => project.workspacePath).map((project) => (
+            <button
+              key={project.id}
+              type="button"
+              role="tab"
+              aria-selected={activeProjectId === project.id}
+              className={`routines-tab${activeProjectId === project.id ? " is-active" : ""}`}
+              onClick={() => setActiveProjectId(project.id)}
+            >
+              {project.name}
+            </button>
+          ))}
+        </div>
+      )}
       {error && <p className="routines-error" role="alert">{error}</p>}
       {loading && routines === null ? (
-        <p className="routines-loading">{text("正在读取例程…", "Loading routines…")}</p>
+        <p className="routines-loading">{text("正在读取自动化…", "Loading automations…")}</p>
       ) : !routines || routines.length === 0 ? (
-        <p className="routines-empty">{text("暂无例程。在看板里开启某个项目的自动认领，或点「新建例程」添加。", "No routines yet.")}</p>
+        <p className="routines-empty">{text("暂无自动化。在看板里开启某个项目的自动认领，或点「新建自动化」添加。", "No automations yet.")}</p>
+      ) : visibleRoutines.length === 0 ? (
+        <p className="routines-empty">
+          {text("该项目暂无自动化任务。可在任务看板中开启自动认领。", "No automation tasks for this project.")}
+        </p>
       ) : (
         <div className="routines-grid">
-          {routines.map((routine) => {
+          {visibleRoutines.map((routine) => {
             const status = statusInfo(routine.lastRun?.status ?? null, text);
             return (
               <article className="routine-card" key={routine.name}>
@@ -188,6 +254,18 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
                 </div>
                 {routine.lastRun?.digest && <p className="routine-digest">{routine.lastRun.digest}</p>}
                 {routine.lastRun?.error && <p className="routine-error" title={routine.lastRun.error}>{routine.lastRun.error}</p>}
+                <div className="routine-switch-row">
+                  <span>{routine.paused ? text("已暂停", "Paused") : text("启用中", "Enabled")}</span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={!routine.paused}
+                    className={`routine-switch${routine.paused ? "" : " is-on"}`}
+                    onClick={() => void togglePaused(routine)}
+                  >
+                    <span aria-hidden="true" />
+                  </button>
+                </div>
                 {routine.prompt && (
                   <details className="routine-prompt">
                     <summary>{text("查看任务说明", "View prompt")}</summary>
@@ -195,6 +273,18 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
                   </details>
                 )}
                 <div className="routine-actions">
+                  <button
+                    type="button"
+                    className="is-primary"
+                    disabled={runningName === routine.name}
+                    onClick={() => void submitRun(routine.name)}
+                  >
+                    {runningName === routine.name
+                      ? text("触发中…", "Triggering…")
+                      : ranName === routine.name
+                        ? text("已触发 ✓", "Triggered ✓")
+                        : text("测试执行", "Run now")}
+                  </button>
                   <button type="button" onClick={() => { setEditing(routine); setRawEdit(routine.raw ?? ""); setError(null); }}>
                     {text("编辑", "Edit")}
                   </button>
@@ -211,7 +301,7 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
       {creating && (
         <div className="routines-modal">
           <div className="routines-modal-box">
-            <h3>{text("新建例程", "New routine")}</h3>
+            <h3>{text("新建自动化", "New automation")}</h3>
             <label>{text("名称", "Name")}
               <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="my-routine" />
             </label>
@@ -243,7 +333,7 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
       {editing && (
         <div className="routines-modal">
           <div className="routines-modal-box">
-            <h3>{text("编辑例程", "Edit routine")}: {editing.name}</h3>
+            <h3>{text("编辑自动化", "Edit automation")}: {editing.name}</h3>
             {editing.unknownKeys && editing.unknownKeys.length > 0 && (
               <p className="routines-note">
                 {text("包含未识别字段", "Contains unrecognized fields")}: {editing.unknownKeys.join(", ")}
@@ -265,8 +355,8 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
       {confirmDelete && (
         <div className="routines-modal">
           <div className="routines-modal-box">
-            <h3>{text("删除例程", "Delete routine")}: {confirmDelete}</h3>
-            <p className="routines-note">{text("将删除例程文件，不可恢复。", "The routine file will be removed permanently.")}</p>
+            <h3>{text("删除自动化", "Delete automation")}: {confirmDelete}</h3>
+            <p className="routines-note">{text("将删除该自动化任务，不可恢复。", "This automation will be removed permanently.")}</p>
             <div className="routines-modal-actions">
               <button type="button" onClick={() => setConfirmDelete(null)}>{text("取消", "Cancel")}</button>
               <button type="button" className="is-danger" onClick={() => void submitDelete(confirmDelete)}>
