@@ -19,14 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----
-
-## Attribution / 上游致谢
-
-本仓库衍生自以下开源项目，代码与设计沿用其贡献：
-
-- **Codex Taskboard**（[chuspeeism/dashi-taskboard](https://github.com/chuspeeism/dashi-taskboard)），Apache License 2.0，Copyright chuspeeism 及原作者。原始 Web UI、server、数据模型与 Codex 嵌入逻辑源自该仓库。
-- **reasonix-taskboard**（[ttmouse/reasonix-taskboard](https://github.com/ttmouse/reasonix-taskboard)），MIT，Copyright Reasonix contributors。
-
-Apache License 2.0 全文见 <https://www.apache.org/licenses/LICENSE-2.0>。上游 Apache-2.0 部分的副本、修改与再分发须遵守 Apache License 2.0 条款（保留 NOTICE 与本致谢）；本项目新增与改造部分以 MIT License 授权。
