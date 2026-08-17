@@ -19,7 +19,7 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const VENDOR = path.join(PLUGIN_ROOT, 'vendor')
 
-const PLUGIN_ID = 'dsh-taskboard'
+const PLUGIN_ID = '@ttmouse/dsh-taskboard'
 
 /** Copy one source tree into vendor/, replacing any previous copy. */
 async function vendorTree(source, target, label) {
