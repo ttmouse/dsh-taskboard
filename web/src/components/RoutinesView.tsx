@@ -130,10 +130,10 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
   const isClaimRoutine = (name: string) => name.startsWith("taskboard-claim-");
 
   return (
-    <div className="routines-view" aria-label={text("例程列表", "Routines")}>
+    <div className="routines-view" aria-label={text("自动化", "Automation")}>
       <div className="routines-header">
         <div>
-          <h2>{text("例程列表", "Routines")}</h2>
+          <h2>{text("自动化", "Automation")}</h2>
           {directory && <p className="routines-directory" title={directory}>{directory}</p>}
         </div>
         <div className="routines-header-actions">

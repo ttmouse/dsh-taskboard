@@ -25,7 +25,9 @@ const ACTIVATE_EVENT = 'dsh-panel-activate'
 interface PanelSpec {
   /** Panel name carried in the cross-plugin activation event. */
   name: string
-  /** Data attribute identifying the injected sidebar entry row. */
+  /** Bare attribute name stamped on the entry row (no brackets). */
+  entryAttr: string
+  /** CSS/query selector for the entry row (with brackets). */
   entrySelector: string
   /** html attribute toggling this panel's center view. */
   activeAttr: string
@@ -40,6 +42,7 @@ interface PanelSpec {
 /** The taskboard panel: the full board app. */
 const TASKBOARD_PANEL: PanelSpec = {
   name: 'taskboard',
+  entryAttr: 'data-dsh-taskboard-entry',
   entrySelector: '[data-dsh-taskboard-entry]',
   activeAttr: 'data-dsh-taskboard-active',
   viewAttr: 'data-dsh-taskboard-view',
@@ -50,6 +53,7 @@ const TASKBOARD_PANEL: PanelSpec = {
 /** The automation panel: the global routines list page (standalone mode). */
 const AUTOMATION_PANEL: PanelSpec = {
   name: 'automation',
+  entryAttr: 'data-dsh-automation-entry',
   entrySelector: '[data-dsh-automation-entry]',
   activeAttr: 'data-dsh-automation-active',
   viewAttr: 'data-dsh-automation-view',
@@ -110,7 +114,7 @@ html[${panel.activeAttr}]:not([data-dsh-ssh-active]) [class*='centerCol'] > :not
 }
 `)
   const entryRules = PANELS.map((panel) => `
-[${panel.entrySelector}] {
+[${panel.entryAttr}] {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -125,16 +129,16 @@ html[${panel.activeAttr}]:not([data-dsh-ssh-active]) [class*='centerCol'] > :not
   font-size: 13px;
   white-space: nowrap;
 }
-[${panel.entrySelector}]:hover {
+[${panel.entryAttr}]:hover {
   background: var(--dsw-specific-sidebar-nav-item-hover);
   color: var(--dsw-alias-label-primary);
 }
-[${panel.entrySelector}][data-active] {
+[${panel.entryAttr}][data-active] {
   background: var(--dsw-specific-sidebar-nav-item-active);
   color: var(--dsw-alias-label-primary);
   font-weight: 600;
 }
-[${panel.entrySelector}] span {
+[${panel.entryAttr}] span {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -177,10 +181,11 @@ function createEntry(
   toggle: () => void,
   isOpen: () => boolean,
   label: () => string,
+  entryAttr: string,
 ): { element: HTMLButtonElement; refreshLabel(): void } {
   const entry = document.createElement('button')
   entry.type = 'button'
-  entry.dataset.dshTaskboardEntry = ''
+  entry.setAttribute(entryAttr, '')
   const labelSpan = document.createElement('span')
   const refreshLabel = (): void => {
     entry.setAttribute('aria-label', label())
@@ -227,9 +232,10 @@ function mountSidebarEntry(
   toggle: () => void,
   isOpen: () => boolean,
   label: () => string,
+  entryAttr: string,
 ): { dispose(): void; refreshLabel(): void } {
   ensureStyle()
-  const created = createEntry(toggle, isOpen, label)
+  const created = createEntry(toggle, isOpen, label, entryAttr)
   const entry = created.element
   let root: HTMLElement | undefined
   const place = (): void => {
@@ -555,6 +561,7 @@ export function apply(ctx: {
       () => setOpen(panel, !(open.get(panel.name) === true)),
       () => open.get(panel.name) === true,
       () => t(panel.entryLabelKey),
+      panel.entryAttr,
     ))
     const onLocaleChange = (): void => {
       t = ctx.locale.bind(NS)
