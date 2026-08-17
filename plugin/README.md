@@ -53,8 +53,10 @@ dsh web
 | `enabled` | `true` | 插件总开关 |
 | `dataDirectory` | `~/.dsh/storages/dsh-taskboard` | SQLite/附件/云配置目录 |
 | `routePrefix` | `/dsh-taskboard` | GUI webserver 上的代理前缀 |
-| `port` | `0`（系统分配） | 内部回环端口 |
+| `port` | `47824` | 内部回环端口（认领 prompt / skill 写死的 API 基址） |
 | `announceToAgent` | `true` | 是否在 system-prompt 中向 agent 宣告本插件 |
+| `claimSweeperEnabled` | `true` | 是否运行 DSH 原生自动认领作业（ctx.jobs） |
+| `claimSweepPollMs` | `60000` | 认领扫描间隔（ms，最小 5000） |
 | `syncWorkspaces` | `true` | 是否把 DSH 工作区同步为看板项目（工作区 = 项目，自动增减） |
 | `syncIntervalMs` | `60000` | 工作区 → 项目同步间隔（ms，0 关闭周期同步） |
 

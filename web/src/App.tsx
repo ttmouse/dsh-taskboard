@@ -27,14 +27,10 @@ import {
   getWorkflowWorkspace,
   getTaskboardMetadata,
   getProjectAutomation,
-  getHeartbeatServiceStatus,
-  startHeartbeatRunner,
   listArchivedTasks,
   listDevelopmentContexts,
   listDeviceWorkspaces,
   updateProjectAutomation,
-  type AutomationHost,
-  type HeartbeatServiceStatus,
   listProjects,
   listTasks,
   moveTask as moveTaskRequest,
@@ -176,8 +172,8 @@ interface AutomationQuotaStatus {
 interface ProjectAutomationRecord {
   automationId?: string;
   codexProjectId: string;
-  /** 心跳任务执行宿主；仅 Reasonix 独立模式记录。 */
-  host?: AutomationHost;
+  /** 遗留字段：旧 Reasonix 心跳宿主记录（本地缓存仅用于兼容，不再使用）。 */
+  host?: string;
   status: ProjectAutomationStatus;
   enabledByUser: boolean;
   quotaAware: boolean;
@@ -577,21 +573,6 @@ function LocalRealtimeSync({
   return null;
 }
 
-/** 心跳状态行的悬浮提示：启用项目数 + 最近执行时间 + 最近错误。 */
-function heartbeatDetailTitle(status: HeartbeatServiceStatus): string {
-  const enabledCount = status.tasks.filter((task) => task.enabled).length;
-  const lastRun = status.tasks.reduce<number | null>(
-    (max, task) => (task.lastRunAt ? Math.max(max ?? 0, task.lastRunAt) : max),
-    null,
-  );
-  const lastError = status.tasks.find((task) => task.lastError)?.lastError ?? null;
-  const parts: string[] = [];
-  if (enabledCount > 0) parts.push(`已启用 ${enabledCount} 个项目`);
-  if (lastRun) parts.push(`最近执行 ${new Date(lastRun).toLocaleTimeString()}`);
-  if (lastError) parts.push(`最近错误：${lastError}`);
-  return parts.length > 0 ? parts.join(" · ") : "dsh 心跳服务";
-}
-
 export function App() {
   const query = useMemo(() => new URLSearchParams(getTaskboardLocation().search), []);
   const embedded = query.get("host") === "codex";
@@ -623,8 +604,6 @@ export function App() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [connection, setConnection] = useState<ConnectionState>("connecting");
-  const [heartbeatStatus, setHeartbeatStatus] = useState<HeartbeatServiceStatus | null>(null);
-  const [heartbeatStarting, setHeartbeatStarting] = useState(false);
   const [search, setSearch] = useState("");
   const [filters, setFilters] = useState(readTaskFilters);
   const [showEmptyColumns, setShowEmptyColumns] = useState(readShowEmptyColumns);
@@ -900,12 +879,10 @@ export function App() {
       setAutomationError(null);
       try {
         const previous = projectAutomationsRef.current[selectedProjectId];
-        const host = previous?.host ?? DEFAULT_AUTOMATION_OPTIONS.host;
-        const result = await getProjectAutomation(selectedProjectId, host);
+        const result = await getProjectAutomation(selectedProjectId);
         writeProjectAutomation(selectedProjectId, {
           automationId: heartbeatTaskIdFor(selectedProjectId),
           codexProjectId: selectedProjectId,
-          host,
           status: result.enabled ? "ACTIVE" : "PAUSED",
           enabledByUser: result.enabled,
           quotaAware: previous?.quotaAware ?? false,
@@ -1003,7 +980,6 @@ export function App() {
     intervalMinutes: AutomationIntervalMinutes;
     model: AutomationModel;
     reasoningEffort: AutomationReasoningEffort;
-    host: AutomationHost;
   }) => {
     const stored = projectAutomations[selectedProjectId];
     if (
@@ -1012,7 +988,7 @@ export function App() {
       || !automationProjectContext.codexProjectId
       || automationRequestInFlightRef.current
     ) return;
-    // Reasonix 独立模式：自动认领开关直接控制本地心跳任务
+    // DSH 原生模式：自动认领开关直接写看板数据库，由 claim-sweep 作业驱动。
     if (!embedded || window.parent === window) {
       if (automationRequestInFlightRef.current) return;
       automationRequestInFlightRef.current = true;
@@ -1023,23 +999,10 @@ export function App() {
         const result = await updateProjectAutomation(selectedProjectId, {
           enabled: options.enabledByUser,
           intervalMinutes: options.intervalMinutes,
-          workspacePath: automationProjectContext.workspacePath ?? undefined,
-          host: options.host,
         });
-        // 互斥：启用某宿主时停用另一宿主，避免两个 Agent 抢同一批卡。
-        if (options.enabledByUser) {
-          const otherHost = options.host === "dsh" ? "reasonix" : "dsh";
-          await updateProjectAutomation(selectedProjectId, {
-            enabled: false,
-            host: otherHost,
-          }).catch(() => {
-            // 停用另一宿主失败不阻塞主操作，留给下次 reconcile 对齐。
-          });
-        }
         writeProjectAutomation(selectedProjectId, {
           automationId: heartbeatTaskIdFor(selectedProjectId),
           codexProjectId: selectedProjectId,
-          host: options.host,
           status: result.enabled ? "ACTIVE" : "PAUSED",
           enabledByUser: result.enabled,
           quotaAware: false,
@@ -1144,43 +1107,6 @@ export function App() {
   useEffect(() => {
     writeTaskFilters(filters);
   }, [filters]);
-
-  // dsh 心跳服务状态：挂载时 + 每 30s 轮询（与 runner 轮询节奏对齐）。
-  useEffect(() => {
-    let cancelled = false;
-    async function pollHeartbeat() {
-      try {
-        const status = await getHeartbeatServiceStatus();
-        if (!cancelled) setHeartbeatStatus(status);
-      } catch {
-        if (!cancelled) setHeartbeatStatus(null);
-      }
-    }
-    void pollHeartbeat();
-    const timer = window.setInterval(() => void pollHeartbeat(), 30000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, []);
-
-  async function handleStartHeartbeat() {
-    setHeartbeatStarting(true);
-    try {
-      await startHeartbeatRunner();
-      window.setTimeout(async () => {
-        try {
-          setHeartbeatStatus(await getHeartbeatServiceStatus());
-        } catch {
-          // 状态刷新失败时保留旧值。
-        }
-      }, 1500);
-    } catch {
-      setAnnouncement("启动心跳服务失败，请稍后重试或使用 npm run ops -- up。");
-    } finally {
-      setHeartbeatStarting(false);
-    }
-  }
 
   useEffect(() => {
     tasksRef.current = tasks;
@@ -2212,29 +2138,6 @@ export function App() {
 
           <div className="nav-spacer" />
           <div className="nav-footer">
-            {heartbeatStatus && (
-              <div
-                className={`heartbeat-status${heartbeatStatus.runner.running ? " is-running" : ""}`}
-                title={heartbeatDetailTitle(heartbeatStatus)}
-              >
-                <span className="heartbeat-dot" aria-hidden="true" />
-                <span className="heartbeat-copy">
-                  {heartbeatStatus.runner.running
-                    ? text("心跳服务运行中", "Heartbeat service running")
-                    : text("心跳服务未运行", "Heartbeat service stopped")}
-                </span>
-                {!heartbeatStatus.runner.running && (
-                  <button
-                    type="button"
-                    className="heartbeat-start"
-                    disabled={heartbeatStarting}
-                    onClick={handleStartHeartbeat}
-                  >
-                    {heartbeatStarting ? text("启动中…", "Starting…") : text("启动", "Start")}
-                  </button>
-                )}
-              </div>
-            )}
             <div className={`connection connection-${connection}`}>
               <span aria-hidden="true" />
               {connection === "live" ? "实时同步" : "正在重新连接…"}
@@ -2371,7 +2274,6 @@ export function App() {
                 pending={automationPending}
                 error={automationError}
                 unavailableReason={automationProjectContext.unavailableReason}
-                reasonix={!embedded || window.parent === window}
                 onOpen={() => void reconcileProjectAutomation()}
                 onChange={(options) => void saveProjectAutomation(options)}
               />

@@ -24,7 +24,6 @@ import {
   isLocalCompanionRoute,
 } from "./cloud-proxy.mjs";
 import { ApiError, TaskboardDatabase } from "./database.mjs";
-import { reconcileHeartbeatAutomation, readHeartbeatAutomation } from "./heartbeat-automation.mjs";
 
 const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const execFileAsync = promisify(execFile);
@@ -213,15 +212,6 @@ function assertAllowedQuery(searchParams, allowed, routeLabel) {
 
 function assertNoQuery(searchParams, routeLabel) {
   assertAllowedQuery(searchParams, new Set(), routeLabel);
-}
-
-/** 解析自动认领的执行宿主；缺省为 reasonix，仅接受 reasonix/dsh。 */
-function parseAutomationHost(value, routeLabel) {
-  if (value === undefined) return "reasonix";
-  if (value !== "reasonix" && value !== "dsh") {
-    throw new ApiError(400, "INVALID_FIELD", `${routeLabel}: 'host' must be 'reasonix' or 'dsh'`);
-  }
-  return value;
 }
 
 function decodeRouteSegment(value, name) {
@@ -1764,18 +1754,16 @@ export function createTaskboardServer(options = {}) {
           throw new ApiError(404, "NOT_FOUND", `Project '${projectId}' not found`);
         }
         if (request.method === "GET") {
-          const host = parseAutomationHost(
-            url.searchParams.get("host") ?? undefined,
-            "GET /api/projects/:id/automation",
-          );
+          if ([...url.searchParams.keys()].length > 0) {
+            throw new ApiError(400, "UNKNOWN_QUERY_PARAMETER", "GET /api/projects/:id/automation does not accept query parameters");
+          }
           return sendJson(response, 200, {
-            automation: await readHeartbeatAutomation(projectId, host),
+            automation: database.getProjectAutomation(projectId),
           });
         }
         const body = await readJson(request);
         assertPlainObject(body);
-        assertAllowedKeys(body, new Set(["enabled", "intervalMinutes", "workspacePath", "host"]));
-        const host = parseAutomationHost(body.host, "POST /api/projects/:id/automation");
+        assertAllowedKeys(body, new Set(["enabled", "intervalMinutes"]));
         if (typeof body.enabled !== "boolean") {
           throw new ApiError(400, "INVALID_FIELD", "'enabled' must be a boolean");
         }
@@ -1786,24 +1774,32 @@ export function createTaskboardServer(options = {}) {
           throw new ApiError(400, "INVALID_FIELD", "'intervalMinutes' must be an integer between 5 and 60");
         }
         const intervalMinutes = body.intervalMinutes ?? 10;
-        const workspacePath = stringField(
-          body.workspacePath ?? project.workspacePath ?? null,
-          "workspacePath",
-          { nullable: true, maxLength: 4096 },
-        );
-        if (!workspacePath) {
-          throw new ApiError(400, "INVALID_FIELD", "workspacePath is required to enable automation");
+        if (enabled && !project.workspacePath) {
+          throw new ApiError(400, "INVALID_FIELD", "workspacePath is required to enable automation (project must map to a DSH workspace)");
         }
-        const automation = await reconcileHeartbeatAutomation({
-          projectId,
-          projectName: project.name,
-          workspacePath,
-          enabled,
-          intervalMinutes,
-          skillPath: resolved.skillPath ?? "",
-          host,
-        });
+        const automation = database.setProjectAutomation(projectId, { enabled, intervalMinutes });
+        events.emit("project.automation", { projectId, automation });
         return sendJson(response, 200, { automation });
+      }
+
+      const claimRunRoute = pathname.match(/^\/api\/projects\/([^/]+)\/claim-run$/);
+      if (claimRunRoute && request.method === "POST") {
+        if ([...url.searchParams.keys()].length > 0) {
+          throw new ApiError(400, "UNKNOWN_QUERY_PARAMETER", "POST /api/projects/:id/claim-run does not accept query parameters");
+        }
+        let projectId;
+        try {
+          projectId = decodeURIComponent(claimRunRoute[1]);
+        } catch {
+          throw new ApiError(400, "INVALID_PATH", "Project id contains invalid encoding");
+        }
+        validateProjectId(projectId);
+        if (!database.getProject(projectId)) {
+          throw new ApiError(404, "NOT_FOUND", `Project '${projectId}' not found`);
+        }
+        // Host claim sweeper stamps its run here (fire-and-forget kick).
+        database.updateProjectLastClaimAt(projectId);
+        return sendJson(response, 200, { stamped: projectId });
       }
 
       if (pathname === "/api/tasks") {

@@ -504,6 +504,15 @@ export class TaskboardDatabase {
     if (!projectColumns.some((column) => column.name === "workspace_path")) {
       this.database.exec("ALTER TABLE projects ADD COLUMN workspace_path TEXT");
     }
+    if (!projectColumns.some((column) => column.name === "automation_enabled")) {
+      this.database.exec("ALTER TABLE projects ADD COLUMN automation_enabled INTEGER NOT NULL DEFAULT 0");
+    }
+    if (!projectColumns.some((column) => column.name === "automation_interval_minutes")) {
+      this.database.exec("ALTER TABLE projects ADD COLUMN automation_interval_minutes INTEGER NOT NULL DEFAULT 10");
+    }
+    if (!projectColumns.some((column) => column.name === "last_claim_at")) {
+      this.database.exec("ALTER TABLE projects ADD COLUMN last_claim_at INTEGER");
+    }
 
     const taskColumns = this.database.prepare("PRAGMA table_info(tasks)").all();
     const hasThreadId = taskColumns.some((column) => column.name === "thread_id");
@@ -796,6 +805,40 @@ export class TaskboardDatabase {
       WHERE id = ?
     `).run(name, workspacePath, now(), id);
     return this.getProject(id);
+  }
+
+  /** Read a project's claim-automation record (enabled flag + interval + last run). */
+  getProjectAutomation(id) {
+    const row = this.database.prepare(`
+      SELECT automation_enabled, automation_interval_minutes, last_claim_at
+      FROM projects WHERE id = ?
+    `).get(id);
+    if (!row) {
+      throw new ApiError(404, "PROJECT_NOT_FOUND", `Project '${id}' does not exist`);
+    }
+    return {
+      enabled: Boolean(row.automation_enabled),
+      intervalMinutes: row.automation_interval_minutes,
+      lastClaimAt: row.last_claim_at ?? null,
+    };
+  }
+
+  /** Persist a project's claim-automation switch (config lives in the board DB). */
+  setProjectAutomation(id, { enabled, intervalMinutes }) {
+    const existing = this.getProjectAutomation(id);
+    this.database.prepare(`
+      UPDATE projects
+      SET automation_enabled = ?, automation_interval_minutes = ?, updated_at = ?
+      WHERE id = ?
+    `).run(enabled ? 1 : 0, intervalMinutes ?? existing.intervalMinutes, now(), id);
+    return this.getProjectAutomation(id);
+  }
+
+  /** Stamp the last claim sweep for a project (called by the host claim sweeper). */
+  updateProjectLastClaimAt(id, timestamp = now()) {
+    this.database.prepare(`
+      UPDATE projects SET last_claim_at = ?, updated_at = ? WHERE id = ?
+    `).run(timestamp, timestamp, id);
   }
 
   deleteProject(id) {

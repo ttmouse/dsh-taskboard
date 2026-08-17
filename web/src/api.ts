@@ -276,36 +276,30 @@ export function subscribeAiChatThread(
   return () => source.close();
 }
 
-export type AutomationHost = "reasonix" | "dsh";
-
 export interface AutomationStateView {
-  host?: AutomationHost;
   enabled: boolean;
   intervalMinutes: number | null;
+  lastClaimAt: number | null;
 }
 
 export interface AutomationUpdateInput {
   enabled: boolean;
   intervalMinutes?: number;
-  workspacePath?: string;
-  host?: AutomationHost;
 }
 
-/** 读取项目自动认领状态（心跳任务模式，host 决定读取哪个宿主文件）。 */
+/** 读取项目自动认领状态（配置存看板数据库，由 DSH 原生 claim-sweep 作业驱动）。 */
 export async function getProjectAutomation(
   projectId: string,
-  host?: AutomationHost,
   signal?: AbortSignal,
 ): Promise<AutomationStateView> {
-  const query = host ? `?host=${encodeURIComponent(host)}` : "";
   const data = await request<{ automation: AutomationStateView }>(
-    `/api/projects/${encodeURIComponent(projectId)}/automation${query}`,
+    `/api/projects/${encodeURIComponent(projectId)}/automation`,
     { signal },
   );
   return data.automation;
 }
 
-/** 写入项目自动认领状态（控制 Reasonix 心跳任务开关）。 */
+/** 写入项目自动认领开关（启用后 DSH claim-sweep 作业按间隔驱动认领会话）。 */
 export async function updateProjectAutomation(
   projectId: string,
   input: AutomationUpdateInput,
@@ -321,31 +315,6 @@ export async function updateProjectAutomation(
     },
   );
   return data.automation;
-}
-
-export interface HeartbeatRunnerStatus {
-  running: boolean;
-  pid: number | null;
-}
-
-export interface HeartbeatTaskStatus {
-  id: string;
-  title: string;
-  enabled: boolean;
-  lastRunAt: number | null;
-  lastError: string | null;
-}
-
-export interface HeartbeatServiceStatus {
-  runner: HeartbeatRunnerStatus;
-  tasks: HeartbeatTaskStatus[];
-}
-
-/** 读取 dsh 心跳服务状态（runner 存活 + 心跳任务摘要）。 */
-export async function getHeartbeatServiceStatus(
-  signal?: AbortSignal,
-): Promise<HeartbeatServiceStatus> {
-  return request<HeartbeatServiceStatus>("/api/automation/heartbeat/status", { signal });
 }
 
 /** 从看板内启动 dsh 心跳 runner（launchd 优先，退化为主机后台拉起）。 */

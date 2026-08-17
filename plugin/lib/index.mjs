@@ -22,7 +22,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import z from 'schemastery'
 import { createTaskboardServer } from '../vendor/server/app.mjs'
-import { dshHomeDir, startHeartbeatTicker } from './heartbeat.mjs'
+import { startClaimSweeper } from './claim-sweeper.mjs'
 
 /** Plugin root: the directory holding lib/ (package.json sits one level up). */
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -36,11 +36,11 @@ const DEFAULT_ROUTE_PREFIX = '/dsh-taskboard'
 /** Order of the announcement section within the tool-guidance band. */
 const SECTION_ORDER = 205
 
-/** Required services: the shared webserver, the system-prompt band, and the workspace registry. */
-export const inject = ['webServer', 'systemPrompt', 'workspaceRegistry']
+/** Required services: webserver, system-prompt band, workspace registry, jobs, and agents. */
+export const inject = ['webServer', 'systemPrompt', 'workspaceRegistry', 'jobs', 'agents']
 
 /** Model-facing announcement: plugin presence, capabilities, and limits. */
-export const TASKBOARD_GUIDANCE = '本机已安装 dsh-taskboard 插件（DSH Web GUI 的完整任务看板）：侧边栏「任务看板」入口；完整能力来自本地 SQLite 服务——多视图（看板/列表/Gantt/工作流/仪表盘）、任务详情（关系/附件/标签/过滤器）、AI 对话、项目自动认领（reasonix/dsh 双宿主心跳，dsh 心跳 runner 由插件随宿主进程托管）。数据存 ~/.dsh/storages/dsh-taskboard/taskboard.sqlite（端口仅回环）。任务可通过看板内「在对话中打开」直接驱动 DSH 会话执行并回写评论。用户提到「任务看板 / 看板 / 任务管理」时即指本插件，请据此协作。'
+export const TASKBOARD_GUIDANCE = '本机已安装 dsh-taskboard 插件（DSH Web GUI 的完整任务看板）：侧边栏「任务看板」入口；完整能力来自本地 SQLite 服务——多视图（看板/列表/Gantt/工作流/仪表盘）、任务详情（关系/附件/标签/过滤器）、AI 对话、项目自动认领（DSH 原生 claim-sweep 后台作业驱动，认领/执行/回写全部通过本机看板 HTTP API 完成，无 taskctl、无外部心跳文件）。数据存 ~/.dsh/storages/dsh-taskboard/taskboard.sqlite（本机回环端口 47824）。任务可通过看板内「在对话中打开」直接驱动 DSH 会话执行并回写评论。用户提到「任务看板 / 看板 / 任务管理」时即指本插件，请据此协作。'
 
 /** Plugin config, validated by the schemastery schema. */
 export const Config = z.object({
@@ -51,13 +51,13 @@ export const Config = z.object({
   /** Webserver route prefix proxying the taskboard (browser half mounts here). */
   routePrefix: z.string().default(DEFAULT_ROUTE_PREFIX),
   /** Internal loopback listen port; 0 requests an OS-assigned port. */
-  port: z.natural().max(65535).default(0),
+  port: z.natural().max(65535).default(47824),
   /** When true, a system-prompt section announces the plugin to every agent. */
   announceToAgent: z.boolean().default(true),
-  /** When true, the host half runs the dsh heartbeat runner in-process. */
-  heartbeatEnabled: z.boolean().default(true),
-  /** Heartbeat poll interval in ms (clamped to >= 1000). */
-  heartbeatPollMs: z.natural().max(3_600_000).default(30_000),
+  /** When true, the host half runs the DSH-native claim sweeper (auto-claim). */
+  claimSweeperEnabled: z.boolean().default(true),
+  /** Claim sweep poll interval in ms (clamped to >= 5000). */
+  claimSweepPollMs: z.natural().max(3_600_000).default(60_000),
   /** When true, DSH workspaces are synced into board projects (workspace = project). */
   syncWorkspaces: z.boolean().default(true),
   /** Workspace → project sync interval in ms (0 disables periodic re-sync). */
@@ -169,7 +169,7 @@ export function apply(ctx, config) {
 
   let routeDisposer = undefined
   let app = undefined
-  let ticker = undefined
+  let sweeper = undefined
   let syncTimer = undefined
   let baseUrl = undefined
 
@@ -206,18 +206,18 @@ export function apply(ctx, config) {
     }
   }
 
-  const startHeartbeat = async () => {
-    if (config.heartbeatEnabled === false) return
+  const startClaimSweep = async () => {
+    if (config.claimSweeperEnabled === false) return
     try {
-      ticker = await startHeartbeatTicker({
-        dshHome: dshHomeDir(),
-        pollMs: Math.max(1000, config.heartbeatPollMs),
-        dshBin: process.env.DSH_BIN ?? 'dsh',
-        log: (message) => ctx.logger.info(`[heartbeat] ${message}`),
+      sweeper = await startClaimSweeper({
+        ctx,
+        baseUrl,
+        pollMs: Math.max(5000, config.claimSweepPollMs),
+        log: (message) => ctx.logger.info(message),
       })
-      if (!ticker.running) ticker = undefined
+      if (!sweeper.running) sweeper = undefined
     } catch (error) {
-      ctx.logger.error(`dsh-taskboard: heartbeat start failed: ${error instanceof Error ? error.message : String(error)}`)
+      ctx.logger.error(`dsh-taskboard: claim sweeper start failed: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
 
@@ -226,9 +226,9 @@ export function apply(ctx, config) {
       clearInterval(syncTimer)
       syncTimer = undefined
     }
-    if (ticker !== undefined) {
-      await ticker.stop()
-      ticker = undefined
+    if (sweeper !== undefined) {
+      await sweeper.stop()
+      sweeper = undefined
     }
     if (routeDisposer !== undefined) {
       routeDisposer()
@@ -241,7 +241,7 @@ export function apply(ctx, config) {
   }
 
   void start()
-  void startHeartbeat()
+  void startClaimSweep()
   ctx.on('dispose', () => {
     void stop()
   })
