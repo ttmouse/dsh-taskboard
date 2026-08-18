@@ -1,6 +1,6 @@
 {
   "name": "dsh-taskboard",
-  "version": "0.1.0",
+  "version": "0.5.0",
   "description": "Local-first issue board for DSH — standalone plugin version, forked from reasonix-taskboard (dashi-taskboard).",
   "type": "module",
   "repository": {
