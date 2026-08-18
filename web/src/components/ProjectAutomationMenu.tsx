@@ -14,6 +14,8 @@ interface AutomationOptions {
   /** 认领模型：'' = 跟随 agent-default-model。 */
   model: string;
   reasoningEffort: AutomationReasoningEffort;
+  /** 前置检查脚本命令（'' = 未配置附加检查；内建统一检查始终开启）。 */
+  checkCommand: string;
 }
 
 interface AutomationState extends AutomationOptions {
@@ -39,7 +41,11 @@ const DEFAULT_OPTIONS: AutomationOptions = {
   intervalMinutes: 5,
   model: "",
   reasoningEffort: "high",
+  checkCommand: "",
 };
+
+/** 切换"前置检查"时默认填入的脚本命令（与约定路径一致）。 */
+const DEFAULT_CHECK_COMMAND = "node scripts/schedule-checks/check.mjs";
 
 export function ProjectAutomationMenu({
   automation,
@@ -55,6 +61,9 @@ export function ProjectAutomationMenu({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const wasPendingRef = useRef(pending);
+  /** 用户是否在本次打开期间改过任何选项：true 时请求完成不再回填 draft，
+   *  避免 onOpen 的 reconcile 用旧值覆盖用户正在进行的编辑（"开了又弹回"）。 */
+  const dirtyRef = useRef(false);
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState({ left: 0, top: 0, ready: false });
   const [draft, setDraft] = useState<AutomationOptions>(DEFAULT_OPTIONS);
@@ -71,6 +80,10 @@ export function ProjectAutomationMenu({
       ? text("运行中", "Running")
       : text("已暂停", "Paused");
   const disabled = pending || Boolean(unavailableReason);
+  // 旧版本地缓存（checkCommand 字段加入前）可能没有该字段：统一归 ""，
+  // 避免 draft.checkCommand 为 undefined 导致 trim() 抛错、开关点不动。
+  const checkCommand = draft.checkCommand ?? "";
+  const checkEnabled = checkCommand.trim() !== "";
 
   /** 认领模型目录按供应商分组（值仍是 "provider::model"，组标签显示供应商）。 */
   const modelGroups: Array<[string, string[]]> = [];
@@ -193,14 +206,15 @@ export function ProjectAutomationMenu({
 
   useEffect(() => {
     if (!open) return;
-    setDraft({ ...DEFAULT_OPTIONS, ...automation });
+    dirtyRef.current = false;
+    setDraft({ ...DEFAULT_OPTIONS, ...automation, checkCommand: automation?.checkCommand ?? "" });
     setModelFilter("");
     setModelOpen(false);
   }, [open]);
 
   useEffect(() => {
-    if (wasPendingRef.current && !pending) {
-      setDraft({ ...DEFAULT_OPTIONS, ...automation });
+    if (wasPendingRef.current && !pending && !dirtyRef.current) {
+      setDraft({ ...DEFAULT_OPTIONS, ...automation, checkCommand: automation?.checkCommand ?? "" });
     }
     wasPendingRef.current = pending;
   }, [automation, pending]);
@@ -250,6 +264,7 @@ export function ProjectAutomationMenu({
 
   const submitChange = (next: AutomationOptions) => {
     if (disabled) return;
+    dirtyRef.current = true;
     setDraft(next);
     onChange(next);
   };
@@ -361,6 +376,42 @@ export function ProjectAutomationMenu({
             )}
           </div>
         </label>
+      )}
+      <div className="project-automation-switch">
+        <span>{text("前置检查", "Pre-check")}</span>
+        <button
+          type="button"
+          className={`board-setting-switch${checkEnabled ? " is-on" : ""}`}
+          role="switch"
+          aria-checked={checkEnabled}
+          disabled={disabled}
+          title={text("每次认领前先执行检查脚本，通过才启动对话", "Run a check command before each claim; only proceed when it passes")}
+          onClick={() => submitChange({
+            ...draft,
+            checkCommand: checkEnabled ? "" : DEFAULT_CHECK_COMMAND,
+          })}
+        >
+          <span aria-hidden="true" />
+        </button>
+      </div>
+      {checkEnabled && (
+        <label className="project-automation-field">
+          <span>{text("检查脚本", "Check command")}</span>
+          <input
+            type="text"
+            className="project-automation-check-command"
+            value={checkCommand}
+            disabled={disabled}
+            placeholder={DEFAULT_CHECK_COMMAND}
+            aria-label={text("检查脚本", "Check command")}
+            onChange={(event) => submitChange({ ...draft, checkCommand: event.target.value })}
+          />
+        </label>
+      )}
+      {checkEnabled && (
+        <p className="project-automation-note">
+          {text("在项目目录执行；退出码 0 放行，2 跳过本轮（不启动、不耗 token），其他/超时阻止并记录失败。", "Runs in the project directory; exit 0 proceeds, 2 skips this round (no session, no tokens), anything else/timeout blocks and records the failure.")}
+        </p>
       )}
       {unavailableReason && <p className="project-automation-note">{unavailableReason}</p>}
       {error && error !== unavailableReason && <p className="project-automation-error" role="alert">{error}</p>}

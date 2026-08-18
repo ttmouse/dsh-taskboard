@@ -41,7 +41,7 @@ function digestFromEvents(events) {
 }
 
 /** Write a run record in the dsh-routines schema under the routine's cwd runs dir. */
-async function writeRunRecord(project, run) {
+export async function writeRunRecord(project, run) {
   const record = {
     runId: `run-${Date.now()}-${randomUUID().slice(0, 5)}`,
     routine: claimRoutineName(project.id),

@@ -1499,6 +1499,23 @@ kbd {
   border-color: var(--accent);
 }
 
+.project-automation-field .project-automation-check-command {
+  width: 100%;
+  height: 26px;
+  padding: 0 8px;
+  border: var(--border-hairline) solid var(--border);
+  border-radius: 5px;
+  outline: 0;
+  background: var(--surface);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12px;
+}
+
+.project-automation-field .project-automation-check-command:focus {
+  border-color: var(--accent);
+}
+
 /* 模型字段：一个可搜索的组合框（输入即筛选，点击选项选中）。 */
 .project-automation-field.project-automation-field-model {
   flex-direction: column;

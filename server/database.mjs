@@ -516,6 +516,9 @@ export class TaskboardDatabase {
     if (!projectColumns.some((column) => column.name === "automation_model")) {
       this.database.exec("ALTER TABLE projects ADD COLUMN automation_model TEXT");
     }
+    if (!projectColumns.some((column) => column.name === "automation_check_command")) {
+      this.database.exec("ALTER TABLE projects ADD COLUMN automation_check_command TEXT");
+    }
 
     const taskColumns = this.database.prepare("PRAGMA table_info(tasks)").all();
     const hasThreadId = taskColumns.some((column) => column.name === "thread_id");
@@ -813,7 +816,7 @@ export class TaskboardDatabase {
   /** Read a project's claim-automation record (enabled flag + interval + last run). */
   getProjectAutomation(id) {
     const row = this.database.prepare(`
-      SELECT automation_enabled, automation_interval_minutes, automation_model, last_claim_at
+      SELECT automation_enabled, automation_interval_minutes, automation_model, automation_check_command, last_claim_at
       FROM projects WHERE id = ?
     `).get(id);
     if (!row) {
@@ -823,19 +826,22 @@ export class TaskboardDatabase {
       enabled: Boolean(row.automation_enabled),
       intervalMinutes: row.automation_interval_minutes,
       model: row.automation_model ?? null,
+      checkCommand: row.automation_check_command ?? null,
       lastClaimAt: row.last_claim_at ?? null,
     };
   }
 
   /** Persist a project's claim-automation switch (config lives in the board DB). */
-  setProjectAutomation(id, { enabled, intervalMinutes, model }) {
+  setProjectAutomation(id, { enabled, intervalMinutes, model, checkCommand }) {
     const existing = this.getProjectAutomation(id);
     const nextModel = model === undefined ? existing.model : (model || null);
+    const nextCheck = checkCommand === undefined ? existing.checkCommand : (checkCommand || null);
     this.database.prepare(`
       UPDATE projects
-      SET automation_enabled = ?, automation_interval_minutes = ?, automation_model = ?, updated_at = ?
+      SET automation_enabled = ?, automation_interval_minutes = ?, automation_model = ?,
+          automation_check_command = ?, updated_at = ?
       WHERE id = ?
-    `).run(enabled ? 1 : 0, intervalMinutes ?? existing.intervalMinutes, nextModel, now(), id);
+    `).run(enabled ? 1 : 0, intervalMinutes ?? existing.intervalMinutes, nextModel, nextCheck, now(), id);
     return this.getProjectAutomation(id);
   }
 

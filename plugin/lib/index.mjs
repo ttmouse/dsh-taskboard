@@ -23,7 +23,8 @@ import { fileURLToPath } from 'node:url'
 import z from 'schemastery'
 import { createTaskboardServer } from '../vendor/server/app.mjs'
 import { buildClaimPrompt, cleanupStaleClaimRoutines, reconcileClaimRoutine } from './claim-routines.mjs'
-import { activeClaimSessions, executeClaimInProcess, stopClaimSession } from './claim-executor.mjs'
+import { activeClaimSessions, executeClaimInProcess, stopClaimSession, writeRunRecord } from './claim-executor.mjs'
+import { defaultCheckCommand, runCheck } from './check-gate.mjs'
 
 /** Plugin root: the directory holding lib/ (package.json sits one level up). */
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -218,16 +219,92 @@ async function resolveClaimProject(name, baseUrl) {
 
 /**
  * Kick an in-process claim session for one project (used by the scheduler
- * and by the 立即运行 button for claim routines).
+ * and by the 立即运行 button for claim routines). Gates, in order:
+ *   ① built-in uniform check (all claim projects, zero tokens): the project
+ *     must have a todo task in the board, otherwise the round is skipped.
+ *   ② optional per-project check command (checkCommand or convention-path
+ *     script): exit 0 proceeds, exit 2 skips, anything else blocks and
+ *     records a failed run.
  */
 async function runInProcessClaim(ctx, project, baseUrl, log) {
-  let automation = { enabled: false, intervalMinutes: 10, model: null }
+  let automation = { enabled: false, intervalMinutes: 10, model: null, checkCommand: null }
   try {
     const res = await fetch(`${baseUrl}/api/projects/${encodeURIComponent(project.id)}/automation`)
     if (res.ok) automation = (await res.json()).automation
   } catch {
     // keep defaults
   }
+
+  // ① Built-in uniform check: only claim when the board has a todo task for
+  // this project. No todo → skip the round (no session, no tokens). A failed
+  // todo lookup is treated as a block (the claim flow itself depends on the
+  // same API, so proceeding would only burn a session on a broken board).
+  let todoCount = 0
+  let todoCheckFailed = false
+  try {
+    const res = await fetch(`${baseUrl}/api/tasks?projectId=${encodeURIComponent(project.id)}&status=todo`)
+    if (res.ok) {
+      todoCount = ((await res.json()).tasks ?? []).length
+    } else {
+      todoCheckFailed = true
+    }
+  } catch (error) {
+    todoCheckFailed = true
+    log(`[claim] ${project.id}: todo check request failed: ${error instanceof Error ? error.message : String(error)}`)
+  }
+  if (todoCheckFailed || todoCount === 0) {
+    log(`[claim] ${project.id}: ${todoCheckFailed ? 'todo check failed' : 'no todo tasks'}, skipping round`)
+    await writeRunRecord(project, {
+      status: todoCheckFailed ? 'failed' : 'skipped',
+      startedAt: Date.now(),
+      finishedAt: Date.now(),
+      durationMs: 0,
+      exitCode: 2,
+      check: { command: 'builtin:has-todo-tasks', todoCount },
+      error: todoCheckFailed
+        ? 'blocked by check gate: todo check request failed'
+        : 'skipped: no todo tasks to claim',
+    }).catch(() => {})
+    return false
+  }
+
+  // ② Optional per-project check command (checkCommand or convention script).
+  const gateCommand = automation.checkCommand ?? await defaultCheckCommand(project.workspacePath)
+  if (gateCommand) {
+    const check = await runCheck({
+      command: gateCommand,
+      cwd: project.workspacePath,
+      env: {
+        TASKBOARD_PROJECT_ID: project.id,
+        TASKBOARD_PROJECT_NAME: project.name,
+        TASKBOARD_WORKSPACE: project.workspacePath,
+        TASKBOARD_API_BASE: baseUrl,
+      },
+      log,
+    })
+    log(`[claim] ${project.id}: check gate → ${check.kind} (exit=${check.exitCode ?? '-'}, ${check.durationMs}ms${check.error ? `, ${check.error}` : ''})`)
+    if (check.kind !== 'pass') {
+      const skipped = check.kind === 'skip'
+      await writeRunRecord(project, {
+        status: skipped ? 'skipped' : 'failed',
+        startedAt: Date.now() - check.durationMs,
+        finishedAt: Date.now(),
+        durationMs: check.durationMs,
+        exitCode: check.exitCode,
+        check: {
+          command: gateCommand,
+          ...(check.timedOut ? { timedOut: true } : {}),
+        },
+        ...(check.stdout ? { stdout: check.stdout.slice(0, 500) } : {}),
+        ...(check.stderr ? { stderr: check.stderr.slice(0, 500) } : {}),
+        error: skipped
+          ? 'skipped by check gate (exit 2)'
+          : `blocked by check gate${check.error ? `: ${check.error}` : ` (exit ${check.exitCode ?? '-'})`}`,
+      }).catch(() => {})
+      return false
+    }
+  }
+
   return executeClaimInProcess({
     ctx,
     project,

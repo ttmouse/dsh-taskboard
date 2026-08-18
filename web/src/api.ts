@@ -280,6 +280,8 @@ export interface AutomationStateView {
   enabled: boolean;
   intervalMinutes: number | null;
   model: string | null;
+  /** 认领前置检查命令（'' / null = 未配置附加检查；内建统一检查始终开启）。 */
+  checkCommand: string | null;
   lastClaimAt: number | null;
 }
 
@@ -287,6 +289,7 @@ export interface AutomationUpdateInput {
   enabled: boolean;
   intervalMinutes?: number;
   automationModel?: string | null;
+  checkCommand?: string | null;
 }
 
 /** 认领模型目录（host 半从 ctx.llm 枚举全部 provider 写入 models.json）。 */
