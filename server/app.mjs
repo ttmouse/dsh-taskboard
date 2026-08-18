@@ -1932,7 +1932,7 @@ export function createTaskboardServer(options = {}) {
         }
         const body = await readJson(request);
         assertPlainObject(body);
-        assertAllowedKeys(body, new Set(["enabled", "intervalMinutes", "automationModel", "checkCommand"]));
+        assertAllowedKeys(body, new Set(["enabled", "intervalMinutes", "automationModel"]));
         if (typeof body.enabled !== "boolean") {
           throw new ApiError(400, "INVALID_FIELD", "'enabled' must be a boolean");
         }
@@ -1949,10 +1949,7 @@ export function createTaskboardServer(options = {}) {
         const automationModel = body.automationModel === undefined
           ? undefined
           : stringField(body.automationModel, "automationModel", { nullable: true, maxLength: 128 });
-        const checkCommand = body.checkCommand === undefined
-          ? undefined
-          : stringField(body.checkCommand, "checkCommand", { nullable: true, maxLength: 500 });
-        const automation = database.setProjectAutomation(projectId, { enabled, intervalMinutes, model: automationModel, checkCommand });
+        const automation = database.setProjectAutomation(projectId, { enabled, intervalMinutes, model: automationModel });
         events.emit("project.automation", { projectId, automation });
         return sendJson(response, 200, { automation });
       }

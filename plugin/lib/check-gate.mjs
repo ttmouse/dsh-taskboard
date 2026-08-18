@@ -23,8 +23,8 @@ export const CHECK_FAIL = 'fail'
 
 export const DEFAULT_CHECK_TIMEOUT_MS = 30_000
 
-/** Convention path (relative to the task working directory) checked when no
- * explicit checkCommand is configured. */
+/** Convention path (relative to the task working directory); every claim
+ * project shares this same check script. */
 export const DEFAULT_CHECK_RELATIVE = 'scripts/schedule-checks/check.mjs'
 
 const MAX_OUTPUT_CHARS = 2000

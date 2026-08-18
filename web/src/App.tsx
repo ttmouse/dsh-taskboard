@@ -184,8 +184,6 @@ interface ProjectAutomationRecord {
   /** 认领模型：'' = 跟随 agent-default-model，否则为模型 id。 */
   model: string;
   reasoningEffort: AutomationReasoningEffort;
-  /** 认领前置检查命令（'' = 未配置附加检查；内建统一检查始终开启）。 */
-  checkCommand?: string;
 }
 
 type ProjectAutomations = Record<string, ProjectAutomationRecord>;
@@ -242,7 +240,6 @@ const DEFAULT_AUTOMATION_OPTIONS = {
   intervalMinutes: 5,
   model: "gpt-5.5",
   reasoningEffort: "high",
-  checkCommand: "",
   host: "reasonix",
 } as const;
 
@@ -900,7 +897,6 @@ export function App() {
             : previous?.intervalMinutes ?? DEFAULT_AUTOMATION_OPTIONS.intervalMinutes,
           model: result.model ?? previous?.model ?? "",
           reasoningEffort: previous?.reasoningEffort ?? DEFAULT_AUTOMATION_OPTIONS.reasoningEffort,
-          checkCommand: result.checkCommand ?? previous?.checkCommand ?? "",
         });
       } catch (error) {
         setAutomationError(error instanceof Error ? error.message : "无法读取自动认领状态");
@@ -990,7 +986,6 @@ export function App() {
     intervalMinutes: AutomationIntervalMinutes;
     model: string;
     reasoningEffort: AutomationReasoningEffort;
-    checkCommand: string;
   }) => {
     const stored = projectAutomations[selectedProjectId];
     if (
@@ -1011,7 +1006,6 @@ export function App() {
           enabled: options.enabledByUser,
           intervalMinutes: options.intervalMinutes,
           automationModel: options.model || null,
-          checkCommand: options.checkCommand || null,
         });
         writeProjectAutomation(selectedProjectId, {
           automationId: heartbeatTaskIdFor(selectedProjectId),
@@ -1024,7 +1018,6 @@ export function App() {
             : options.intervalMinutes,
           model: options.model,
           reasoningEffort: options.reasoningEffort,
-          checkCommand: result.checkCommand ?? options.checkCommand,
         });
       } catch (error) {
         writeProjectAutomation(selectedProjectId, previousRecord);

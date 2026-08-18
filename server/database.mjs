@@ -816,7 +816,7 @@ export class TaskboardDatabase {
   /** Read a project's claim-automation record (enabled flag + interval + last run). */
   getProjectAutomation(id) {
     const row = this.database.prepare(`
-      SELECT automation_enabled, automation_interval_minutes, automation_model, automation_check_command, last_claim_at
+      SELECT automation_enabled, automation_interval_minutes, automation_model, last_claim_at
       FROM projects WHERE id = ?
     `).get(id);
     if (!row) {
@@ -826,22 +826,20 @@ export class TaskboardDatabase {
       enabled: Boolean(row.automation_enabled),
       intervalMinutes: row.automation_interval_minutes,
       model: row.automation_model ?? null,
-      checkCommand: row.automation_check_command ?? null,
       lastClaimAt: row.last_claim_at ?? null,
     };
   }
 
   /** Persist a project's claim-automation switch (config lives in the board DB). */
-  setProjectAutomation(id, { enabled, intervalMinutes, model, checkCommand }) {
+  setProjectAutomation(id, { enabled, intervalMinutes, model }) {
     const existing = this.getProjectAutomation(id);
     const nextModel = model === undefined ? existing.model : (model || null);
-    const nextCheck = checkCommand === undefined ? existing.checkCommand : (checkCommand || null);
     this.database.prepare(`
       UPDATE projects
       SET automation_enabled = ?, automation_interval_minutes = ?, automation_model = ?,
-          automation_check_command = ?, updated_at = ?
+          updated_at = ?
       WHERE id = ?
-    `).run(enabled ? 1 : 0, intervalMinutes ?? existing.intervalMinutes, nextModel, nextCheck, now(), id);
+    `).run(enabled ? 1 : 0, intervalMinutes ?? existing.intervalMinutes, nextModel, now(), id);
     return this.getProjectAutomation(id);
   }
 

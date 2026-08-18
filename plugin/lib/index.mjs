@@ -222,12 +222,13 @@ async function resolveClaimProject(name, baseUrl) {
  * and by the 立即运行 button for claim routines). Gates, in order:
  *   ① built-in uniform check (all claim projects, zero tokens): the project
  *     must have a todo task in the board, otherwise the round is skipped.
- *   ② optional per-project check command (checkCommand or convention-path
- *     script): exit 0 proceeds, exit 2 skips, anything else blocks and
- *     records a failed run.
+ *   ② uniform convention-path check script (scripts/schedule-checks/check.mjs
+ *     under the project workspace; every claim project shares the same
+ *     path): exit 0 proceeds, exit 2 skips, anything else blocks and
+ *     records a failed run. No script on disk → no gate.
  */
 async function runInProcessClaim(ctx, project, baseUrl, log) {
-  let automation = { enabled: false, intervalMinutes: 10, model: null, checkCommand: null }
+  let automation = { enabled: false, intervalMinutes: 10, model: null }
   try {
     const res = await fetch(`${baseUrl}/api/projects/${encodeURIComponent(project.id)}/automation`)
     if (res.ok) automation = (await res.json()).automation
@@ -268,8 +269,8 @@ async function runInProcessClaim(ctx, project, baseUrl, log) {
     return false
   }
 
-  // ② Optional per-project check command (checkCommand or convention script).
-  const gateCommand = automation.checkCommand ?? await defaultCheckCommand(project.workspacePath)
+  // ② Uniform convention-path check script (no per-project override).
+  const gateCommand = await defaultCheckCommand(project.workspacePath)
   if (gateCommand) {
     const check = await runCheck({
       command: gateCommand,
