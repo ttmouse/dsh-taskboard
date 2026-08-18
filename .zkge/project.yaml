@@ -1,0 +1,63 @@
+# ============================================================
+# zk-ge-verification 技能模板：project.yaml
+# 对应 A4 文件布局中 .zkge/project.yaml
+# 初始化时填写：PROJECT.<SLUG> + A1 规范词实例 + 目标/反目标/边界
+# ============================================================
+schema: zkge.project/v1
+project_id: PROJECT.DSH-TASKBOARD     # 如 PROJECT.REASONIX-TASKBOARD（小写 + 连字符）
+
+meta:
+  name: "dsh-taskboard 自动认领链路"
+  description: "DSH 插件内自动认领（认领最早 todo 议题 → 进程内 agent 执行 → 回写评论 → in_review），过程 GUI 实时可见可干预、历史可回放"
+  type: existing                      # 存量项目（认领链路已实现，正在追问题）
+  committed_at: "2026-08-17T23:00:00Z"
+  owner: "ttmouse"
+
+# A1 规范词实例：本项目对规范词的具体含义（不满足 MUST 不得进入下一状态）
+normative_terms:
+  must:
+    - "认领会话注入的 user/message 事件必须携带非空 message id（followup({ id: randomUUID(), ... })），否则 DSH 加载历史时整条会话拒绝回放"
+    - "agent 执行认领必须通过 HTTP API（http://127.0.0.1:47825，见 references/api.md）读写看板，禁止走浏览器 CDP 点击操作"
+    - "并发认领必须互斥：同一时刻一个项目最多一个 in-flight 认领会话（调度器 inFlight 集合），且同一浏览器桥不得被多个并行认领会话驱动"
+  must_not:
+    - "不得在用户页面确认前把 issue 移到 done"
+    - "不得把'会话正常结束（turn/end）'当作'认领动作成功'——run 记录 status=ok 只代表会话结束，不代表任务状态流转"
+  should:
+    - "认领失败应留痕（run 记录 status=failed + error 字段），不静默吞掉"
+    - "R2/R3 项目使用不同模型做 BUILDER 与 CHALLENGER"
+  may:
+    - "归因时 threadId 的自定义值"
+
+# 目标：为什么做（业务层语言）
+goals:
+  - "开启自动认领后，系统自动认领最早 todo 议题，过程在看板实时可见可读可干预"
+  - "认领过程的历史（含 prompt 注入、agent 思考、工具调用、结果）任何时候可回放查看"
+  - "认领动作必须真实完成任务状态流转（todo → in_progress → in_review），不是'会话跑了但任务没动'"
+
+# 反目标：明确不做（防范围漂移）
+non_goals:
+  - "不重构认领执行宿主（保持进程内 ctx.agents.create，不迁回外部 runner）"
+  - "不做云板共享/多机协作（那是 taskctl CLI 的能力，本插件不背）"
+  - "不做 Reasonix 心跳兼容（fe3ca42 已彻底移除，不回退）"
+
+# 边界：数据/信任/外部依赖
+boundaries:
+  external_systems:                  # 外部系统清单
+    - name: "dsh-session-persistence（DSH 会话持久化）"
+      direction: out
+      data: "认领会话文件 ~/.dsh/sessions/**/session.jsonl.zstd（多帧 zstd）"
+    - name: "DSH GUI / 浏览器桥"
+      direction: both
+      data: "认领会话在 GUI 可见；agent 不应驱动浏览器操作看板"
+    - name: "看板 HTTP API（127.0.0.1:47825）"
+      direction: in
+      data: "任务读写（tasks/move/comments/relations），agent 认领的唯一接口"
+  irreversible_operations:           # 不可逆操作（对应架构 human_gate）
+    - "把 issue 移到 done（必须用户确认）"
+  reliability_requirements:          # 可靠性要求（SLO 等）
+    - "认领会话历史 100% 可回放（无 SessionPersistenceCorruptionError）"
+    - "认领调度单飞（同项目同时最多一个执行）"
+
+# 开放问题：没有答案就写"未知"，不允许自动补成听起来合理的答案
+open_questions:
+  - "agent 认领动作失败的根因清单是否完备（当前已知：走浏览器而非 API、并行会话抢浏览器；是否还有别的）"

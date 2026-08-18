@@ -15,5 +15,5 @@ src-tauri/gen/
 src-tauri/resources/
 src-tauri/target/
 .dsh/
-.zkge/
 .reasonix/
+refs/

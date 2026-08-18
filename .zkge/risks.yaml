@@ -1,0 +1,56 @@
+# ============================================================
+# zk-ge-verification 技能模板：risks.yaml
+# 对应 A4 文件布局中 .zkge/risks.yaml
+# A2 枚举实例：本项目实际风险项 + R0-R3 分级
+# ============================================================
+schema: zkge.risks/v1
+project_id: PROJECT.DSH-TASKBOARD
+
+# R0-R3 分级参考：
+#   R0 = 无风险（文档/纯展示）
+#   R1 = 低风险（单文件、可回滚、无外部影响）
+#   R2 = 中风险（API/持久化/并发/迁移——需要真实验证预言）
+#   R3 = 高风险（资金/安全/数据不可逆/法规）
+risks:
+  - id: RISK.SESSION.001
+    description: "认领会话注入消息缺 id 导致历史无法回放（SessionPersistenceCorruptionError，已发生过 2 次）"
+    category: data_loss
+    risk_level: R2
+    trigger: "followup() 注入 user/message 不带 id 字段"
+    impact: "整条认领会话历史拒绝加载，无法查看 agent 做了什么"
+    mitigation: "CLAIM.SESSION.001（message 必须带 id）+ 会话文件形状校验测试"
+    status: mitigated
+
+  - id: RISK.SESSION.002
+    description: "agent 认领动作走浏览器 CDP 而非 HTTP API，认领不生效（任务仍 todo）"
+    category: correctness
+    risk_level: R2
+    trigger: "agent 会话内倾向用浏览器操作看板（点状态按钮报编号失效）"
+    impact: "认领链路空转：会话跑了但任务没流转，用户以为在认领实际没认领"
+    mitigation: "CLAIM.AGENT.001（agent 必须走 HTTP API）+ 会话内容断言测试"
+    status: open
+
+  - id: RISK.SESSION.003
+    description: "并行认领会话争抢同一浏览器桥导致连接反复重建、页面跳变"
+    category: availability
+    risk_level: R2
+    trigger: "多项目同时开启认领且同宿主驱动同一浏览器"
+    impact: "认领会话互相干扰，agent 操作失败（digest 显示 'STOP fighting for the same browser'）"
+    mitigation: "CLAIM.SCHED.001（调度同浏览器互斥/串行）+ 并发测试"
+    status: open
+
+  - id: RISK.SESSION.004
+    description: "run 记录 status=ok 被误读为认领成功（实际只代表会话正常结束）"
+    category: correctness
+    risk_level: R1
+    trigger: "看 run 记录 exitCode=0 就以为认领完成"
+    impact: "监控误报：显示'成功'但任务未流转"
+    mitigation: "MUST_NOT 规范词 + 验收总表以任务状态流转为准"
+    status: mitigated
+
+# 风险汇总统计（由 zkge-validate 或人工维护）
+summary:
+  r0: 0
+  r1: 1
+  r2: 3
+  r3: 0

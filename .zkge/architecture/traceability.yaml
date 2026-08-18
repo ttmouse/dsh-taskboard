@@ -1,0 +1,14 @@
+# ============================================================
+# zk-ge-verification 技能模板：traceability.yaml
+# 对应 A4 文件布局中 .zkge/architecture/traceability.yaml
+# 追踪关系：声明 → 实现 → 测试 → 运行（回答"这条业务声明由哪里实现、在哪里运行、由什么证据支持"）
+# ============================================================
+schema: zkge.traceability/v1
+project_id: PROJECT.<ASCII_SLUG>
+edges:
+  - claim_id: CLAIM.<DOMAIN>.<NNN>
+    implementation_ref: ""          # 实现位置（模块/文件/类型）
+    test_ref: ""                    # 测试位置（测试文件/用例）
+    runtime_ref: ""                 # 运行位置（端点/任务/事件）
+    evidence_ref: ""                # 证据（evidence_id 或 run_id）
+    status: traced | gap            # gap = 某跳缺失（进 coverage-debt.yaml）

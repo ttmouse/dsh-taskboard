@@ -1,0 +1,30 @@
+# ============================================================
+# CLAIM.SESSION.001：认领会话注入消息必须携带 message id
+# 背景：SessionPersistenceCorruptionError（seq 7 lacks an identified message），已发生 2 次
+# ============================================================
+schema: zkge.claim/v1
+id: CLAIM.SESSION.001
+statement: "认领会话中每个 user/message、assistant/message、tool/result 事件都携带非空 message id，DSH 加载历史时校验通过"
+owner: engineering.claim-executor
+risk_level: R2
+required_assurance_level: A3
+scope:
+  included: [host=deepseek-harness, session_kind=claim]
+  excluded: [旧损坏会话（claim-1793627f-081e6f94 未修复）]
+assumptions:
+  - id: ASSUMPTION.SESSION.001
+    text: "dsh-session 的 assertMessageEventShape 要求 message.id 非空字符串（验证于 dsh-session lib）"
+oracle:
+  type: integration
+  expression: "对会话文件做 DSH 同款帧扫描 + 形状校验：所有 message 事件 id 非空 且 无 torn frame 且 全部帧可解码"
+counterexample:
+  expression: "存在任一 message 事件缺 id（如 seq N lacks an identified message）→ 历史拒绝加载"
+required_verifiers:
+  - 会话文件形状校验脚本（帧扫描 + assertMessageEventShape 复刻）
+  - 真实认领运行后校验（GUI 打开新会话历史）
+invalidation_inputs:
+  - specification_digest
+  - source_digest
+  - artifact_digest
+  - verifier_digest
+status: UNKNOWN

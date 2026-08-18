@@ -1,0 +1,25 @@
+# ============================================================
+# zk-ge-verification 技能模板：architecture.yaml
+# 对应 A4 文件布局中 .zkge/architecture/architecture.yaml
+# 阶段③ 架构承诺：模块边界 DAG（阶段⑦ 用它校验实际代码图）
+# ============================================================
+schema: zkge.architecture/v1
+project_id: PROJECT.<ASCII_SLUG>
+
+architecture:
+  modules:                          # 节点：模块 = 职责单元
+    - name: ""                      # 如 api.external / application / domain / infrastructure
+      responsibility: ""
+      human_gate: false             # 该模块是否含不可逆操作
+  dependencies:                     # 有向边：允许的依赖
+    - from: ""
+      to: ""
+      reason: ""                    # 工作真的流过吗（写不出理由 = 假边 = 删除）
+      human_gate: false
+
+  # 任务图规则④：人类闸门位置（不可逆边必须人审）
+  human_gates:
+    - action: ""                    # 不可逆动作，如 生产发布 / 数据迁移 / 删除资源
+      position: ""
+      approver: ""
+      evidence_required: ""

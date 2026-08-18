@@ -1,0 +1,30 @@
+# ============================================================
+# CLAIM.SCHED.001：认领调度互斥——同项目单飞 + 同浏览器桥不并行驱动
+# 背景：并行认领会话（deepseek-harness + dsh-taskboard）争抢同一浏览器桥
+# ============================================================
+schema: zkge.claim/v1
+id: CLAIM.SCHED.001
+statement: "认领调度互斥：同一项目同时至多一个 in-flight 认领会话；同一宿主进程内多个认领会话不得并行驱动同一浏览器桥"
+owner: engineering.scheduler
+risk_level: R2
+required_assurance_level: A2
+scope:
+  included: [scheduler=in_process, poll_ms=30000]
+  excluded: [跨进程/多宿主的认领（本插件不负责）]
+assumptions:
+  - id: ASSUMPTION.SCHED.001
+    text: "同项目 inFlight 集合已实现（sweep 中 inFlight.has 跳过）；浏览器桥互斥尚未实现（open）"
+oracle:
+  type: property
+  expression: "任意时刻，同 project_id 的认领会话数量 ≤ 1；宿主进程内活跃认领会话总量受控（同一浏览器桥单占用）"
+counterexample:
+  expression: "两项目认领会话同时存活且都驱动同一浏览器桥 → 连接反复重建、页面跳变、agent 操作失败"
+required_verifiers:
+  - 调度并发测试（两项目同时到期，断言会话串行/互斥）
+  - 会话事件流检查（无「另一并行认领会话也在驱动同一浏览器」的 agent 推理）
+invalidation_inputs:
+  - specification_digest
+  - source_digest
+  - artifact_digest
+  - verifier_digest
+status: UNKNOWN

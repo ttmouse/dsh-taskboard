@@ -1,0 +1,33 @@
+{
+  "schema": "zkge.handoff/v1",
+  "project_id": "PROJECT.<SLUG>",
+  "state": "S8_HANDOFF_READY",
+  "decision": "PASS",
+  "subject": {
+    "source_digest": "sha256:...",
+    "artifact_digest": "sha256:...",
+    "sbom_digest": "sha256:..."
+  },
+  "commitment_digest": "sha256:...",
+  "required_claims": {
+    "count": 0,
+    "pass": 0,
+    "excepted": 0,
+    "unknown": 0,
+    "fail": 0,
+    "invalid": 0
+  },
+  "evidence_index_digest": "sha256:...",
+  "open_counterexamples": [],
+  "residual_risks": [],
+  "exceptions": [],
+  "runtime_limitations": [],
+  "rollback_evidence_id": "EVIDENCE....",
+  "replay": {
+    "command": "make zkge-replay",
+    "environment_digest": "sha256:...",
+    "expected_result_digest": "sha256:..."
+  },
+  "approved_by": [],
+  "generated_at": "UTC_RFC3339"
+}

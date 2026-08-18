@@ -1,0 +1,24 @@
+# ============================================================
+# zk-ge-verification 技能模板：verification-plan.yaml
+# 对应 A4 文件布局中 .zkge/architecture/verification-plan.yaml
+# 每 claim 的验证方法 + 工具链（第 ⑤ 步测试设计的落点）
+# ============================================================
+schema: zkge.verification-plan/v1
+project_id: PROJECT.<ASCII_SLUG>
+verifiers:                          # 本项目使用的验证器（第 0 步校准对象）
+  - id: ""
+    version: ""
+    owner: ""
+    self_test_result: ""            # 校准结果
+    known_blind_spots: []           # 盲区登记（盲区内结论不得用于门禁）
+plan:
+  - claim_id: CLAIM.<DOMAIN>.<NNN>
+    verification_methods:           # 对应工具映射表的阶段
+      - stage: ④
+        tool: ""
+      - stage: ⑤
+        tool: ""
+      - stage: ⑦
+        tool: ""
+    required_assurance_level: A0 | A1 | A2 | A3 | A4
+    acceptance: ""                  # 什么算通过（达标判定）

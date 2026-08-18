@@ -1,0 +1,30 @@
+# ============================================================
+# CLAIM.AGENT.001：agent 认领必须通过 HTTP API 读写看板，禁止浏览器 CDP 操作
+# 背景：认领动作失败——agent 走浏览器点按钮（报「编号失效」）而非 skill 规定的 curl 流程
+# ============================================================
+schema: zkge.claim/v1
+id: CLAIM.AGENT.001
+statement: "认领会话中 agent 对看板的读写全部通过 HTTP API（http://127.0.0.1:47825，references/api.md 流程），不驱动浏览器操作看板"
+owner: engineering.claim-executor
+risk_level: R2
+required_assurance_level: A2
+scope:
+  included: [execution=in_process, api_base=127.0.0.1:47825]
+  excluded: [agent 用浏览器查看 GUI 会话（非看板操作）]
+assumptions:
+  - id: ASSUMPTION.AGENT.001
+    text: "manage-taskboard skill 的 api.md 是 agent 认领的唯一接口契约"
+oracle:
+  type: runtime
+  expression: "认领会话事件流中，任务写操作（move/comments）都伴随对 127.0.0.1:47825 的 HTTP 调用；会话内不出现对看板 UI 的浏览器点击操作"
+counterexample:
+  expression: "会话内出现浏览器操作看板（点状态按钮/导航看板页面）→ 认领动作不可信，任务未流转即失败"
+required_verifiers:
+  - 认领会话内容断言（工具调用类型为 HTTP API 而非 browser）
+  - 看板任务状态核验（认领后任务应 in_progress/in_review，非 todo）
+invalidation_inputs:
+  - specification_digest
+  - source_digest
+  - artifact_digest
+  - verifier_digest
+status: UNKNOWN

@@ -1,0 +1,31 @@
+# ============================================================
+# zk-ge-verification 技能模板：intent.yaml
+# 对应 A4 文件布局中 .zkge/architecture/intent.yaml
+# 世界图/任务图坐标：实体/关系/状态迁移（能力问题的图论落点）
+# ============================================================
+schema: zkge.intent/v1
+project_id: PROJECT.<ASCII_SLUG>
+
+# 世界图：系统记住什么（实体 + 关系）
+world_graph:
+  entities:
+    - name: ""                      # 实体名
+      description: ""
+      code_mapping: ""              # 代码对应物（类型/表）
+  relations:
+    - name: ""                      # 关系名，如 AFFECTED / DEPENDS_ON
+      domain: ""                    # 源实体
+      range: ""                     # 目标实体
+      code_mapping: ""
+
+# 任务图：系统如何推进（状态 + 迁移）
+task_graph:
+  states:
+    - name: ""
+      description: ""
+  transitions:
+    - from: ""
+      to: ""
+      trigger: ""                   # 什么动作触发
+      guard: ""                     # 守卫条件
+      human_gate: false             # 是否人类闸门

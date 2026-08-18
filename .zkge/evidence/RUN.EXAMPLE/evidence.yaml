@@ -1,0 +1,28 @@
+# ============================================================
+# zk-ge-verification 技能模板：evidence.yaml
+# 对应 A4 文件布局中 .zkge/evidence/<run_id>/ 的单条记录
+# 证据绑定：claim/source/artifact/spec/environment/verifier/raw-output 的 digest
+# ============================================================
+schema: zkge.evidence/v1
+evidence_id: EVIDENCE.<CLAIM_ID>.<RUN_ID>.<NNN>
+claim_id: CLAIM.<DOMAIN>.<NNN>
+run_id: RUN.<UTC_YYYYMMDDTHHMMSSZ>.<8_HEX>
+verifier:
+  id: ""                            # 验证器 id（如 build_or_update_graph_tool）
+  version: ""                       # 版本
+  owner: ""                         # 维护人
+  self_test: ""                     # 自检结果（第 0 步校准）
+bindings:                           # 任一变化 → 本证据 INVALID
+  specification_digest: "sha256:"
+  source_digest: "sha256:"
+  artifact_digest: "sha256:"
+  sbom_digest: "sha256:"
+  environment_digest: "sha256:"
+  verifier_digest: "sha256:"
+  challenge_digest: "sha256:"
+  policy_digest: "sha256:"
+result:
+  status: PASS | FAIL | INVALID | UNKNOWN
+  raw_output_ref: ""                # 原始结果引用（不得用摘要代替）
+  counterexample_ref: ""            # 反例引用（若有）
+status: ACTIVE | INVALID            # INVALID 后从最早变化点重跑
