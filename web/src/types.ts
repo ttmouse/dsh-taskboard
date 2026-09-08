@@ -177,6 +177,7 @@ export interface Project {
   name: string;
   workspacePath: string | null;
   issueCount: number;
+  automationEnabled: boolean;
   createdAt: string;
   updatedAt: string;
 }

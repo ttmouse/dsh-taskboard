@@ -7,6 +7,13 @@ description: Manage taskboard projects, issues, comments, and status transitions
 
 Use the dsh-taskboard HTTP API for every project, issue, and comment operation. Base URL: `http://127.0.0.1:47825` (loopback, no auth). Read [references/api.md](references/api.md) before choosing an endpoint or field.
 
+## Command-line only (no browser tools)
+
+All operations and verification in this skill are **command-line / HTTP API only**. Do not use browser tools (`browser_*`), do not open the GUI or a web page to verify anything. Verify by:
+- re-reading task state via the API (`GET /api/tasks/<id>`),
+- running build/typecheck scripts and checking the produced artifacts,
+- checking what the running server actually serves (`curl` the served index.html/assets and compare hashes).
+
 ## Attribution rule
 
 Every mutation (move, comment, relation) must declare its actor — otherwise
@@ -56,7 +63,7 @@ Every write response returns the task's current `version`. Every mutation must c
 3. Create or update issues with `POST /api/tasks` / `POST /api/tasks/<id>/move`; consume their JSON output. Issues created through the API belong to the project you pass in `projectId`.
 4. To claim a `todo` issue, move it to `in_progress` (`POST /api/tasks/<id>/move` with `{"version": <latest>, "status": "in_progress"}`) before starting implementation. If the claim reports a version conflict, or a fresh read shows the status changed, skip the issue and do not implement it.
 5. Include the latest `version` on every concurrent update (move, comment, relation, archive), using the version returned by the most recent read.
-6. Before requesting review, verify the requested work and acceptance criteria.
+6. Before requesting review, verify the requested work and acceptance criteria using only the command line and HTTP API (per "Command-line only" above) — never with browser tools.
 7. After implementation and self-verification, add a comment summarizing the key changes, verification, result, and remaining risks (`POST /api/tasks/<id>/comments` with `{"body": "..."}`); then move the issue to `in_review` with the latest version. Never move it directly to `done`.
 8. Move an issue from `in_review` to `done` only when the user explicitly confirms acceptance or explicitly asks to mark it complete. Self-verification alone is not sufficient.
 9. Move work that cannot continue to `blocked`, and work that will not continue to `canceled`.

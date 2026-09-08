@@ -102,7 +102,7 @@ dsh web
 插件化过程中发现并修复了上游看板代码的子路径部署问题：
 
 1. `web/src/App.tsx` 的 SSE 广播订阅用硬编码绝对路径 `new EventSource("/api/events")`，在 `/dsh-taskboard/` 子路径下丢前缀（改为 `resolveTaskboardUrl("/api/events")`）。其余 API 调用均已走 `resolveTaskboardUrl`（相对 `document.baseURI`）。
-2. 新增 `host=dsh` 宿主模式：把父窗口消息协议（主题同步等）与上游遗留的 Codex 自动化路由解耦，使 iframe 内嵌 DSH 时主题可跟随、自动化走 DSH 会话直连。
+2. 新增 `host=dsh` 宿主模式：把父窗口消息协议（主题同步等）与上游遗留的宿主自动化路由解耦，使 iframe 内嵌 DSH 时主题可跟随、自动化走 DSH 会话直连。
 
 ## 阶段路线
 

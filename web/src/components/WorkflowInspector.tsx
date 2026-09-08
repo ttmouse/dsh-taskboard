@@ -887,8 +887,8 @@ export function WorkflowInspector({
                 />
                 <span>
                   {text(
-                    "记录执行该议题的 Codex 对话",
-                    "Record the Codex conversation that processes this issue",
+                    "记录执行该议题的 AI 对话",
+                    "Record the AI conversation that processes this issue",
                   )}
                 </span>
               </label>

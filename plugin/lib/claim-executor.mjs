@@ -10,7 +10,7 @@
  * spot and no "cannot monitor/intervene" gap.
  */
 import { randomUUID } from 'node:crypto'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { routinesDir } from './claim-routines.mjs'
 
@@ -54,7 +54,75 @@ export async function writeRunRecord(project, run) {
   const runsDir = path.join(project.workspacePath, '.dsh', 'routines', 'runs')
   await mkdir(runsDir, { recursive: true })
   await writeFile(path.join(runsDir, `${record.runId}.json`), JSON.stringify(record, null, 2), 'utf8')
-  return record.runId
+  return record
+}
+
+/** Claim runs write their final record to the same file they opened in
+ *  `status: 'running'` (one run = one file, so no stale running files are
+ *  left behind on a normal finish). */
+export async function writeRunRecordFinal(runId, project, run) {
+  const runsDir = path.join(project.workspacePath, '.dsh', 'routines', 'runs')
+  await mkdir(runsDir, { recursive: true })
+  await writeFile(path.join(runsDir, `${runId}.json`), JSON.stringify(run, null, 2), 'utf8')
+}
+
+/**
+ * A claim run opens a `status: 'running'` record before it boots the agent,
+ * and writes the terminal record when the turn ends. If the host process was
+ * killed between those two writes, the running record is never finalized and
+ * would render as a permanent "running" on the automation panel. Reclaim the
+ * ones left by the claim executor (claim-* session ids) that predate this
+ * boot: they are, by construction, orphans of a previous process — no live
+ * session in the current host can belong to them.
+ */
+export async function finalizeInterruptedRuns(projects, log) {
+  const claimId = new Set()
+  for (const project of projects) {
+    if (project.workspacePath) claimId.add(claimRoutineName(project.id))
+  }
+  if (claimId.size === 0) return 0
+  let reclaimed = 0
+  for (const project of projects) {
+    if (!project.workspacePath) continue
+    const runsDir = path.join(project.workspacePath, '.dsh', 'routines', 'runs')
+    let files
+    try {
+      files = await readdir(runsDir)
+    } catch {
+      continue
+    }
+    for (const file of files) {
+      if (!file.startsWith('run-') || !file.endsWith('.json')) continue
+      const recordPath = path.join(runsDir, file)
+      let record
+      try {
+        record = JSON.parse(await readFile(recordPath, 'utf8'))
+      } catch {
+        continue
+      }
+      if (record.status !== 'running') continue
+      const sessionId = typeof record.sessionId === 'string' ? record.sessionId : ''
+      if (!sessionId.startsWith('claim-')) continue
+      if (!claimId.has(record.routine)) continue
+      const startedAt = typeof record.startedAt === 'number' ? record.startedAt : 0
+      const finishedAt = Date.now()
+      const final = {
+        ...record,
+        status: 'interrupted',
+        finishedAt,
+        durationMs: startedAt > 0 ? finishedAt - startedAt : null,
+        error: 'interrupted: host restarted before the run finished',
+      }
+      try {
+        await writeFile(recordPath, JSON.stringify(final, null, 2), 'utf8')
+        reclaimed += 1
+        log(`[claim] reclaimed interrupted run ${record.runId} (${record.routine})`)
+      } catch {
+        // keep going; the record simply stays running
+      }
+    }
+  }
+  return reclaimed
 }
 
 /** Resolve agent options for the claim run (per-project model override). */
@@ -95,7 +163,7 @@ export async function executeClaimInProcess({ ctx, project, model, prompt, log }
   const sessionId = `claim-${project.id.slice(0, 8)}-${randomUUID().slice(0, 8)}`
   const startedAt = Date.now()
   let handle
-  const runId = await writeRunRecord(project, {
+  const runRecord = await writeRunRecord(project, {
     status: 'running',
     startedAt,
     sessionId,
@@ -134,8 +202,9 @@ export async function executeClaimInProcess({ ctx, project, model, prompt, log }
   } catch (error) {
     const message = `agent create failed: ${error instanceof Error ? error.message : String(error)}`
     log(`[claim] ${project.id}: ${message}`)
-    if (runId) {
-      await writeRunRecord(project, {
+    if (runRecord) {
+      await writeRunRecordFinal(runRecord.runId, project, {
+        ...runRecord,
         status: 'failed',
         startedAt,
         finishedAt: Date.now(),
@@ -179,8 +248,9 @@ export async function executeClaimInProcess({ ctx, project, model, prompt, log }
       await sleep(2000)
     }
     const digest = digestFromEvents(events)
-    if (runId) {
-      await writeRunRecord(project, {
+    if (runRecord) {
+      await writeRunRecordFinal(runRecord.runId, project, {
+        ...runRecord,
         status: finished ? 'ok' : 'failed',
         startedAt,
         finishedAt: Date.now(),

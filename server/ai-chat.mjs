@@ -313,7 +313,7 @@ export class AiChatService {
               (resumingThreadId && normalized.threadId !== resumingThreadId)
               || (startedThreadId && normalized.threadId !== startedThreadId)
             ) {
-              throw new Error("Codex returned an unexpected thread id");
+              throw new Error("AI engine returned an unexpected thread id");
             }
             startedThreadId = normalized.threadId;
             this.database.updateAiChatThread(threadId, { codexThreadId: normalized.threadId });
@@ -429,7 +429,7 @@ export class AiChatService {
         400,
         "INVALID_MODEL",
         requestedModel === undefined
-          ? "Codex did not provide an available model"
+          ? "AI 引擎未提供可用模型"
           : `Unknown model '${requestedModel}'`,
       );
     }
@@ -493,7 +493,7 @@ export class AiChatService {
       return { temporaryDirectory: null, attachmentPaths: [], imagePaths: [] };
     }
     const temporaryDirectory = await mkdtemp(
-      path.join(os.tmpdir(), "codex-taskboard-ai-turn-"),
+      path.join(os.tmpdir(), "taskboard-ai-turn-"),
     );
     try {
       const attachmentPaths = [];
@@ -536,21 +536,21 @@ export class AiChatService {
       publicError = "Interrupted";
     } else if (error) {
       status = "failed";
-      publicError = cappedError(error) || "Codex turn failed";
+      publicError = cappedError(error) || "AI turn failed";
     } else if (terminalOutcome() === "failed") {
       status = "failed";
-      publicError = terminalError() || "Codex reported a failed turn";
+      publicError = terminalError() || "AI reported a failed turn";
     } else if (result.exitCode !== 0) {
       status = "failed";
       publicError = result.exitCode === null
-        ? `Codex exited due to signal ${result.signal ?? "unknown"}`
-        : `Codex exited with code ${result.exitCode}`;
+        ? `AI exited due to signal ${result.signal ?? "unknown"}`
+        : `AI exited with code ${result.exitCode}`;
     } else if (terminalOutcome() !== "completed") {
       status = "failed";
-      publicError = "Codex exited without reporting turn completion";
+      publicError = "AI exited without reporting turn completion";
     } else if (!resumingThreadId && !startedThreadId()) {
       status = "failed";
-      publicError = "Codex did not provide a thread id";
+      publicError = "AI did not provide a thread id";
     } else {
       status = "completed";
     }

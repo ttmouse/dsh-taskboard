@@ -87,8 +87,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       error: {
         code: "SERVICE_UNAVAILABLE",
         message: apiText(
-          "无法连接本地 Taskboard 服务，请重新通过 Taskboard 启动 Codex。",
-          "Could not connect to the local Taskboard service. Start Codex from Taskboard again.",
+          "无法连接本地 Taskboard 服务，请重新通过 Taskboard 启动服务。",
+          "Could not connect to the local Taskboard service. Start the service again.",
         ),
       },
     });
@@ -139,22 +139,6 @@ export async function getHostRuntime(signal?: AbortSignal): Promise<HostContext 
     }) | null;
   }>("/api/local/host-runtime", { signal });
   return data.runtime;
-}
-
-export async function getCodexThreadProgress(
-  threadIds: string[],
-  signal?: AbortSignal,
-): Promise<Record<string, { completed: number | null; total: number | null; running: boolean } | null>> {
-  const query = new URLSearchParams();
-  for (const threadId of threadIds) query.append("threadId", threadId);
-  const data = await request<{
-    progress: Record<string, {
-      completed: number | null;
-      total: number | null;
-      running: boolean;
-    } | null>;
-  }>(`/api/local/codex-thread-progress?${query}`, { signal });
-  return data.progress;
 }
 
 export async function publishHostRuntime(context: HostContext): Promise<void> {
@@ -309,6 +293,12 @@ export interface RoutineRunInfo {
   error: string | null;
   digest: string | null;
   sessionId: string | null;
+  /** 认领前置检查（check gate）的摘要，skipped/failed 时存在。 */
+  check?: {
+    command?: string;
+    todoCount?: number;
+    timedOut?: boolean;
+  } | null;
 }
 
 /** 一条例程：YAML 字段 + 最近运行。 */

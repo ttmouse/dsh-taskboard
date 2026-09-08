@@ -52,6 +52,7 @@ export function buildClaimPrompt(project) {
     `你是 dsh-taskboard 的自动认领例程，处理「${project.name}」项目（项目 ID：${project.id}，项目目录：${project.workspacePath}）。`,
     '使用 manage-taskboard 技能执行一次自动认领：找到该项目最早的 todo 议题，读取最新内容与全部评论后认领（移动到 in_progress），实现并自验后回写总结评论、移到 in_review。',
     '所有细节（API 基址、乐观并发、状态流转规则）以技能文档为准。',
+    '全程仅使用命令行与 HTTP API（curl / 构建脚本 / 服务器资产检查）完成操作与自验；禁止调用任何浏览器工具（browser_*），不要打开 GUI 或网页验证。',
   ].join('\n')
 }
 

@@ -3,7 +3,7 @@ import type { ActorIdentity, AssigneeTarget } from "./types";
 export const CODEX_AGENT_ACTOR: ActorIdentity = {
   type: "agent",
   id: "codex-agent",
-  name: "Reasonix Agent",
+  name: "AI Agent",
   avatarUrl: null,
 };
 

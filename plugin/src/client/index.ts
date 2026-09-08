@@ -80,7 +80,7 @@ const GUI_THEME_ATTR = 'data-ds-dark-theme'
 /** Message the app accepts from its parent window to switch theme. */
 const THEME_MESSAGE = 'taskboard:theme'
 
-/** host=dsh turns on the app's parent-message protocol without Codex automation routing. */
+/** host=dsh turns on the app's parent-message protocol without host automation routing. */
 const HOST_QUERY = 'host'
 const HOST_VALUE = 'dsh'
 
@@ -520,24 +520,43 @@ function mountExecutionBridge(
   frame: () => HTMLIFrameElement | undefined,
   t: (key: string, params?: Record<string, unknown>) => string,
 ): () => void {
-  /** Wait until the freshly started session is current, then prompt into it. */
-  const promptIntoCurrent = (prompt: string): Promise<boolean> =>
+  /**
+   * Wait until the session started by `workspaces.startSession` becomes
+   * current, then prompt into it. `startSession` navigates asynchronously
+   * (its workspace connect is fire-and-forget), so naively prompting into
+   * "whatever is current" races ahead and queues the task prompt into the
+   * conversation that happens to be selected — usually the one the user was
+   * in with the board open. Track the pre-click session and only accept a
+   * different one as the started session; after the timeout, fall back to
+   * the current session so a reused (already-current) blank session still
+   * receives the prompt.
+   */
+  const promptIntoStarted = (prompt: string, before: string | null | undefined): Promise<boolean> =>
     new Promise((resolve) => {
       const startedAt = Date.now()
+      const queueInto = (target: string): Promise<boolean> => {
+        const binding = sessions.binding(target)
+        if (binding === undefined) return Promise.resolve(false)
+        return Promise.race([
+          binding.session.prompt([{ type: 'text', text: prompt }], 'queue').then((result) => result.ok),
+          new Promise<boolean>((r) => setTimeout(() => r(false), 20000)),
+        ])
+      }
       const check = (): void => {
         const snapshot = sessions.list.getSnapshot()
         const current = snapshot?.current
-        if (typeof current === 'string' && current !== '') {
-          const binding = sessions.binding(current)
-          if (binding !== undefined) {
-            void Promise.race([
-              binding.session.prompt([{ type: 'text', text: prompt }], 'queue').then((result) => result.ok),
-              new Promise<boolean>((r) => setTimeout(() => r(false), 20000)),
-            ]).then(resolve)
-            return
-          }
+        if (typeof current === 'string' && current !== '' && current !== before) {
+          void queueInto(current).then(resolve)
+          return
         }
         if (Date.now() - startedAt > 15000) {
+          // The navigation never landed (connect failed, or the target blank
+          // session was already current): best-effort prompt into the current
+          // session instead of dropping the handoff.
+          if (typeof current === 'string' && current !== '') {
+            void queueInto(current).then(resolve)
+            return
+          }
           resolve(false)
           return
         }
@@ -556,8 +575,9 @@ function mountExecutionBridge(
         workspaceId = undefined
       }
     }
+    const before = sessions.list.getSnapshot().current ?? null
     workspaces.startSession(workspaceId)
-    const accepted = await promptIntoCurrent(payload.prompt)
+    const accepted = await promptIntoStarted(payload.prompt, before)
     if (!accepted) appendTaskComment(payload.taskId, t('execute.failed'))
   }
 

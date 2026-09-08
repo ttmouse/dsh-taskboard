@@ -73,7 +73,7 @@ export async function resolveAiWorkspace(projectId, codexStatePath, database) {
 }
 
 function sanitizeModels(value) {
-  if (!Array.isArray(value)) throw new Error("Codex returned an invalid model catalog");
+  if (!Array.isArray(value)) throw new Error("AI engine returned an invalid model catalog");
   return value.flatMap((model) => {
     if (
       !model
@@ -125,7 +125,7 @@ function listSkills(codexExecutable, workspacePath, processEnv) {
     let buffer = "";
     let settled = false;
     const timeout = setTimeout(
-      () => finish(new Error("Timed out while reading Codex skills")),
+      () => finish(new Error("Timed out while reading AI engine skills")),
       CATALOG_TIMEOUT_MS,
     );
 
@@ -145,7 +145,7 @@ function listSkills(codexExecutable, workspacePath, processEnv) {
 
     function handleMessage(message) {
       if (message?.id === 1) {
-        if (message.error) return finish(new Error("Codex app-server rejected initialization"));
+        if (message.error) return finish(new Error("AI engine app-server rejected initialization"));
         send({ method: "initialized" });
         send({
           id: 2,
@@ -155,7 +155,7 @@ function listSkills(codexExecutable, workspacePath, processEnv) {
         return;
       }
       if (message?.id !== 2) return;
-      if (message.error) return finish(new Error("Codex app-server could not list skills"));
+      if (message.error) return finish(new Error("AI engine app-server could not list skills"));
       finish(null, Array.isArray(message.result?.data) ? message.result.data : []);
     }
 
@@ -163,7 +163,7 @@ function listSkills(codexExecutable, workspacePath, processEnv) {
     child.stdout.on("data", (chunk) => {
       buffer += chunk;
       if (buffer.length > CATALOG_MAX_BUFFER) {
-        finish(new Error("Codex skills response exceeded the catalog size limit"));
+        finish(new Error("AI engine skills response exceeded the catalog size limit"));
         return;
       }
       let newlineIndex = buffer.indexOf("\n");
@@ -182,7 +182,7 @@ function listSkills(codexExecutable, workspacePath, processEnv) {
     child.once("error", (error) => finish(error));
     child.once("exit", (code, signal) => {
       if (!settled) {
-        finish(new Error(`Codex app-server exited before listing skills (${signal || code})`));
+        finish(new Error(`AI engine app-server exited before listing skills (${signal || code})`));
       }
     });
     child.once("spawn", () => {

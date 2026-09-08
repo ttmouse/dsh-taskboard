@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { execFile, spawn } from "node:child_process";
-import { mkdir, readFile, readdir, stat, unlink, writeFile } from "node:fs/promises";
+import { readdirSync, readFileSync } from "node:fs";
+import { mkdir, readFile, readdir, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { isIP } from "node:net";
 import os from "node:os";
@@ -1175,7 +1176,7 @@ async function discoverSkills(codexExecutable, workspacePath) {
     let settled = false;
     let buffer = "";
     const timeout = setTimeout(() => {
-      finish(new Error("Timed out while reading Codex skills"));
+      finish(new Error("Timed out while reading AI engine skills"));
     }, 10_000);
 
     function finish(error, value) {
@@ -1195,7 +1196,7 @@ async function discoverSkills(codexExecutable, workspacePath) {
     function handleMessage(message) {
       if (message?.id === 1) {
         if (message.error) {
-          finish(new Error("Codex app-server rejected initialization"));
+          finish(new Error("AI engine app-server rejected initialization"));
           return;
         }
         send({ method: "initialized" });
@@ -1208,7 +1209,7 @@ async function discoverSkills(codexExecutable, workspacePath) {
       }
       if (message?.id !== 2) return;
       if (message.error) {
-        finish(new Error("Codex app-server could not list skills"));
+        finish(new Error("AI engine app-server could not list skills"));
         return;
       }
       finish(null, Array.isArray(message.result?.data) ? message.result.data : []);
@@ -1233,7 +1234,7 @@ async function discoverSkills(codexExecutable, workspacePath) {
     child.once("error", (error) => finish(error));
     child.once("exit", (code, signal) => {
       if (!settled) {
-        finish(new Error(`Codex app-server exited before listing skills (${signal || code})`));
+        finish(new Error(`AI engine app-server exited before listing skills (${signal || code})`));
       }
     });
     child.once("spawn", () => {
@@ -1286,7 +1287,7 @@ async function discoverMcpServers(codexExecutable) {
     maxBuffer: 2 * 1024 * 1024,
   });
   const entries = JSON.parse(result.stdout);
-  if (!Array.isArray(entries)) throw new Error("Codex returned an invalid MCP server list");
+  if (!Array.isArray(entries)) throw new Error("AI engine returned an invalid MCP server list");
   return entries
     .filter((entry) => (
       entry
@@ -1327,12 +1328,77 @@ export function resolveServerOptions(options = {}) {
     staticDirectory: options.staticDirectory ?? path.join(PROJECT_ROOT, "dist", "web"),
     skillPath: options.skillPath ?? path.join(PROJECT_ROOT, "skills", "manage-taskboard", "SKILL.md"),
     routinesDirectory: options.routinesDirectory ?? process.env.CODEX_TASKBOARD_ROUTINES_DIR ?? null,
+    routinesProjectDir: options.routinesProjectDir
+      ?? process.env.DSH_ROUTINES_PROJECT_DIR
+      ?? discoverRoutinesProjectDir() ?? null,
+    routinesDaemonLabel: options.routinesDaemonLabel
+      ?? process.env.DSH_ROUTINES_DAEMON_LABEL
+      ?? discoverRoutinesDaemonLabel() ?? null,
     codexExecutable: options.codexExecutable ?? process.env.CODEX_EXECUTABLE ?? "codex",
     codexStatePath: options.codexStatePath
       ?? path.join(codexHome, ".codex-global-state.json"),
     codexProcessesPath: options.codexProcessesPath
       ?? path.join(codexHome, "process_manager", "chat_processes.json"),
   };
+}
+
+/** Scan ~/Library/LaunchAgents for a dsh-routines agent and return its WorkingDirectory. */
+function discoverRoutinesProjectDir() {
+  const agent = findRoutinesLaunchAgent();
+  return agent?.workingDirectory ?? null;
+}
+
+/** Scan ~/Library/LaunchAgents for a dsh-routines agent and return its Label. */
+function discoverRoutinesDaemonLabel() {
+  const agent = findRoutinesLaunchAgent();
+  return agent?.label ?? null;
+}
+
+/**
+ * Locate the launchd agent that runs the dsh-routines scheduler (the process
+ * that owns <projectDir>/.dsh/routines/state.json). The scheduler decides its
+ * state path from its own working directory (projectDir), which is the
+ * agent's WorkingDirectory — not the board's routines directory. Parse the
+ * plist textually (macOS-only; env overrides exist for other setups).
+ * @returns {{label: string, workingDirectory: string} | null}
+ */
+function findRoutinesLaunchAgent() {
+  try {
+    const agentsDir = path.join(os.homedir(), "Library", "LaunchAgents");
+    const files = readdirSyncSafe(agentsDir);
+    for (const file of files) {
+      if (!file.endsWith(".plist")) continue;
+      if (!/dsh|routine/i.test(file)) continue;
+      const text = readFileSyncSafe(path.join(agentsDir, file));
+      if (text === null) continue;
+      const label = /<key>Label<\/key>\s*<string>([^<]+)<\/string>/.exec(text)?.[1];
+      const workingDirectory = /<key>WorkingDirectory<\/key>\s*<string>([^<]+)<\/string>/.exec(text)?.[1];
+      const argv = /<key>ProgramArguments<\/key>[\s\S]*?<\/array>/.exec(text)?.[0] ?? "";
+      const runsRoutines = /routines/.test(argv) || /dsh/.test(argv);
+      if (label && workingDirectory && runsRoutines) {
+        return { label, workingDirectory };
+      }
+    }
+  } catch {
+    // Not macOS or no agents dir: env overrides are the fallback.
+  }
+  return null;
+}
+
+function readdirSyncSafe(dir) {
+  try {
+    return readdirSync(dir);
+  } catch {
+    return [];
+  }
+}
+
+function readFileSyncSafe(file) {
+  try {
+    return readFileSync(file, "utf8");
+  } catch {
+    return null;
+  }
 }
 
 export function resolvePort(value = process.env.CODEX_TASKBOARD_PORT ?? "47824") {
@@ -1389,8 +1455,11 @@ async function latestRoutineRun(cwd, name) {
  * `paused` is reported as the inverse of the claim automation switch (the
  * YAML itself is always paused so the external ops runner skips it).
  * @param claimSwitch - optional (routineName) => automation.enabled lookup.
+ * @param routinesProjectDir - scheduler working dir whose state.json owns the
+ *   authoritative paused list for non-claim routines (dsh-routines ignores the
+ *   YAML `paused` key; pause/resume lives in <projectDir>/.dsh/routines/state.json).
  */
-async function listRoutines(routinesDirectory, claimSwitch) {
+async function listRoutines(routinesDirectory, claimSwitch, routinesProjectDir) {
   if (!routinesDirectory) return { routinesDirectory: null, routines: [] };
   let files;
   try {
@@ -1399,6 +1468,7 @@ async function listRoutines(routinesDirectory, claimSwitch) {
     return { routinesDirectory, routines: [] };
   }
   const runs = await readRoutineRuns(path.join(routinesDirectory, "runs"));
+  const statePaused = await readRoutinesStatePaused(routinesProjectDir);
   const now = Date.now();
   const routines = [];
   for (const file of files) {
@@ -1424,13 +1494,22 @@ async function listRoutines(routinesDirectory, claimSwitch) {
           error: run.error ?? null,
           digest: run.digest ?? null,
           sessionId: run.sessionId ?? null,
+          check: run.check ?? null,
         } : null,
         raw,
         unknownKeys,
       };
       if (claimSwitch) {
         const claimEnabled = claimSwitch(parsed.name);
-        if (claimEnabled !== undefined) entry.paused = !claimEnabled;
+        if (claimEnabled !== undefined) {
+          // Claim routine: its on/off switch IS the board automation record.
+          entry.paused = !claimEnabled;
+        } else if (statePaused) {
+          // Non-claim routine: the dsh-routines scheduler only honours the
+          // paused set in its state.json (YAML `paused` is not part of its
+          // schema), so report the authoritative state.
+          entry.paused = statePaused.has(parsed.name);
+        }
       }
       routines.push(entry);
     } catch {
@@ -1439,6 +1518,83 @@ async function listRoutines(routinesDirectory, claimSwitch) {
   }
   routines.sort((a, b) => String(a.name).localeCompare(String(b.name)));
   return { routinesDirectory, routines };
+}
+
+/**
+ * Read the dsh-routines paused set from the scheduler's state.json.
+ * The scheduler owns `<projectDir>/.dsh/routines/state.json` and decides
+ * pause purely from its `paused` list — YAML `paused` keys are ignored.
+ * @returns {Promise<Set<string> | null>} - null when the project dir is
+ *   unknown or the state file cannot be read (caller falls back to YAML).
+ */
+async function readRoutinesStatePaused(routinesProjectDir) {
+  if (!routinesProjectDir) return null;
+  try {
+    const text = await readFile(
+      path.join(routinesProjectDir, ".dsh", "routines", "state.json"),
+      "utf8",
+    );
+    const parsed = JSON.parse(text);
+    const paused = Array.isArray(parsed?.paused) ? parsed.paused : [];
+    return new Set(paused.filter((name) => typeof name === "string"));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Persist a routine's paused state in the dsh-routines scheduler's
+ * state.json (the only paused control the external runner honours), then
+ * restart the scheduler daemon so it re-reads the file. The daemon loads
+ * state.json once at boot and never watches it, so a restart is required
+ * for the toggle to take effect.
+ * @param name - routine name.
+ * @param paused - desired paused flag.
+ * @param routinesProjectDir - scheduler working dir (owner of state.json).
+ * @param daemonLabel - launchd label to kickstart, or null to skip restart.
+ * @returns true when the state file was written.
+ */
+async function applyRoutinesPaused(name, paused, routinesProjectDir, daemonLabel) {
+  if (!routinesProjectDir) return false;
+  const statePath = path.join(routinesProjectDir, ".dsh", "routines", "state.json");
+  let state;
+  try {
+    state = JSON.parse(await readFile(statePath, "utf8"));
+  } catch {
+    state = { paused: [], lastRunAt: {} };
+  }
+  const pausedList = Array.isArray(state.paused) ? state.paused.filter((n) => typeof n === "string") : [];
+  const next = paused
+    ? (pausedList.includes(name) ? pausedList : [...pausedList, name])
+    : pausedList.filter((n) => n !== name);
+  state.paused = next;
+  if (typeof state.lastRunAt !== "object" || state.lastRunAt === null) state.lastRunAt = {};
+  await mkdir(path.dirname(statePath), { recursive: true });
+  const tmp = `${statePath}.tmp-${process.pid}`;
+  await writeFile(tmp, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+  try {
+    await rename(tmp, statePath);
+  } catch (error) {
+    await unlink(tmp).catch(() => {});
+    throw error;
+  }
+  if (daemonLabel) kickstartRoutinesDaemon(daemonLabel);
+  return true;
+}
+
+/** Restart the launchd agent running the dsh-routines scheduler (best-effort). */
+function kickstartRoutinesDaemon(daemonLabel) {
+  try {
+    const domain = process.platform === "darwin" ? `gui/${os.userInfo().uid}` : `user/${os.userInfo().uid}`;
+    const child = spawn("launchctl", ["kickstart", "-k", `${domain}/${daemonLabel}`], {
+      detached: true,
+      stdio: "ignore",
+    });
+    child.unref();
+  } catch {
+    // Restart failure leaves the state file updated; it applies on the next
+    // scheduler boot. Never break the API for a daemon hiccup.
+  }
 }
 
 /**
@@ -1979,6 +2135,7 @@ export function createTaskboardServer(options = {}) {
           return sendJson(response, 200, await listRoutines(
             resolved.routinesDirectory,
             (name) => claimAutomationEnabled(database, name),
+            resolved.routinesProjectDir,
           ));
         }
         if (request.method === "POST") {
@@ -2094,6 +2251,17 @@ export function createTaskboardServer(options = {}) {
             paused: body.paused === undefined ? Boolean(current.paused) : Boolean(body.paused),
           };
           await writeFile(file, serializeRoutine(routine), "utf8");
+          // dsh-routines only honours paused state in its state.json (the YAML
+          // key is not part of its schema), so mirror the toggle there and
+          // restart the scheduler daemon so it re-reads the file.
+          if (body.paused !== undefined) {
+            await applyRoutinesPaused(
+              name,
+              Boolean(body.paused),
+              resolved.routinesProjectDir,
+              resolved.routinesDaemonLabel,
+            );
+          }
           return sendJson(response, 200, { updated: name });
         }
         if (request.method === "DELETE") {

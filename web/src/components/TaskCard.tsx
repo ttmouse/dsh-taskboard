@@ -41,8 +41,8 @@ interface CommonTaskCardProps {
   onDragEnd: () => void;
 }
 
-/** reasonix 简化卡片接口（由 BoardColumn 调用） */
-interface ReasonixTaskCardProps extends CommonTaskCardProps {
+/** 看板列简化卡片接口（由 BoardColumn 调用） */
+interface BoardTaskCardProps extends CommonTaskCardProps {
   statusIndex: number;
   onMove: (task: Task, status: TaskStatus) => void;
   onOpenThread: (threadId: string) => void;
@@ -60,7 +60,7 @@ interface FullTaskCardProps extends CommonTaskCardProps {
   onOpenConversation: (conversation: TaskConversationItem) => void;
 }
 
-export type TaskCardProps = ReasonixTaskCardProps | FullTaskCardProps;
+export type TaskCardProps = BoardTaskCardProps | FullTaskCardProps;
 
 const PRIORITY_LABELS: Record<TaskPriority, string> = {
   none: "无优先级",
@@ -358,8 +358,8 @@ function AssigneeControl({
   );
 }
 
-/** reasonix 简化卡片：由 BoardColumn 驱动（onMove/onOpenThread） */
-function ReasonixTaskCard({
+/** 看板列简化卡片：由 BoardColumn 驱动（onMove/onOpenThread） */
+function BoardTaskCard({
   task,
   statusIndex,
   isDragging,
@@ -373,7 +373,7 @@ function ReasonixTaskCard({
   onDragStart,
   onDragEnd,
   onOpenThread,
-}: ReasonixTaskCardProps) {
+}: BoardTaskCardProps) {
   const dueDate = task.dueDate
     ? new Intl.DateTimeFormat("zh-CN", { month: "short", day: "numeric" }).format(new Date(`${task.dueDate}T12:00:00`))
     : null;
@@ -689,5 +689,5 @@ export function TaskCard(props: TaskCardProps) {
   if ("presentation" in props) {
     return <FullTaskCard {...props} />;
   }
-  return <ReasonixTaskCard {...props} />;
+  return <BoardTaskCard {...props} />;
 }

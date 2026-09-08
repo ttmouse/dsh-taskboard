@@ -349,7 +349,7 @@ function initialNodes(): WorkflowCanvasNode[] {
         ...paletteData("codex-review"),
         title: "审核交付结果",
         description: "检查产物、测试与验收条件",
-        meta: "Codex · 自动审核",
+        meta: "AI · 自动审核",
       },
     },
     {

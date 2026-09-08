@@ -1,7 +1,7 @@
 import type { ReactNode, SVGProps } from "react";
 import type { TaskPriority, TaskStatus } from "../types";
 
-// Geometry is sourced from Linear's live icon assets and Codex's native controls.
+// Geometry is sourced from Linear's live icon assets and the host's native controls.
 // Keep SVG definitions here so product components never draw their own icons.
 const ICONS = {
   alert: {

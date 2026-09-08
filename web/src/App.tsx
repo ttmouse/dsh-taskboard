@@ -174,7 +174,7 @@ interface AutomationQuotaStatus {
 interface ProjectAutomationRecord {
   automationId?: string;
   codexProjectId: string;
-  /** 遗留字段：旧 Reasonix 心跳宿主记录（本地缓存仅用于兼容，不再使用）。 */
+  /** 遗留字段：旧宿主记录（本地缓存仅用于兼容，不再使用）。 */
   host?: string;
   status: ProjectAutomationStatus;
   enabledByUser: boolean;
@@ -240,10 +240,10 @@ const DEFAULT_AUTOMATION_OPTIONS = {
   intervalMinutes: 5,
   model: "gpt-5.5",
   reasoningEffort: "high",
-  host: "reasonix",
+  host: "dsh",
 } as const;
 
-/** Reasonix 心跳任务 id：与 server/heartbeat-automation.mjs 的 heartbeatTaskId 保持一致。 */
+/** 认领任务 id：与 server 心跳任务 id 保持一致。 */
 function heartbeatTaskIdFor(projectId: string): string {
   return `taskboard_claim_${projectId}`;
 }
@@ -313,9 +313,7 @@ function readProjectAutomations(): ProjectAutomations {
       const reasoningEffort = candidate.reasoningEffort ?? "high";
       const enabledByUser = candidate.enabledByUser ?? candidate.status === "ACTIVE";
       const quotaAware = candidate.quotaAware ?? false;
-      const host = candidate.host === "reasonix" || candidate.host === "dsh"
-        ? candidate.host
-        : "reasonix";
+      const host = candidate.host === "dsh" ? candidate.host : "dsh";
       if (
         (candidate.automationId !== undefined && typeof candidate.automationId !== "string")
         || typeof candidate.codexProjectId !== "string"
@@ -686,7 +684,7 @@ export function App() {
   const selectedDeviceWorkspacePath = deviceWorkspacePaths[selectedProjectId];
   const selectedProjectAutomation = projectAutomations[selectedProjectId];
   const automationProjectContext = useMemo(() => {
-    // Reasonix 独立模式（浏览器直接使用）：自动认领通过本地心跳任务实现，
+    // 独立模式（浏览器直接使用）：自动认领通过本地心跳任务实现，
     // workspacePath 取项目自身路径即可，菜单可用。
     if (!embedded || window.parent === window) {
       if (!selectedProject) return { unavailableReason: "请先选择项目" };
@@ -704,7 +702,7 @@ export function App() {
     if (!selectedProject) return { unavailableReason: "请先选择项目" };
 
     // ChatGPT cloud projects (`g-p-*`) are visible in the shared sidebar, but
-    // Codex automations only accept local Codex project IDs. Treating a cloud
+    // local automations only accept local project IDs. Treating a cloud
     // project as a direct match makes the native API reject the request (432).
     const isLocalCodexProject = (projectId: string) => !projectId.startsWith("g-p-");
     const directCodexProject = isLocalCodexProject(selectedProject.id)
@@ -726,7 +724,7 @@ export function App() {
       )?.id;
 
     if (!workspacePath || !codexProjectId) {
-      return { unavailableReason: "请先在 Codex 中添加并映射该项目目录" };
+      return { unavailableReason: "请先在宿主中添加并映射该项目目录" };
     }
     if (!manageTaskboardSkillPath) {
       return { unavailableReason: "任务面板还没有读取到 Skill 路径" };
@@ -842,7 +840,7 @@ export function App() {
     const response = new Promise<AutomationHostResponse>((resolve, reject) => {
       const timeoutId = window.setTimeout(() => {
         pendingAutomationRequestsRef.current.delete(requestId);
-        reject(new Error("Codex 自动化没有响应，请稍后重试"));
+        reject(new Error("宿主自动化没有响应，请稍后重试"));
       }, 10_000);
       pendingAutomationRequestsRef.current.set(requestId, { resolve, reject, timeoutId });
     });
@@ -878,7 +876,7 @@ export function App() {
       return;
     }
     if (!selectedProjectId || !automationProjectContext.codexProjectId || automationRequestInFlightRef.current) return;
-    // Reasonix 独立模式：从本地心跳任务读取状态
+    // 独立模式：从本地心跳任务读取状态
     if (!embedded || window.parent === window) {
       automationRequestInFlightRef.current = true;
       setAutomationPending(true);
@@ -1157,7 +1155,7 @@ export function App() {
         pendingAutomationRequestsRef.current.delete(payload.requestId);
         if (payload.ok) pending.resolve(payload as AutomationHostResponse);
         else pending.reject(new Error(
-          typeof payload.error === "string" ? payload.error : "Codex 无法更新自动化",
+          typeof payload.error === "string" ? payload.error : "宿主无法更新自动化",
         ));
         return;
       }
@@ -1175,7 +1173,7 @@ export function App() {
       if (message.type === "taskboard:thread-create-error" && message.payload) {
         const payload = message.payload as { taskId?: unknown; error?: unknown };
         setOpeningThreadTaskId(null);
-        setActionError(typeof payload.error === "string" ? payload.error : "无法在 Codex 中创建对话。");
+        setActionError(typeof payload.error === "string" ? payload.error : "无法在宿主中创建对话。");
         return;
       }
 
@@ -1919,7 +1917,7 @@ export function App() {
       setAnnouncement(`${trimmed} 为早期共享线程 id，无对应独立会话，已打开 dsh 会话页。`);
       return;
     }
-    // dsh 心跳线程由 DeepSeek Harness 执行，Reasonix 中无对应对话：
+    // dsh 心跳线程由 DeepSeek Harness 执行，外部宿主无对应对话：
     // headless 会话 id 与线程 id 一致（runner 每次运行生成 dsh-<uuid> 并注入
     // DSH_SESSION_ID），因此用 ?session= 深链直达该次执行的真实会话。
     if (isDshThreadId(trimmed)) {
@@ -1943,7 +1941,10 @@ export function App() {
       return;
     }
 
-    window.location.assign(`reasonix://threads/${encodeURIComponent(trimmed)}`);
+    // 非 DSH 线程（如 AI 对话引擎创建的外部线程）：没有独立的本地会话页，
+    // 打开 DSH 会话浏览页兜底。
+    window.open(`${DSH_WEB_URL}/sessions`, "_blank", "noopener,noreferrer");
+    setAnnouncement("该线程没有对应的本地会话，已打开会话浏览页。");
   }
 
   function openTaskConversation(conversation: TaskConversationItem) {
@@ -1964,7 +1965,7 @@ export function App() {
 
   function openTaskInThread(task: Task) {
     const threadId = task.threadId?.trim() ?? "";
-    // dsh 心跳线程：直接打开该次执行的 dsh 会话，而不是在 Reasonix 新建对话。
+    // dsh 心跳线程：直接打开该次执行的 dsh 会话，而不是新建外部对话。
     if (isDshThreadId(threadId)) {
       // 宿主（codex/dsh）内嵌时交给宿主在当前页面内切换会话，不新开页面；
       // 独立模式回退到 dsh 深链新标签。
@@ -1996,7 +1997,7 @@ export function App() {
 
     if (!embedded || window.parent === window) {
       // host=dsh：在同一 GUI 内驱动真实 DSH 会话（由插件宿主监听执行），
-      // 而不是跳转到 Reasonix 新建对话。
+      // 独立模式（无宿主）没有可用的会话执行路径。
       if (hostMessaging) {
         window.parent.postMessage({
           type: "taskboard:dsh-execute",
@@ -2011,10 +2012,7 @@ export function App() {
         setAnnouncement("已发送给 DeepSeek Harness 执行，切换到了对应会话。");
         return;
       }
-      const query = new URLSearchParams();
-      if (workspacePath) query.set("path", workspacePath);
-      query.set("prompt", prompt);
-      window.location.assign(`reasonix://new?${query.toString().replace(/\+/g, "%20")}`);
+      setActionError("请在 DSH Web GUI 中以插件方式打开看板，才能驱动真实会话执行议题。");
       return;
     }
     if (openingThreadTaskId) return;
@@ -2157,7 +2155,11 @@ export function App() {
                 className={`project-nav-item${selectedProjectId === project.id ? " active" : ""}`}
                 onClick={() => changeProject(project.id)}
               >
-                <span className="project-dot" aria-hidden="true" />
+                <span
+                  className={`project-dot${project.automationEnabled ? " has-automation" : ""}`}
+                  aria-hidden="true"
+                  title={project.automationEnabled ? "已开启自动认领" : undefined}
+                />
                 <span>{project.name}</span>
               </button>
             ))}
@@ -2169,15 +2171,6 @@ export function App() {
               <span aria-hidden="true" />
               {connection === "live" ? "实时同步" : "正在重新连接…"}
             </div>
-            <button
-              type="button"
-              className="theme-toggle"
-              onClick={() => setTheme((current) => current === "dark" ? "light" : "dark")}
-              aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
-            >
-              <span aria-hidden="true"><LinearIcon name={theme === "dark" ? "sun" : "moon"} /></span>
-              <span className="theme-toggle-label">{theme === "dark" ? "浅色模式" : "深色模式"}</span>
-            </button>
           </div>
         </aside>
       )}
@@ -2202,7 +2195,7 @@ export function App() {
                 <button
                   className="detail-back-button codex-sidebar-expand-button"
                   type="button"
-                  aria-label="展开 Codex 侧边栏"
+                  aria-label="展开宿主侧边栏"
                   title="展开侧边栏"
                   onClick={expandCodexSidebar}
                 >
@@ -2468,7 +2461,7 @@ export function App() {
             <div className="project-home-heading">
               <span>任务面板</span>
               <h1>选择项目</h1>
-              <p>从 Codex 项目开始，或继续使用之前保存的项目。</p>
+              <p>从已保存的项目开始，或继续使用之前保存的项目。</p>
             </div>
             {projectsLoading ? (
               <div className="project-grid project-grid-loading" aria-label="正在加载项目" aria-busy="true">
@@ -2501,7 +2494,7 @@ export function App() {
                               <span className="project-card-copy">
                                 <strong>{project.name}</strong>
                                 <span>
-                                  {project.inCodex ? "Codex 项目" : "已保存的项目"}
+                                  {project.inCodex ? "宿主项目" : "已保存的项目"}
                                   {project.issueCount > 0 ? ` · ${project.issueCount} 个议题` : ""}
                                 </span>
                               </span>

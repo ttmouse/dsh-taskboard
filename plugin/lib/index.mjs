@@ -23,7 +23,7 @@ import { fileURLToPath } from 'node:url'
 import z from 'schemastery'
 import { createTaskboardServer } from '../vendor/server/app.mjs'
 import { buildClaimPrompt, cleanupStaleClaimRoutines, reconcileClaimRoutine } from './claim-routines.mjs'
-import { activeClaimSessions, executeClaimInProcess, stopClaimSession, writeRunRecord } from './claim-executor.mjs'
+import { activeClaimSessions, executeClaimInProcess, finalizeInterruptedRuns, stopClaimSession, writeRunRecord } from './claim-executor.mjs'
 import { defaultCheckCommand, runCheck } from './check-gate.mjs'
 
 /** Plugin root: the directory holding lib/ (package.json sits one level up). */
@@ -556,6 +556,20 @@ export function apply(ctx, config) {
       baseUrl = `http://127.0.0.1:${address.port}`
       void pluginLog(`dsh-taskboard: serving ${config.routePrefix} (internal loopback port ${address.port}, data ${dataDirectory})`)
       ctx.logger.info(`dsh-taskboard: serving ${config.routePrefix} (internal loopback port ${address.port}, data ${dataDirectory})`)
+      // Reclaim claim-run records left `running` by a previous host boot.
+      try {
+        const projects = await (await fetch(`${baseUrl}/api/projects`)).json().then((r) => r.projects ?? [])
+        const reclaimed = await finalizeInterruptedRuns(projects, (message) => {
+          void pluginLog(message)
+          ctx.logger.info(`dsh-taskboard: ${message}`)
+        })
+        if (reclaimed > 0) {
+          void pluginLog(`dsh-taskboard: reclaimed ${reclaimed} interrupted claim run(s)`)
+          ctx.logger.info(`dsh-taskboard: reclaimed ${reclaimed} interrupted claim run(s)`)
+        }
+      } catch (error) {
+        void pluginLog(`dsh-taskboard: interrupted-run reclaim failed: ${error instanceof Error ? error.message : String(error)}`)
+      }
       void refreshModelCatalog(ctx, dataDirectory, (message) => {
         void pluginLog(message)
         ctx.logger.info(`dsh-taskboard: ${message}`)

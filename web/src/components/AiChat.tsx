@@ -129,7 +129,7 @@ const PANEL_DEFAULT_GEOMETRY: PanelGeometry = {
 };
 const SKILL_MARKER = AI_CHAT_SKILL_MARKER;
 const SKILL_LINK_PREFIX = "#ai-chat-skill-";
-const COMPOSER_FRAGMENT_MIME = "application/x-codex-taskboard-composer-fragment";
+const COMPOSER_FRAGMENT_MIME = "application/x-taskboard-composer-fragment";
 const COMPOSER_HTML_BLOCKS = new Set([
   "ADDRESS",
   "ARTICLE",
@@ -2164,8 +2164,8 @@ export function AiChat({
           ref={panelRef}
           className={`ai-chat-panel${panelResizeEdge ? ` is-resizing-${panelResizeEdge}` : ""}`}
           style={panelGeometry ?? undefined}
-          aria-label={text("Codex AI 对话", "Codex AI chat")}
-          data-screen-label={text("Codex AI 对话", "Codex AI chat")}
+          aria-label={text("AI 对话", "AI chat")}
+          data-screen-label={text("AI 对话", "AI chat")}
         >
           <div
             className="ai-chat-resize-handle is-top"
@@ -2288,7 +2288,7 @@ export function AiChat({
                 {snapshot.thread.status === "running" && (
                   <div className="ai-chat-running" role="status">
                     <span className="ai-chat-spinner" />
-                    {text("Codex 正在处理", "Codex is working")}
+                    {text("AI 正在处理", "AI is working")}
                   </div>
                 )}
                 {retryableUserEvent && (
@@ -2318,8 +2318,8 @@ export function AiChat({
                   : text("打开一个历史对话", "Open a chat from history")}</strong>
                 <p>{projectId
                   ? text(
-                    "Codex 会在新对话创建时记住当前项目。",
-                    "Codex will remember the current project when it creates the new chat.",
+                    "AI 会在新对话创建时记住当前项目。",
+                    "AI will remember the current project when it creates the new chat.",
                   )
                   : text("进入项目后可以新建对话。", "Open a project to start a new chat.")}</p>
               </div>
@@ -2384,9 +2384,9 @@ export function AiChat({
                 ref={editorRef}
                 className="ai-chat-composer-editor"
                 contentEditable={!composerBlocked}
-                data-placeholder={text("询问 Codex", "Ask Codex")}
+                data-placeholder={text("询问 AI", "Ask AI")}
                 role="textbox"
-                aria-label={text("发送给 Codex 的消息", "Message to Codex")}
+                aria-label={text("发送给 AI 的消息", "Message to AI")}
                 aria-multiline="true"
                 suppressContentEditableWarning
                 onBeforeInput={(event) => rememberComposerBeforeInput(event.nativeEvent as InputEvent)}
@@ -2515,7 +2515,7 @@ export function AiChat({
                     aria-label={text("执行权限", "Execution permissions")}
                   >
                     <header>
-                      <span>{text("应如何批准 Codex 操作？", "How should Codex operations be approved?")}</span>
+                      <span>{text("应如何批准 AI 操作？", "How should AI operations be approved?")}</span>
                       <a
                         href="https://developers.openai.com/codex/security"
                         target="_blank"
@@ -2693,8 +2693,8 @@ export function AiChat({
               <div className="ai-chat-confirm" role="alertdialog" aria-modal="true" aria-labelledby="ai-chat-confirm-title">
                 <strong id="ai-chat-confirm-title">{text("允许完全访问？", "Allow full access?")}</strong>
                 <p>{text(
-                  "本次消息允许 Codex 访问工作区之外的文件和命令。确认只对本次发送生效。",
-                  "This message lets Codex access files and commands outside the workspace. This approval applies only to this message.",
+                  "本次消息允许 AI 访问工作区之外的文件和命令。确认只对本次发送生效。",
+                  "This message lets AI access files and commands outside the workspace. This approval applies only to this message.",
                 )}</p>
                 <div>
                   <button type="button" onClick={() => setPendingDangerInput(null)}>

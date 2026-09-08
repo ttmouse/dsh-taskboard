@@ -48,6 +48,7 @@ function statusInfo(status: string | null, text: (zh: string, en: string) => str
     case "running": return { label: text("运行中", "Running"), tone: "running" };
     case "canceled": return { label: text("已取消", "Canceled"), tone: "idle" };
     case "skipped": return { label: text("已跳过", "Skipped"), tone: "idle" };
+    case "interrupted": return { label: text("已中断", "Interrupted"), tone: "failed" };
     default: return { label: text("从未运行", "Never"), tone: "idle" };
   }
 }
@@ -85,6 +86,8 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
   const [runningName, setRunningName] = useState<string | null>(null);
   const [ranName, setRanName] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  /** 详情对话框：存例程名，渲染时从最新列表取数据，轮询刷新后详情同步更新。 */
+  const [detailName, setDetailName] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -105,6 +108,16 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
     const timer = window.setInterval(() => void load(), 30_000);
     return () => window.clearInterval(timer);
   }, [load]);
+
+  // Esc 关闭详情对话框
+  useEffect(() => {
+    if (!detailName) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setDetailName(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [detailName]);
 
   const submitCreate = async () => {
     try {
@@ -187,6 +200,11 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
       || (routine.prompt ?? "").toLowerCase().includes(searchQuery);
   });
 
+  /** 详情对话框的数据始终来自最新列表（30s 轮询刷新后同步更新）。 */
+  const detailRoutine = detailName
+    ? (routines ?? []).find((routine) => routine.name === detailName) ?? null
+    : null;
+
   return (
     <div className="routines-view" aria-label={text("自动化", "Automation")}>
       <div className="routines-header">
@@ -256,6 +274,13 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
             const status = statusInfo(routine.lastRun?.status ?? null, text);
             return (
               <article className="routine-card" key={routine.name}>
+                {/* 覆盖点击层：点击卡片主体打开详情（对齐 .task-card-open） */}
+                <button
+                  type="button"
+                  className="routine-card-open"
+                  onClick={() => setDetailName(routine.name)}
+                  aria-label={`${routine.name} · ${text("查看详情", "View details")}`}
+                />
                 <header className="routine-card-header">
                   <strong className="routine-name">{routine.name}</strong>
                   {isClaimRoutine(routine.name) && <span className="routine-badge">认领</span>}
@@ -289,7 +314,9 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
                 {routine.lastRun?.error && (
                   <p className="routine-error" title={routine.lastRun.error}>
                     {routine.lastRun.status === "skipped"
-                      ? text("上次运行未结束，本次到点已自动跳过。", "Previous run still in progress; this run was skipped.")
+                      ? (routine.lastRun.check
+                        ? text("本轮已跳过（没有待认领的任务）。", "This run was skipped (no tasks to claim).")
+                        : text("上次运行未结束，本次到点已自动跳过。", "Previous run still in progress; this run was skipped."))
                       : routine.lastRun.error}
                   </p>
                 )}
@@ -314,12 +341,6 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
                     <span aria-hidden="true" />
                   </button>
                 </div>
-                {routine.prompt && (
-                  <details className="routine-prompt">
-                    <summary>{text("查看任务说明", "View prompt")}</summary>
-                    <pre>{routine.prompt}</pre>
-                  </details>
-                )}
                 <div className="routine-actions">
                   <button
                     type="button"
@@ -420,6 +441,181 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
                 {text("删除", "Delete")}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {detailRoutine && (
+        <div
+          className="routine-detail"
+          role="dialog"
+          aria-modal="true"
+          aria-label={detailRoutine.name}
+          onClick={() => setDetailName(null)}
+        >
+          <div className="routine-detail-box" onClick={(event) => event.stopPropagation()}>
+            <header className="routine-detail-header">
+              <div className="routine-detail-title">
+                <h3>{detailRoutine.name}</h3>
+                {isClaimRoutine(detailRoutine.name) && <span className="routine-badge">认领</span>}
+                <span className={`routine-status is-${statusInfo(detailRoutine.lastRun?.status ?? null, text).tone}`}>
+                  {statusInfo(detailRoutine.lastRun?.status ?? null, text).label}
+                </span>
+              </div>
+              <div className="routine-detail-header-actions">
+                <button type="button" className="routine-detail-close" onClick={() => setDetailName(null)} aria-label={text("关闭", "Close")}>×</button>
+              </div>
+            </header>
+            <div className="routine-detail-body">
+              <dl className="routine-detail-rows">
+                <div className="routine-detail-row">
+                  <dt>{text("调度", "Schedule")}</dt>
+                  <dd>{describeSchedule(detailRoutine.schedule, text)}</dd>
+                </div>
+                {detailRoutine.timezone && (
+                  <div className="routine-detail-row">
+                    <dt>{text("时区", "Timezone")}</dt>
+                    <dd>{detailRoutine.timezone}</dd>
+                  </div>
+                )}
+                {detailRoutine.profile && (
+                  <div className="routine-detail-row">
+                    <dt>Profile</dt>
+                    <dd>{detailRoutine.profile}</dd>
+                  </div>
+                )}
+                {detailRoutine.cwd && (
+                  <div className="routine-detail-row">
+                    <dt>{text("目录", "cwd")}</dt>
+                    <dd title={detailRoutine.cwd}>{detailRoutine.cwd}</dd>
+                  </div>
+                )}
+                {detailRoutine.overlap && (
+                  <div className="routine-detail-row">
+                    <dt>{text("重叠策略", "Overlap")}</dt>
+                    <dd>{detailRoutine.overlap}</dd>
+                  </div>
+                )}
+                {detailRoutine.timeoutMin != null && (
+                  <div className="routine-detail-row">
+                    <dt>{text("超时", "Timeout")}</dt>
+                    <dd>{text(`${detailRoutine.timeoutMin} 分钟`, `${detailRoutine.timeoutMin} min`)}</dd>
+                  </div>
+                )}
+                {Array.isArray(detailRoutine.deliver) && detailRoutine.deliver.length > 0 && (
+                  <div className="routine-detail-row">
+                    <dt>{text("交付", "Deliver")}</dt>
+                    <dd>{detailRoutine.deliver.join(", ")}</dd>
+                  </div>
+                )}
+              </dl>
+
+              <section className="routine-detail-section">
+                <h4>{text("最近运行", "Last run")}</h4>
+                {detailRoutine.lastRun ? (
+                  <dl className="routine-detail-rows">
+                    <div className="routine-detail-row">
+                      <dt>{text("开始", "Started")}</dt>
+                      <dd>{formatTime(detailRoutine.lastRun.startedAt)}</dd>
+                    </div>
+                    <div className="routine-detail-row">
+                      <dt>{text("耗时", "Duration")}</dt>
+                      <dd>{formatDuration(detailRoutine.lastRun.durationMs)}</dd>
+                    </div>
+                    {detailRoutine.lastRun.finishedAt != null && (
+                      <div className="routine-detail-row">
+                        <dt>{text("结束", "Finished")}</dt>
+                        <dd>{formatTime(detailRoutine.lastRun.finishedAt)}</dd>
+                      </div>
+                    )}
+                    {detailRoutine.lastRun.exitCode != null && (
+                      <div className="routine-detail-row">
+                        <dt>{text("退出码", "Exit code")}</dt>
+                        <dd>{detailRoutine.lastRun.exitCode}</dd>
+                      </div>
+                    )}
+                    {detailRoutine.lastRun.sessionId && (
+                      <div className="routine-detail-row">
+                        <dt>{text("会话", "Session")}</dt>
+                        <dd className="routine-detail-mono" title={detailRoutine.lastRun.sessionId}>{detailRoutine.lastRun.sessionId}</dd>
+                      </div>
+                    )}
+                    {detailRoutine.lastRun.error && (
+                      <div className="routine-detail-row">
+                        <dt>{text("错误", "Error")}</dt>
+                        <dd className="routine-detail-error" title={detailRoutine.lastRun.error}>{detailRoutine.lastRun.error}</dd>
+                      </div>
+                    )}
+                    {detailRoutine.lastRun.digest && (
+                      <div className="routine-detail-row">
+                        <dt>{text("摘要", "Digest")}</dt>
+                        <dd>{detailRoutine.lastRun.digest}</dd>
+                      </div>
+                    )}
+                  </dl>
+                ) : (
+                  <p className="routine-detail-empty">{text("该例程尚未运行。", "This routine has not run yet.")}</p>
+                )}
+              </section>
+
+              {detailRoutine.prompt && (
+                <section className="routine-detail-section">
+                  <h4>{text("任务说明", "Prompt")}</h4>
+                  <pre className="routine-detail-prompt">{detailRoutine.prompt}</pre>
+                </section>
+              )}
+            </div>
+            <footer className="routine-detail-footer">
+              <span className="routine-detail-hint">
+                {isClaimRoutine(detailRoutine.name)
+                  ? text("认领例程由看板「自动认领」开关驱动。", "Claim routines are driven by the board's auto-claim switch.")
+                  : text("例程由 dsh-routines 调度器按计划执行。", "Routines run on schedule via the dsh-routines scheduler.")}
+              </span>
+              <div className="routine-detail-actions">
+                <button
+                  type="button"
+                  className="is-primary"
+                  disabled={runningName === detailRoutine.name}
+                  onClick={() => void submitRun(detailRoutine.name)}
+                >
+                  {runningName === detailRoutine.name
+                    ? text("触发中…", "Triggering…")
+                    : ranName === detailRoutine.name
+                      ? text("已触发 ✓", "Triggered ✓")
+                      : text("测试执行", "Run now")}
+                </button>
+                {detailRoutine.lastRun?.status === "running" && (
+                  <button type="button" className="is-danger" onClick={() => void submitStop(detailRoutine.name)}>
+                    {text("停止", "Stop")}
+                  </button>
+                )}
+                {!isClaimRoutine(detailRoutine.name) && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditing(detailRoutine);
+                        setRawEdit(detailRoutine.raw ?? "");
+                        setDetailName(null);
+                        setError(null);
+                      }}
+                    >
+                      {text("编辑", "Edit")}
+                    </button>
+                    <button
+                      type="button"
+                      className="is-danger"
+                      onClick={() => {
+                        setConfirmDelete(detailRoutine.name);
+                        setDetailName(null);
+                      }}
+                    >
+                      {text("删除", "Delete")}
+                    </button>
+                  </>
+                )}
+              </div>
+            </footer>
           </div>
         </div>
       )}

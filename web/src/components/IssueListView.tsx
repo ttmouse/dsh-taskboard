@@ -152,7 +152,7 @@ export function IssueListView({
                               onChange={(event) => void onUpdate(task, { assigneeTarget: event.target.value as "current-user" | "codex-agent" }).catch(() => {})}
                             >
                               <option value="current-user">{currentUser.name}</option>
-                              <option value="codex-agent">Codex Agent</option>
+                              <option value="codex-agent">AI Agent</option>
                             </select>
                           </label>
                         </span>

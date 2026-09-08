@@ -374,7 +374,7 @@ export function spawnCodexTurn({
   function consumeLine(line) {
     if (fatalError) return;
     if (line.length > maxLineBytes) {
-      rejectWithDiagnostic(new Error(`Codex JSONL line exceeded ${maxLineBytes} bytes`));
+      rejectWithDiagnostic(new Error(`AI engine JSONL line exceeded ${maxLineBytes} bytes`));
       return;
     }
     if (line.at(-1) === 13) line = line.subarray(0, -1);
@@ -383,7 +383,7 @@ export function spawnCodexTurn({
     try {
       raw = JSON.parse(line.toString("utf8"));
     } catch {
-      rejectWithDiagnostic(new Error("Codex emitted malformed JSONL"));
+      rejectWithDiagnostic(new Error("AI engine emitted malformed JSONL"));
       return;
     }
     try {
@@ -402,7 +402,7 @@ export function spawnCodexTurn({
       if (newline === -1) {
         const remainder = bytes.subarray(offset);
         if (stdoutBuffer.length + remainder.length > maxLineBytes) {
-          rejectWithDiagnostic(new Error(`Codex JSONL line exceeded ${maxLineBytes} bytes`));
+          rejectWithDiagnostic(new Error(`AI engine JSONL line exceeded ${maxLineBytes} bytes`));
           return;
         }
         stdoutBuffer = stdoutBuffer.length === 0
@@ -412,7 +412,7 @@ export function spawnCodexTurn({
       }
       const segment = bytes.subarray(offset, newline);
       if (stdoutBuffer.length + segment.length > maxLineBytes) {
-        rejectWithDiagnostic(new Error(`Codex JSONL line exceeded ${maxLineBytes} bytes`));
+        rejectWithDiagnostic(new Error(`AI engine JSONL line exceeded ${maxLineBytes} bytes`));
         return;
       }
       const line = stdoutBuffer.length === 0

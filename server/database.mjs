@@ -249,6 +249,7 @@ function projectFromRow(row) {
     name: row.name,
     workspacePath: row.workspace_path,
     issueCount: Number(row.issue_count ?? 0),
+    automationEnabled: Number(row.automation_enabled ?? 0) === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -573,7 +574,7 @@ export class TaskboardDatabase {
     }
     this.database.exec(`
       UPDATE tasks
-      SET creator_type = 'agent', creator_id = 'codex-agent', creator_name = 'Reasonix Agent'
+      SET creator_type = 'agent', creator_id = 'codex-agent', creator_name = 'AI Agent'
       WHERE thread_id IS NOT NULL AND version = 1 AND creator_id = 'local-user'
     `);
     const identityTaskColumns = this.database.prepare("PRAGMA table_info(tasks)").all();
@@ -631,7 +632,7 @@ export class TaskboardDatabase {
     }
     this.database.exec(`
       UPDATE comments
-      SET author_type = 'agent', author_id = 'codex-agent', author_name = 'Reasonix Agent'
+      SET author_type = 'agent', author_id = 'codex-agent', author_name = 'AI Agent'
       WHERE thread_id IS NOT NULL AND author_id = 'local'
     `);
     this.database.exec(`
@@ -766,6 +767,7 @@ export class TaskboardDatabase {
         projects.workspace_path,
         projects.created_at,
         projects.updated_at,
+        projects.automation_enabled,
         COUNT(tasks.id) AS issue_count
       FROM projects
       LEFT JOIN tasks
@@ -776,7 +778,8 @@ export class TaskboardDatabase {
         projects.name,
         projects.workspace_path,
         projects.created_at,
-        projects.updated_at
+        projects.updated_at,
+        projects.automation_enabled
       ORDER BY projects.created_at, projects.id
     `).all().map(projectFromRow);
   }

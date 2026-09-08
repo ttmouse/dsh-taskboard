@@ -37,8 +37,8 @@ import { TaskboardIcon } from "./TaskboardIcon";
 type SubmenuName = TaskFilterKey;
 
 const LINK_LABELS = {
-  linked: "Reasonix 已处理",
-  unlinked: "尚未由 Reasonix 处理",
+  linked: "已关联会话",
+  unlinked: "尚未关联会话",
 } as const;
 
 interface TaskFilterMenuProps {
@@ -188,8 +188,8 @@ export function TaskFilterMenu({ tasks, search, labels, filters, onChange }: Tas
     {
       id: "link-linked",
       label: LINK_LABELS.linked,
-      category: text("Reasonix 对话", "Reasonix conversations"),
-      keywords: "reasonix thread task 已处理",
+      category: text("会话关联", "Conversation links"),
+      keywords: "conversation thread task 关联",
       count: countFor("link", (task) => task.conversationRefs.length > 0),
       selected: filters.link === "linked",
       icon: <LinearIcon name="link" />,
@@ -198,8 +198,8 @@ export function TaskFilterMenu({ tasks, search, labels, filters, onChange }: Tas
     {
       id: "link-unlinked",
       label: LINK_LABELS.unlinked,
-      category: text("Reasonix 对话", "Reasonix conversations"),
-      keywords: "reasonix thread task 未处理",
+      category: text("会话关联", "Conversation links"),
+      keywords: "conversation thread task 未关联",
       count: countFor("link", (task) => task.conversationRefs.length === 0),
       selected: filters.link === "unlinked",
       icon: <LinearIcon name="linkOff" />,
@@ -250,8 +250,8 @@ export function TaskFilterMenu({ tasks, search, labels, filters, onChange }: Tas
     },
     {
       id: "link" as const,
-      label: text("Reasonix 关联", "Reasonix link"),
-      keywords: "link linked thread task reasonix 关联",
+      label: text("会话关联", "Conversation links"),
+      keywords: "link linked thread task conversation 关联",
       icon: <LinearIcon name="link" />,
       summary: filters.link === "all" ? null : LINK_LABELS[filters.link],
     },

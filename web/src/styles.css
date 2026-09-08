@@ -312,8 +312,7 @@ kbd {
 }
 
 .nav-item,
-.project-nav-item,
-.theme-toggle {
+.project-nav-item {
   display: flex;
   align-items: center;
   width: 100%;
@@ -329,8 +328,7 @@ kbd {
 }
 
 .nav-item:hover,
-.project-nav-item:hover,
-.theme-toggle:hover {
+.project-nav-item:hover {
   background: var(--surface-hover);
   color: var(--text-primary);
 }
@@ -341,8 +339,7 @@ kbd {
   color: var(--text-primary);
 }
 
-.nav-glyph,
-.theme-toggle > span {
+.nav-glyph {
   display: grid;
   place-items: center;
   width: 16px;
@@ -377,6 +374,11 @@ kbd {
 
 .project-nav-item.active .project-dot {
   background: var(--accent);
+}
+
+.project-nav-item .project-dot.has-automation {
+  border-color: var(--success);
+  background: var(--success);
 }
 
 .project-nav-item span:last-child {
@@ -472,10 +474,6 @@ kbd {
 
 .connection-reconnecting > span:first-child {
   animation: pulse 1.5s ease-in-out infinite;
-}
-
-.theme-toggle {
-  margin-top: 2px;
 }
 
 .workspace {
@@ -9081,16 +9079,6 @@ kbd {
     border-top: 0;
   }
 
-  .theme-toggle {
-    width: auto;
-    margin-top: 0;
-    padding: 4px;
-  }
-
-  .theme-toggle-label {
-    display: none;
-  }
-
 }
 
 @media (max-width: 620px) {
@@ -9524,7 +9512,7 @@ kbd {
   max-width: var(--main-board-max-width, 1248px);
   min-width: 0;
   min-height: 0;
-  padding: 0;
+  padding: 0 0 0 18px;
   overflow-x: auto;
   overflow-y: hidden;
   overscroll-behavior-x: contain;

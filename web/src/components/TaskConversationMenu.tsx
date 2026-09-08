@@ -29,7 +29,7 @@ function conversationStatus(
     }
     return text("正在处理", "Processing");
   }
-  return conversation.kind === "local-ai" ? text("已暂停", "Paused") : "Codex";
+  return conversation.kind === "local-ai" ? text("已暂停", "Paused") : "AI 会话";
 }
 
 export function TaskConversationMenu({

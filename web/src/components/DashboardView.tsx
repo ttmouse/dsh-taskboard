@@ -414,10 +414,10 @@ export function DashboardView({
 
   const summaryBody = projectSummary?.summary
     ?? (summaryLoadFailed || projectSummary?.error
-      ? text("Codex 暂时无法生成项目总结。", "Codex cannot generate the project summary now.")
+      ? text("AI 暂时无法生成项目总结。", "AI cannot generate the project summary now.")
       : text(
-          "Codex 正在整理当前项目的进展、风险和下一步重点…",
-          "Codex is reviewing the project's progress, risks, and next steps…",
+          "AI 正在整理当前项目的进展、风险和下一步重点…",
+          "AI is reviewing the project's progress, risks, and next steps…",
         ));
   const hour = new Date().getHours();
   const greeting = hour < 12
@@ -490,14 +490,14 @@ export function DashboardView({
             </div>
           </header>
 
-          <section className="dashboard-codex-summary" aria-label={text("Codex 项目总结", "Codex project summary")}>
+          <section className="dashboard-codex-summary" aria-label={text("AI 项目总结", "AI project summary")}>
             <div className="dashboard-summary-bubble">
               <p
                 className={summaryTyping ? "is-typing" : undefined}
-                aria-label={summaryReady ? summary : text("Codex 正在整理项目总结", "Codex is preparing the project summary")}
+                aria-label={summaryReady ? summary : text("AI 正在整理项目总结", "AI is preparing the project summary")}
               >{displayedSummary}</p>
             </div>
-            <img className="dashboard-codex-mark" src="codex-agent-logo.png" alt="" aria-hidden="true" />
+            <img className="dashboard-codex-mark" src="favicon.svg" alt="" aria-hidden="true" />
           </section>
         </div>
 
