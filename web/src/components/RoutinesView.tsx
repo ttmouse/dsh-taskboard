@@ -43,10 +43,13 @@ function formatDuration(ms: number | null | undefined): string {
 
 function statusInfo(status: string | null, text: (zh: string, en: string) => string): { label: string; tone: string } {
   switch (status) {
-    case "ok": return { label: text("成功", "OK"), tone: "ok" };
+    case "ok":
+    case "completed": return { label: text("成功", "OK"), tone: "ok" };
     case "failed": return { label: text("失败", "Failed"), tone: "failed" };
     case "running": return { label: text("运行中", "Running"), tone: "running" };
     case "canceled": return { label: text("已取消", "Canceled"), tone: "idle" };
+    case "killed": return { label: text("已终止", "Killed"), tone: "idle" };
+    case "timeout": return { label: text("超时", "Timed out"), tone: "failed" };
     case "skipped": return { label: text("已跳过", "Skipped"), tone: "idle" };
     case "interrupted": return { label: text("已中断", "Interrupted"), tone: "failed" };
     default: return { label: text("从未运行", "Never"), tone: "idle" };

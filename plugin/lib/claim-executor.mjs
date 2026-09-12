@@ -17,6 +17,27 @@ import { routinesDir } from './claim-routines.mjs'
 /** In-flight claim sessions: sessionId -> control record. */
 const ACTIVE = new Map()
 
+/**
+ * Control record for one in-flight claim session. `requestStop` is invoked by
+ * the stop path so the executor's poll loop can distinguish a deliberate user
+ * stop (recorded `canceled`) from a 60-minute deadline or silent failure
+ * (recorded `failed`); `disposed` makes dispose idempotent across the stop
+ * path and the executor's own `finally`.
+ */
+function claimControl(handle, projectId, startedAt) {
+  let stopped = false
+  return {
+    handle,
+    projectId,
+    startedAt,
+    stopped: () => stopped,
+    requestStop: () => {
+      stopped = true
+    },
+    disposed: false,
+  }
+}
+
 /** Short label for the run record's routine field (matches the yaml name). */
 export function claimRoutineName(projectId) {
   return `taskboard-claim-${projectId.slice(0, 12)}`
@@ -216,7 +237,8 @@ export async function executeClaimInProcess({ ctx, project, model, prompt, log }
     return false
   }
 
-  ACTIVE.set(sessionId, { handle, projectId: project.id, startedAt })
+  const control = claimControl(handle, project.id, startedAt)
+  ACTIVE.set(sessionId, control)
   try {
     // The prompt message MUST carry a stable id: dsh-session persists
     // user/message events with the message verbatim and validates on load
@@ -247,27 +269,35 @@ export async function executeClaimInProcess({ ctx, project, model, prompt, log }
       }
       await sleep(2000)
     }
+    const stoppedByUser = control.stopped()
     const digest = digestFromEvents(events)
     if (runRecord) {
       await writeRunRecordFinal(runRecord.runId, project, {
         ...runRecord,
-        status: finished ? 'ok' : 'failed',
+        status: finished ? 'ok' : stoppedByUser ? 'canceled' : 'failed',
         startedAt,
         finishedAt: Date.now(),
         durationMs: Date.now() - startedAt,
-        exitCode: finished ? 0 : 1,
+        exitCode: finished ? 0 : stoppedByUser ? null : 1,
         sessionId,
         ...(digest ? { digest } : {}),
-        ...(finished ? {} : { error: 'claim turn did not end within 60min (stopped?)' }),
+        ...(finished
+          ? {}
+          : stoppedByUser
+            ? { error: 'stopped by user' }
+            : { error: 'claim turn did not end within 60min (stopped?)' }),
       }).catch(() => {})
     }
     return finished
   } finally {
     ACTIVE.delete(sessionId)
-    try {
-      await handle.dispose()
-    } catch (error) {
-      log(`[claim] ${project.id}: dispose failed: ${error instanceof Error ? error.message : String(error)}`)
+    if (!control.disposed) {
+      control.disposed = true
+      try {
+        await control.handle.dispose()
+      } catch (error) {
+        log(`[claim] ${project.id}: dispose failed: ${error instanceof Error ? error.message : String(error)}`)
+      }
     }
   }
 }
@@ -277,11 +307,15 @@ export async function stopClaimSession(sessionId, log) {
   const control = ACTIVE.get(sessionId)
   if (!control) return false
   ACTIVE.delete(sessionId)
-  try {
-    await control.handle.dispose()
-    log(`[claim] stopped session ${sessionId}`)
-  } catch (error) {
-    log(`[claim] stop failed: ${error instanceof Error ? error.message : String(error)}`)
+  control.requestStop()
+  if (!control.disposed) {
+    control.disposed = true
+    try {
+      await control.handle.dispose()
+      log(`[claim] stopped session ${sessionId}`)
+    } catch (error) {
+      log(`[claim] stop failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
   }
   return true
 }

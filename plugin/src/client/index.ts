@@ -438,8 +438,26 @@ interface ExecutePayload {
 interface SessionPromptFace {
   prompt(content: Array<{ type: string; text: string }>, mode: 'queue' | 'steer'): Promise<{ ok: boolean }>
 }
+/**
+ * A session summary entry in the sessions list snapshot. The runtime list
+ * carries `blank` (fresh session with no messages) and `cwd` per session —
+ * the same fields UiWorkspace.connectWorkspace reads to decide session
+ * reuse. Kept optional so a host lacking the fields degrades to refusal
+ * rather than an unsafe fallback.
+ */
+interface SessionListSummary {
+  id: string
+  blank?: boolean
+  cwd?: string
+}
 interface SessionsService {
-  list: { getSnapshot(): { current?: string | null; ids: string[] } }
+  list: {
+    getSnapshot(): {
+      current?: string | null
+      ids: string[]
+      byId?: Record<string, SessionListSummary>
+    }
+  }
   binding(id: string): { session: SessionPromptFace } | undefined
   /** Select a session as current (the same selection the sidebar click performs). */
   open(id: string): void
@@ -476,7 +494,7 @@ const DICTIONARIES = {
     'entry.label': '任务看板',
     'entry.automation': '自动化',
     'execute.started': '已交给 DeepSeek Harness 执行：{prompt}',
-    'execute.failed': '已打开 DSH 会话，但提示词未能入队，请查看会话状态。',
+    'execute.failed': '未能将任务提示词送入目标 DSH 会话（找不到或无法打开对应工作区会话），未入队。请确认该任务的项目工作区已打开后重试。',
     'card.title': '任务看板（dsh-taskboard）',
     'card.open': '打开任务看板',
     'card.description': '完整 SQLite 任务板：看板/列表/甘特/工作流/仪表盘/AI 对话。卡片执行直接驱动 DSH 会话。',
@@ -486,7 +504,7 @@ const DICTIONARIES = {
     'entry.label': 'Taskboard',
     'entry.automation': 'Automation',
     'execute.started': 'Handed off to DeepSeek Harness: {prompt}',
-    'execute.failed': 'DSH session opened, but the prompt could not be queued. Check the session.',
+    'execute.failed': 'Could not deliver the task prompt to the target DSH session (no reachable session for the project workspace), so it was not queued. Make sure the workspace is open, then retry.',
     'card.title': 'Taskboard (dsh-taskboard)',
     'card.open': 'Open taskboard',
     'card.description': 'Full SQLite taskboard: board/list/gantt/workflow/dashboard/AI chat. Card execution drives real DSH sessions.',
@@ -527,20 +545,37 @@ function mountExecutionBridge(
    * "whatever is current" races ahead and queues the task prompt into the
    * conversation that happens to be selected — usually the one the user was
    * in with the board open. Track the pre-click session and only accept a
-   * different one as the started session; after the timeout, fall back to
-   * the current session so a reused (already-current) blank session still
-   * receives the prompt.
+   * different one as the started session.
+   *
+   * After the timeout, only the one *provably safe* fallback is kept: when
+   * the pre-click session is still current AND it is the target workspace's
+   * untouched blank session (same reuse rule UiWorkspace.connectWorkspace
+   * applies), it IS the intended target and receives the prompt. Any other
+   * state — navigation never landed, the workspace could not be opened, the
+   * pre-click session is an active conversation — refuses instead of silently
+   * queuing the task prompt into a conversation the user did not ask to run
+   * it in.
    */
-  const promptIntoStarted = (prompt: string, before: string | null | undefined): Promise<boolean> =>
+  const promptIntoStarted = (
+    prompt: string,
+    before: string | null | undefined,
+    target: { path: string } | null,
+  ): Promise<boolean> =>
     new Promise((resolve) => {
       const startedAt = Date.now()
-      const queueInto = (target: string): Promise<boolean> => {
-        const binding = sessions.binding(target)
+      const queueInto = (sessionId: string): Promise<boolean> => {
+        const binding = sessions.binding(sessionId)
         if (binding === undefined) return Promise.resolve(false)
         return Promise.race([
           binding.session.prompt([{ type: 'text', text: prompt }], 'queue').then((result) => result.ok),
           new Promise<boolean>((r) => setTimeout(() => r(false), 20000)),
         ])
+      }
+      /** True when `sessionId` is the target workspace's fresh blank session. */
+      const isSafeBlankReuse = (sessionId: string): boolean => {
+        if (target === null || target.path === '') return false
+        const summary = sessions.list.getSnapshot().byId?.[sessionId]
+        return summary?.blank === true && summary.cwd === target.path
       }
       const check = (): void => {
         const snapshot = sessions.list.getSnapshot()
@@ -550,10 +585,13 @@ function mountExecutionBridge(
           return
         }
         if (Date.now() - startedAt > 15000) {
-          // The navigation never landed (connect failed, or the target blank
-          // session was already current): best-effort prompt into the current
-          // session instead of dropping the handoff.
-          if (typeof current === 'string' && current !== '') {
+          // Navigation never landed within the wait.
+          if (
+            typeof current === 'string'
+            && current !== ''
+            && current === before
+            && isSafeBlankReuse(current)
+          ) {
             void queueInto(current).then(resolve)
             return
           }
@@ -567,20 +605,30 @@ function mountExecutionBridge(
 
   const runExecution = async (payload: ExecutePayload): Promise<void> => {
     appendTaskComment(payload.taskId, t('execute.started', { prompt: payload.prompt.slice(0, 200) }))
+    const target = { path: typeof payload.workspacePath === 'string' ? payload.workspacePath : '' }
     let workspaceId: string | undefined
-    if (typeof payload.workspacePath === 'string' && payload.workspacePath !== '') {
+    if (target.path !== '') {
       try {
-        workspaceId = (await workspaces.create({ path: payload.workspacePath })).id
+        workspaceId = (await workspaces.create({ path: target.path })).id
       } catch {
-        workspaceId = undefined
+        // The workspace the task belongs to cannot be registered: no reliable
+        // target session exists. Fail loud instead of falling back to whatever
+        // conversation is current.
+        appendTaskComment(payload.taskId, t('execute.failed'))
+        return
       }
     }
     const before = sessions.list.getSnapshot().current ?? null
-    workspaces.startSession(workspaceId)
-    const accepted = await promptIntoStarted(payload.prompt, before)
+    if (workspaceId !== undefined) workspaces.startSession(workspaceId)
+    else workspaces.startSession() // pathless task: inherit the GUI's current/recent workspace
+    const accepted = await promptIntoStarted(payload.prompt, before, target)
     if (!accepted) appendTaskComment(payload.taskId, t('execute.failed'))
   }
 
+  // Serialize executions: startSession navigations and prompt queues are
+  // asynchronous, so without a queue two rapid dsh-execute clicks can both
+  // observe the same first-arriving session and cross-queue their prompts.
+  let executionTail: Promise<void> = Promise.resolve()
   const onMessage = (event: MessageEvent): void => {
     const target = frame()
     if (target === undefined || event.source !== target.contentWindow) return
@@ -588,7 +636,11 @@ function mountExecutionBridge(
     if (data.type !== DSH_EXECUTE_MESSAGE) return
     const payload = data.payload as ExecutePayload | undefined
     if (payload === undefined || typeof payload.prompt !== 'string' || typeof payload.taskId !== 'string') return
-    void runExecution(payload)
+    executionTail = executionTail
+      .then(() => runExecution(payload))
+      .catch((error: unknown) => {
+        console.warn('taskboard dsh-execute failed:', error)
+      })
   }
 
   window.addEventListener('message', onMessage)

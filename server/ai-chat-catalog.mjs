@@ -9,6 +9,25 @@ const execFileAsync = promisify(execFile);
 const CATALOG_TIMEOUT_MS = 10_000;
 const CATALOG_MAX_BUFFER = 2 * 1024 * 1024;
 
+/**
+ * Environment to spawn the AI engine with when it is being used to *read* the
+ * machine's model/skill/MCP inventory.
+ *
+ * Agent shells may put a `codex` wrapper first on PATH that appends
+ * `--profile <name>` to every invocation. That flag is only accepted by codex's
+ * runtime subcommands, so `codex app-server --stdio` and `codex debug models`
+ * abort with "--profile only applies to runtime commands" before answering —
+ * which silently empties the catalog whenever the host was launched from such a
+ * shell. Dropping the variable the wrapper keys on makes it exec the real binary
+ * untouched; agent turns (`codex exec`) keep the ambient environment so the
+ * shell's own instrumentation still applies to them.
+ */
+export function aiEngineEnv(env = process.env) {
+  const clean = { ...env };
+  delete clean.SEEDMUX_STATE_SOCK;
+  return clean;
+}
+
 async function existingDirectory(value) {
   if (typeof value !== "string" || !path.isAbsolute(value.trim())) return null;
   try {
@@ -237,15 +256,16 @@ export async function discoverAiCatalog({
   processEnv,
 }) {
   const { workspacePath } = await resolveAiWorkspace(projectId, codexStatePath, database);
+  const env = aiEngineEnv(processEnv);
   const [modelResult, skillEntries] = await Promise.all([
     execFileAsync(codexExecutable, ["debug", "models"], {
       cwd: workspacePath,
-      env: processEnv,
+      env,
       encoding: "utf8",
       timeout: CATALOG_TIMEOUT_MS,
       maxBuffer: CATALOG_MAX_BUFFER,
     }),
-    listSkills(codexExecutable, workspacePath, processEnv),
+    listSkills(codexExecutable, workspacePath, env),
   ]);
   const modelCatalog = JSON.parse(modelResult.stdout);
   return {

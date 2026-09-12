@@ -1997,8 +1997,9 @@ export function App() {
 
     if (!embedded || window.parent === window) {
       // host=dsh：在同一 GUI 内驱动真实 DSH 会话（由插件宿主监听执行），
-      // 独立模式（无宿主）没有可用的会话执行路径。
-      if (hostMessaging) {
+      // 独立模式（无宿主，或裸标签页里 window.parent 就是自己）没有可用的
+      // 会话执行路径——不要向自身 postMessage（会被静默丢弃）。
+      if (hostMessaging && window.parent !== window) {
         window.parent.postMessage({
           type: "taskboard:dsh-execute",
           payload: {

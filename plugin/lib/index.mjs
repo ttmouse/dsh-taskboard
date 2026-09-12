@@ -508,6 +508,7 @@ export function apply(ctx, config) {
   let syncTimer = undefined
   let claimTimer = undefined
   let baseUrl = undefined
+  let stopped = false
 
   const start = async () => {
     try {
@@ -548,6 +549,11 @@ export function apply(ctx, config) {
         },
       })
       const address = await app.listen({ host: '127.0.0.1', port: config.port })
+      if (stopped) {
+        await app.close()
+        app = undefined
+        return
+      }
       routeDisposer = ctx.webServer.register({
         kind: 'prefix',
         path: config.routePrefix,
@@ -576,7 +582,16 @@ export function apply(ctx, config) {
       })
       if (config.syncWorkspaces) {
         const runSync = () => {
-          void syncWorkspacesFromRegistry(ctx.workspaceRegistry, baseUrl, (message) => {
+          if (stopped || !baseUrl) return
+          let workspaceRegistry
+          try {
+            workspaceRegistry = ctx.workspaceRegistry
+          } catch (error) {
+            const message = `workspace sync: context unavailable: ${error instanceof Error ? error.message : String(error)}`
+            void pluginLog(message)
+            return
+          }
+          void syncWorkspacesFromRegistry(workspaceRegistry, baseUrl, (message) => {
             void pluginLog(message)
             ctx.logger.info(message)
           })
@@ -611,7 +626,7 @@ export function apply(ctx, config) {
             })
         }
         runSync()
-        if (config.syncIntervalMs > 0) syncTimer = setInterval(runSync, config.syncIntervalMs)
+        if (!stopped && config.syncIntervalMs > 0) syncTimer = setInterval(runSync, config.syncIntervalMs)
       }
     } catch (error) {
       const message = `start failed: ${error instanceof Error ? error.message : String(error)}`
@@ -621,6 +636,7 @@ export function apply(ctx, config) {
   }
 
   const stop = async () => {
+    stopped = true
     if (claimTimer !== undefined) {
       claimTimer()
       claimTimer = undefined
@@ -640,7 +656,7 @@ export function apply(ctx, config) {
   }
 
   void start().then(() => {
-    if (config.claimPollMs > 0) {
+    if (!stopped && app !== undefined && baseUrl !== undefined && config.claimPollMs > 0) {
       claimTimer = startClaimScheduler(
         ctx,
         baseUrl,

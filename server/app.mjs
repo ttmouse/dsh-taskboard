@@ -18,6 +18,7 @@ import {
 } from "../shared/domain.mjs";
 import { normalizeWorkflowSnapshot } from "../shared/workflow-control-flow.mjs";
 import { computeNextRun, parseRoutineYaml, serializeRoutine } from "../shared/routines-yaml.mjs";
+import { aiEngineEnv } from "./ai-chat-catalog.mjs";
 import { AiChatService } from "./ai-chat.mjs";
 import { createCloudConfigStore } from "./cloud-config.mjs";
 import {
@@ -1171,6 +1172,7 @@ async function discoverSkills(codexExecutable, workspacePath) {
   const entries = await new Promise((resolve, reject) => {
     const child = spawn(codexExecutable, ["app-server", "--stdio"], {
       cwd: workspacePath,
+      env: aiEngineEnv(),
       stdio: ["pipe", "pipe", "ignore"],
     });
     let settled = false;
@@ -1283,6 +1285,7 @@ async function discoverSkills(codexExecutable, workspacePath) {
 
 async function discoverMcpServers(codexExecutable) {
   const result = await execFileAsync(codexExecutable, ["mcp", "list", "--json"], {
+    env: aiEngineEnv(),
     timeout: 8_000,
     maxBuffer: 2 * 1024 * 1024,
   });
@@ -2180,8 +2183,24 @@ export function createTaskboardServer(options = {}) {
       const routineRunRoute = pathname.match(/^\/api\/routines\/([^/]+)\/run$/);
       if (routineRunRoute && request.method === "POST") {
         const name = parseRoutineName(decodeURIComponent(routineRunRoute[1]));
+        if (name.startsWith(CLAIM_ROUTINE_PREFIX)) {
+          // Claim routines execute only in-process in the GUI host. A handler
+          // verdict of false means the round was skipped/blocked by a gate or
+          // its project is gone — never fall through to the external ops
+          // runner, which would launch an un-gated headless claim that
+          // executes work the gates just refused to authorize.
+          if (!options.routinesRunHandler) {
+            throw new ApiError(409, "CLAIM_ROUTINE_NO_RUNNER",
+              "Claim routines run in-process in the DSH host; this server has no in-process runner");
+          }
+          const handled = await options.routinesRunHandler(name);
+          return sendJson(response, 202, {
+            started: handled ? name : null,
+            mode: handled ? "in-process" : "gated",
+          });
+        }
         if (options.routinesRunHandler) {
-          // In-process handler (claim routines execute in the GUI host).
+          // In-process handler (plain routines can still opt into the host).
           const handled = await options.routinesRunHandler(name);
           if (handled) return sendJson(response, 202, { started: name, mode: "in-process" });
         }
