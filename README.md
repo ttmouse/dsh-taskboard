@@ -1,4 +1,4 @@
-<img width="3392" height="2366" alt="image" src="https://github.com/user-attachments/assets/f8194b5b-409a-44b3-a2e9-afccd4ffb48f" />
+![dsh-taskboard 截图](https://github.com/user-attachments/assets/f8194b5b-409a-44b3-a2e9-afccd4ffb48f)
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
