@@ -1,16 +1,16 @@
 /**
  * dsh-taskboard — claim routines manager (host half).
  *
- * Auto-claim is implemented with dsh-routines (the third-party cron bundle
- * installed in the ops profile): each workspace-mapped project owns a virtual
- * claim routine YAML under $DSH_HOME/routines. The routine file is *always*
- * present (the card in the automation panel stays visible), and the board's
- * automation switch — stored in the taskboard DB, toggled from the project
- * automation menu or from the routines page itself — is the only on/off
- * control. The YAML is always written with `paused: true` so the external
- * ops scheduler skips it: execution happens in-process, gated on the switch
- * by the board's claim scheduler, so the GUI streams the session. No
- * heartbeat files, no taskctl, no daemon loop.
+ * $DSH_HOME/routines is the PLUGIN's own automation storage (confirmed by
+ * the user 2026-10-07 — it is NOT official-host territory), so each
+ * workspace-mapped project always keeps a claim routine YAML there and the
+ * automation panel lists it as a card. The board's automation switch —
+ * stored in the taskboard DB, toggled from the project automation menu or
+ * from the routines page itself — is the only on/off control; /api/routines
+ * reports paused == "switch off". The YAML file itself is always written
+ * with `paused: true` so any external runner skips it: execution happens
+ * in-process, gated on the switch by the board's claim scheduler, so the
+ * GUI streams the session. No heartbeat files, no taskctl, no daemon loop.
  */
 import { mkdir, readdir, readFile, unlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
