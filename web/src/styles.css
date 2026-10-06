@@ -11702,6 +11702,9 @@ kbd {
 }
 
 .issue-list-title-cell small {
+  /* Issue identifier: kept in the DOM (accessible name, row context) but not
+     shown in the list — the title alone identifies the row there. */
+  display: none;
   flex: 0 0 auto;
   color: var(--text-tertiary);
   font-size: 10px;
@@ -12407,17 +12410,10 @@ kbd {
   .dashboard-recent-panel .dashboard-task-list { grid-template-columns: minmax(0, 1fr); }
   .dashboard-label-list { grid-template-columns: minmax(0, 1fr); }
   .issue-list-row {
-    grid-template-areas:
-      "title time"
-      "metadata metadata";
-    grid-template-columns: minmax(0, 1fr) auto;
-    min-height: 66px;
-    gap: 6px 12px;
-    padding: 8px 10px 8px 20px;
+    grid-template-columns: minmax(120px, 1fr) max-content auto;
+    gap: 8px;
+    padding: 0 8px 0 16px;
   }
-  .issue-list-title-cell { grid-area: title; }
-  .issue-list-metadata { grid-area: metadata; justify-content: flex-start; }
-  .issue-list-row > time { grid-area: time; }
   .issue-list-labels > i:nth-child(n+2) { display: inline-flex; }
   .gantt-hide-completed > span { display: none; }
 }
