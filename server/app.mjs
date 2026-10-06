@@ -1453,6 +1453,38 @@ async function latestRoutineRun(cwd, name) {
 }
 
 /**
+ * List ALL run records for one routine (newest first), merged from the global
+ * routines runs dir and the per-cwd runs dir. Powers the automation panel's
+ * run-history tab.
+ */
+async function listRoutineRuns(routinesDirectory, cwd, name, limit = 30) {
+  const records = [];
+  const dirs = [
+    routinesDirectory ? path.join(routinesDirectory, "runs") : null,
+    typeof cwd === "string" && cwd !== "" ? path.join(cwd, ".dsh", "routines", "runs") : null,
+  ].filter(Boolean);
+  for (const dir of [...new Set(dirs)]) {
+    let files;
+    try {
+      files = await readdir(dir);
+    } catch {
+      continue;
+    }
+    for (const file of files) {
+      if (!file.startsWith("run-") || !file.endsWith(".json")) continue;
+      try {
+        const record = JSON.parse(await readFile(path.join(dir, file), "utf8"));
+        if (record.routine === name) records.push(record);
+      } catch {
+        // Skip unparsable run records.
+      }
+    }
+  }
+  records.sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
+  return records.slice(0, limit);
+}
+
+/**
  * List routines: parsed YAML fields plus the latest run record per routine.
  * Claim routines are virtual — their on/off state lives in the board DB, so
  * `paused` is reported as the inverse of the claim automation switch (the
@@ -2206,6 +2238,33 @@ export function createTaskboardServer(options = {}) {
         }
         spawnRoutineRun(name);
         return sendJson(response, 202, { started: name, mode: "external" });
+      }
+
+      // Run history for one routine (automation panel's run-records tab):
+      // merge global + per-cwd runs dirs, newest first.
+      const routineRunsRoute = pathname.match(/^\/api\/routines\/([^/]+)\/runs$/);
+      if (routineRunsRoute && request.method === "GET") {
+        if ([...url.searchParams.keys()].length > 0) {
+          throw new ApiError(400, "UNKNOWN_QUERY_PARAMETER", "GET /api/routines/:name/runs does not accept query parameters");
+        }
+        const name = parseRoutineName(decodeURIComponent(routineRunsRoute[1]));
+        let cwd = null;
+        if (resolved.routinesDirectory) {
+          try {
+            const parsed = parseRoutineYaml(
+              await readFile(path.join(resolved.routinesDirectory, `${name}.yaml`), "utf8"),
+            );
+            if (typeof parsed.cwd === "string" && parsed.cwd !== "") cwd = parsed.cwd;
+          } catch {
+            // Unknown yaml (e.g. claim routines): fall back to the project map.
+          }
+        }
+        if (!cwd) {
+          const claimProject = claimProjectByName(database, name);
+          if (claimProject?.workspacePath) cwd = claimProject.workspacePath;
+        }
+        const runs = await listRoutineRuns(resolved.routinesDirectory, cwd, name);
+        return sendJson(response, 200, { runs });
       }
 
       const routineStopRoute = pathname.match(/^\/api\/routines\/([^/]+)\/stop$/);

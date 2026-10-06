@@ -52,7 +52,7 @@ async function main() {
   // external — the loader resolves it from the platform module table, so the
   // settings card renders on the shell's React copy (hooks stay valid).
   await build({
-    entryPoints: [path.join(PLUGIN_ROOT, 'src', 'client', 'index.ts')],
+    entryPoints: [path.join(PLUGIN_ROOT, 'src', 'client', 'index.tsx')],
     outfile: path.join(PLUGIN_ROOT, 'lib', 'client.js'),
     bundle: true,
     format: 'cjs',

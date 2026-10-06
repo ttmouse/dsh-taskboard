@@ -14,9 +14,15 @@
  * Failure policy: a taskboard start failure is logged, never thrown — the
  * host must not take the GUI down; the announce section still registers so
  * agents know the plugin exists.
+ *
+ * Isolation policy: the data directory is shared by every DSH home while the
+ * workspace registry belongs to one home, so the mirror only ever deletes
+ * projects the current home created (see the provenance file below) and its
+ * teardown always releases the loopback port before a replacement mounts.
  */
+import { createHash } from 'node:crypto'
 import { request as httpRequest } from 'node:http'
-import { appendFile, cp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { appendFile, cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -83,7 +89,7 @@ const SECTION_ORDER = 205
 export const inject = ['webServer', 'systemPrompt', 'workspaceRegistry', 'sessionPersistence', 'agents', 'sessions', 'agentDefaultModel', 'llm']
 
 /** Model-facing announcement: plugin presence, capabilities, and limits. */
-export const TASKBOARD_GUIDANCE = '本机已安装 dsh-taskboard 插件（DSH Web GUI 的完整任务看板）：侧边栏「任务看板」入口；完整能力来自本地 SQLite 服务——多视图（看板/列表/Gantt/工作流/仪表盘）、任务详情（关系/附件/标签/过滤器）、AI 对话、项目自动认领（dsh-routines 例程驱动：认领开关生成 ~/.dsh/routines/taskboard-claim-*.yaml，由 ops profile 的 routines-scheduler 定时执行 headless 会话，认领/执行/回写全部通过本机看板 HTTP API 完成，无 taskctl、无心跳文件、无长驻作业）。数据存 ~/.dsh/storages/dsh-taskboard/taskboard.sqlite（本机回环端口 47825）。任务可通过看板内「在对话中打开」直接驱动 DSH 会话执行并回写评论。用户提到「任务看板 / 看板 / 任务管理」时即指本插件，请据此协作。'
+export const TASKBOARD_GUIDANCE = '本机已安装 dsh-taskboard 插件（DSH Web GUI 的完整任务看板）：侧边栏「任务看板」与「自动化」入口、右栏「任务」侧栏；完整能力来自本地 SQLite 服务——多视图（看板/列表/Gantt/工作流/仪表盘）、任务详情（关系/附件/标签/过滤器）、AI 对话、项目自动认领（官方 host schedule 服务定时投递到每项目常驻认领会话执行，认领开关即自动化面板的项目开关）。数据存 ~/.dsh/storages/dsh-taskboard/taskboard.sqlite（本机回环端口 47825）。任务可通过看板内「在对话中打开」直接驱动 DSH 会话执行并回写评论。用户提到「任务看板 / 看板 / 任务管理 / 建任务 / 建议题」时即指本插件；对看板的任何读写（建任务、改状态、加评论、加关系）请先加载 manage-taskboard 技能并遵循其 API 纪律（version 并发、署名 headers、threadId 回链），不要绕过技能裸写 HTTP API。'
 
 /** Plugin config, validated by the schemastery schema. */
 export const Config = z.object({
@@ -143,17 +149,79 @@ function makeProxy(port, prefix) {
 }
 
 /**
+ * Identify the DSH home whose workspace registry this host mirrors. Two hosts
+ * sharing one board database — for example the Desktop app on `~/.dsh-beta`
+ * and `dsh web` on `~/.dsh` — have different registries but the same
+ * `dataDirectory`, so the home is what tells their projects apart.
+ * @param home - explicit `DSH_HOME` override (tests); defaults to the process.
+ * @returns the absolute home directory.
+ */
+export function currentHomeKey(home = process.env.DSH_HOME) {
+  return path.resolve(home ?? path.join(os.homedir(), '.dsh'))
+}
+
+/**
+ * Per-home provenance file inside the (shared) board data directory. One file
+ * per home keeps hosts from clobbering each other's bookkeeping.
+ * @param dataDirectory - board data directory.
+ * @param homeKey - owning DSH home.
+ * @returns the absolute state file path.
+ */
+export function syncStatePath(dataDirectory, homeKey) {
+  const digest = createHash('sha1').update(homeKey).digest('hex').slice(0, 12)
+  return path.join(dataDirectory, `workspace-sync-${digest}.json`)
+}
+
+/**
+ * Read the project ids this home created. A missing or unreadable file yields
+ * an empty set, which disables removals: a project may only be deleted when
+ * this home can prove it created it.
+ * @param file - provenance file path.
+ * @param log - logger callback.
+ * @returns the owned project ids.
+ */
+export async function readSyncState(file, log = () => {}) {
+  try {
+    const parsed = JSON.parse(await readFile(file, 'utf8'))
+    const ids = Array.isArray(parsed?.projects) ? parsed.projects.filter((id) => typeof id === 'string') : []
+    return new Set(ids)
+  } catch (error) {
+    if (error instanceof Error && error.code !== 'ENOENT') {
+      log(`workspace sync: cannot read ${path.basename(file)}: ${error.message} — treating no project as owned`)
+    }
+    return new Set()
+  }
+}
+
+/**
+ * Persist the project ids one home created.
+ * @param file - provenance file path.
+ * @param homeKey - owning DSH home.
+ * @param ids - owned project ids.
+ */
+export async function writeSyncState(file, homeKey, ids) {
+  const body = JSON.stringify({ version: 1, home: homeKey, projects: [...ids].sort() }, null, 2)
+  await writeFile(file, `${body}\n`, { encoding: 'utf8', mode: 0o600 })
+}
+
+/**
  * Sync DSH workspaces into board projects: every workspace becomes (or
  * updates) a project keyed by the workspace id, with `workspace_path` set to
  * the workspace path. The workspace registry is the single source of truth —
  * the board's own independent project creation is removed from the UI, so
  * projects mirror the DSH workspace list (plus the legacy 'local' 全局 catch-all).
+ *
+ * Removals are scoped to projects this home created: the registry only lists
+ * the workspaces of the *current* DSH home while the data directory is shared
+ * by every home, so an unscoped mirror would delete another home's projects.
  * @param registry - the injected `workspaceRegistry` service.
  * @param baseUrl - internal taskboard loopback base URL.
  * @param log - logger callback.
+ * @param options - `dataDirectory` (defaults to the shared board directory) and
+ *   an explicit `homeKey` for tests.
  * @returns summary string, or null when the registry is unavailable.
  */
-async function syncWorkspacesFromRegistry(registry, baseUrl, log) {
+export async function syncWorkspacesFromRegistry(registry, baseUrl, log, options = {}) {
   let workspaces
   try {
     workspaces = registry.list().map((entity) => ({
@@ -166,13 +234,20 @@ async function syncWorkspacesFromRegistry(registry, baseUrl, log) {
     return null
   }
   if (workspaces.length === 0) return 'workspace sync: no workspaces'
+  const dataDirectory = options.dataDirectory ?? DEFAULT_DATA_DIR
+  const homeKey = options.homeKey ?? currentHomeKey()
+  const stateFile = syncStatePath(dataDirectory, homeKey)
+  const owned = await readSyncState(stateFile, log)
   const listRes = await fetch(`${baseUrl}/api/projects`)
   if (!listRes.ok) throw new Error(`list projects: HTTP ${listRes.status}`)
   const { projects } = await listRes.json()
   const existing = new Map(projects.map((project) => [project.id, project]))
+  const known = new Set(existing.keys())
   let created = 0
   let updated = 0
   let removed = 0
+  let kept = 0
+  let dirty = false
   for (const ws of workspaces) {
     const current = existing.get(ws.id)
     if (current === undefined) {
@@ -181,8 +256,14 @@ async function syncWorkspacesFromRegistry(registry, baseUrl, log) {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ id: ws.id, name: ws.name, workspacePath: ws.path }),
       })
-      if (res.ok) created++
-      else log(`workspace sync: create '${ws.id}' failed: HTTP ${res.status}`)
+      if (res.ok) {
+        created++
+        owned.add(ws.id)
+        known.add(ws.id)
+        dirty = true
+      } else {
+        log(`workspace sync: create '${ws.id}' failed: HTTP ${res.status}`)
+      }
     } else if (current.name !== ws.name || current.workspacePath !== ws.path) {
       const res = await fetch(`${baseUrl}/api/projects/${encodeURIComponent(ws.id)}`, {
         method: 'PUT',
@@ -193,18 +274,107 @@ async function syncWorkspacesFromRegistry(registry, baseUrl, log) {
       else log(`workspace sync: update '${ws.id}' failed: HTTP ${res.status}`)
     }
   }
-  // Mirror removals: workspace-managed projects whose workspace is gone are
-  // deleted (the board route refuses 'local' and temp-* projects).
+  // Mirror removals: a workspace-managed project this home created whose
+  // workspace is gone is deleted (the board route refuses 'local' and temp-*
+  // projects). Projects another DSH home created are never touched — their
+  // workspaces simply are not in this home's registry.
   const currentIds = new Set(workspaces.map((ws) => ws.id))
   for (const project of projects) {
     if (!project.workspacePath || currentIds.has(project.id)) continue
+    if (!owned.has(project.id)) {
+      kept++
+      continue
+    }
     const res = await fetch(`${baseUrl}/api/projects/${encodeURIComponent(project.id)}`, { method: 'DELETE' })
-    if (res.ok) removed++
-    else log(`workspace sync: remove '${project.id}' failed: HTTP ${res.status}`)
+    if (res.ok) {
+      removed++
+      owned.delete(project.id)
+      dirty = true
+    } else {
+      log(`workspace sync: remove '${project.id}' failed: HTTP ${res.status}`)
+    }
   }
-  return `workspace sync: ${workspaces.length} workspaces, ${created} created, ${updated} updated, ${removed} removed`
+  // Housekeeping: forget ids that no longer exist on the board at all.
+  for (const id of [...owned]) {
+    if (!known.has(id)) {
+      owned.delete(id)
+      dirty = true
+    }
+  }
+  if (dirty) {
+    try {
+      await writeSyncState(stateFile, homeKey, owned)
+    } catch (error) {
+      log(`workspace sync: cannot write ${path.basename(stateFile)}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+  const scope = kept > 0 ? `, ${kept} other-home project(s) kept` : ''
+  return `workspace sync: ${workspaces.length} workspaces, ${created} created, ${updated} updated, ${removed} removed${scope}`
 }
 
+/**
+ * Run one teardown step, reporting (never throwing) its failure so that a later
+ * step — closing the listening server above all — always runs.
+ * @param name - step label for the log.
+ * @param action - teardown action, or undefined when there is nothing to release.
+ * @param log - logger callback.
+ * @returns whether the step completed.
+ */
+export async function releaseStep(name, action, log = () => {}) {
+  if (action === undefined) return true
+  try {
+    await action()
+    return true
+  } catch (error) {
+    log(`teardown ${name} failed: ${error instanceof Error ? error.message : String(error)}`)
+    return false
+  }
+}
+
+/**
+ * Release every resource the host half owns, in order. Cordis disposes a
+ * context before mounting its replacement, so one failing step (a route
+ * unregister on an already inactive context, say) must not skip the rest and
+ * leave the loopback port bound.
+ * @param resources - teardown actions; each may be undefined.
+ * @param log - logger callback.
+ * @returns one result per step, in release order.
+ */
+export async function releaseHostResources(resources, log = () => {}) {
+  return [
+    await releaseStep('claim scheduler', resources.stopClaims, log),
+    await releaseStep('sync timer', resources.clearSyncTimer, log),
+    await releaseStep('route', resources.unregisterRoute, log),
+    await releaseStep('server', resources.closeServer, log),
+  ]
+}
+
+/**
+ * Bind the board server, retrying briefly while the loopback port is still held
+ * by a previous instance: a hot reload mounts the replacement before the
+ * outgoing host half has finished closing.
+ * @param app - board server returned by `createTaskboardServer`.
+ * @param options - listen options (`host`, `port`) forwarded to the server.
+ * @param retry - attempts, delay between them, and the logger.
+ * @returns the bound address.
+ */
+export async function listenWithRetry(app, options, retry = {}) {
+  const attempts = retry.attempts ?? 8
+  const delayMs = retry.delayMs ?? 250
+  const log = retry.log ?? (() => {})
+  let lastError
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await app.listen(options)
+    } catch (error) {
+      lastError = error
+      if (!(error instanceof Error) || error.code !== 'EADDRINUSE' || attempt === attempts) throw error
+      log(`port ${options.port} is still busy (attempt ${attempt}/${attempts}); retrying in ${delayMs}ms`)
+      await new Promise((resolve) => setTimeout(resolve, delayMs))
+    }
+  }
+  throw lastError
+}
 
 /**
  * Resolve the project id behind a claim routine name (taskboard-claim-<12>).
@@ -548,7 +718,12 @@ export function apply(ctx, config) {
           return stopClaimSession(active.sessionId, (message) => ctx.logger.info(`dsh-taskboard: ${message}`))
         },
       })
-      const address = await app.listen({ host: '127.0.0.1', port: config.port })
+      const address = await listenWithRetry(app, { host: '127.0.0.1', port: config.port }, {
+        log: (message) => {
+          void pluginLog(message)
+          ctx.logger.info(`dsh-taskboard: ${message}`)
+        },
+      })
       if (stopped) {
         await app.close()
         app = undefined
@@ -594,7 +769,7 @@ export function apply(ctx, config) {
           void syncWorkspacesFromRegistry(workspaceRegistry, baseUrl, (message) => {
             void pluginLog(message)
             ctx.logger.info(message)
-          })
+          }, { dataDirectory })
             .then((summary) => {
               if (summary) {
                 void pluginLog(summary)
@@ -635,24 +810,37 @@ export function apply(ctx, config) {
     }
   }
 
+  let stopping = false
+  const reportTeardown = (message) => {
+    void pluginLog(message)
+    ctx.logger.warn(`dsh-taskboard: ${message}`)
+  }
   const stop = async () => {
+    if (stopping) return
+    stopping = true
     stopped = true
-    if (claimTimer !== undefined) {
-      claimTimer()
-      claimTimer = undefined
-    }
-    if (syncTimer !== undefined) {
-      clearInterval(syncTimer)
-      syncTimer = undefined
-    }
-    if (routeDisposer !== undefined) {
-      routeDisposer()
-      routeDisposer = undefined
-    }
-    if (app !== undefined) {
-      await app.close()
-      app = undefined
-    }
+    await releaseHostResources({
+      stopClaims: claimTimer === undefined ? undefined : () => {
+        const disposer = claimTimer
+        claimTimer = undefined
+        disposer()
+      },
+      clearSyncTimer: syncTimer === undefined ? undefined : () => {
+        const timer = syncTimer
+        syncTimer = undefined
+        clearInterval(timer)
+      },
+      unregisterRoute: routeDisposer === undefined ? undefined : () => {
+        const disposer = routeDisposer
+        routeDisposer = undefined
+        disposer()
+      },
+      closeServer: app === undefined ? undefined : async () => {
+        const instance = app
+        app = undefined
+        await instance.close()
+      },
+    }, reportTeardown)
   }
 
   void start().then(() => {
@@ -669,7 +857,8 @@ export function apply(ctx, config) {
       pluginLog(`claim scheduler started (poll=${Math.max(5000, config.claimPollMs)}ms)`)
     }
   })
-  ctx.on('dispose', () => {
-    void stop()
-  })
+  // Cordis awaits an effect's async disposer before mounting the replacement,
+  // so the replacement never races this instance for the loopback port.
+  if (typeof ctx.effect === 'function') ctx.effect(() => async () => { await stop() }, 'dsh-taskboard.close')
+  else ctx.on('dispose', () => { void stop() })
 }

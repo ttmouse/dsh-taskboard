@@ -1,6 +1,6 @@
 {
   "name": "@ttmouse/dsh-taskboard",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "dashi-taskboard 的 DSH 双面插件（独立版）：host 半在宿主进程拉起 SQLite server（数据目录 ~/.dsh/storages/dsh-taskboard），client 半注入侧边栏入口并把完整看板（看板/列表/Gantt/工作流/仪表盘/AI 对话）挂进 GUI 中间列。",
   "type": "module",
   "repository": {
@@ -27,6 +27,9 @@
     "./client": "./lib/client.js",
     "./package.json": "./package.json"
   },
+  "engines": {
+    "dsh": ">=0.1.5-rc.2"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
@@ -46,10 +49,14 @@
   ],
   "scripts": {
     "build": "node scripts/build.mjs",
+    "test": "node --test tests/*.test.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "schemastery": "^3.18.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh": ">=0.1.5-rc.2"
   },
   "devDependencies": {
     "esbuild": "^0.24.0",

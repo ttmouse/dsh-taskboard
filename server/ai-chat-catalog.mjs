@@ -7,7 +7,10 @@ import { ApiError } from "./database.mjs";
 
 const execFileAsync = promisify(execFile);
 const CATALOG_TIMEOUT_MS = 10_000;
-const CATALOG_MAX_BUFFER = 2 * 1024 * 1024;
+// `codex debug models` prints the whole machine inventory: 158 models -> 2.8 MB,
+// so a 2 MiB cap aborted the read with ERR_CHILD_PROCESS_STDIO_MAXBUFFER and
+// surfaced as HTTP 500 on GET /api/local/ai/catalog.
+const CATALOG_MAX_BUFFER = 16 * 1024 * 1024;
 
 /**
  * Environment to spawn the AI engine with when it is being used to *read* the
