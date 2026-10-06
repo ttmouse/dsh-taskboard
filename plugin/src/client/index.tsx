@@ -624,6 +624,7 @@ function mountOpenThreadBridge(
   frame: () => HTMLIFrameElement | undefined,
   closePanels: () => void,
   extraFrames: () => Array<HTMLIFrameElement | undefined> = () => [],
+  openSideTasks: (sessionId: string) => void = () => {},
 ): () => void {
   const onMessage = (event: MessageEvent): void => {
     const sources = [frame(), ...extraFrames()]
@@ -641,6 +642,10 @@ function mountOpenThreadBridge(
         // refresh failed.
         await refreshSessions().catch(() => {})
         uiWorkspace.openSession(threadId)
+        // Reveal the taskboard tab in the right sidebar for the session we
+        // just opened, so a freshly created conversation always shows the
+        // board without a manual click.
+        openSideTasks(threadId)
       } catch (error: unknown) {
         console.warn(`taskboard: cannot open conversation ${threadId}`, error)
       }
@@ -905,11 +910,20 @@ export function apply(ctx: {
     locale: NS,
   }, () => t('sidepanel.label'))), 'dsh-taskboard: right-sidebar tab title')
 
-  /** Reveal this session's taskboard tab in the right sidebar (never throwing into the shell). */
-  const openSideTasks = (sessionId: string): void => {
+  /**
+   * Reveal this session's taskboard tab in the right sidebar (never throwing
+   * into the shell). Right after `openSession` the conversation surface is not
+   * mounted yet and the shell's controller refuses with "no session surface is
+   * mounted", so retry briefly until it appears.
+   */
+  const openSideTasks = (sessionId: string, attempt = 0): void => {
     try {
       ctx.sidebarRight.openTab(SIDE_TAB_KIND, { params: { sessionId } })
     } catch (error: unknown) {
+      if (attempt < 15) {
+        window.setTimeout(() => openSideTasks(sessionId, attempt + 1), 300)
+        return
+      }
       console.warn('taskboard: cannot open the right-sidebar taskboard tab', error)
     }
   }
@@ -951,6 +965,7 @@ export function apply(ctx: {
     () => frames.get(TASKBOARD_PANEL.name)?.current,
     () => ctx.layout.selectPanel(null),
     () => [...sideFrames].map((ref) => ref.current),
+    openSideTasks,
   ), 'dsh-taskboard: open-thread bridge')
 
   // Settings card: fill the plugin item hole in the settings panel.
