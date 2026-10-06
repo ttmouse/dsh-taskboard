@@ -985,3 +985,1055 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* ============================================================
+ * 官方风格列表布局（v2）：状态筛选 + 项目筛选 + 单行条目
+ * 行内：标题行（名称/徽标/状态）+ 摘要行（调度 · 下次计划时间）
+ * 右侧：启用开关 + 行内操作。点击行主体打开详情对话框。
+ * ============================================================ */
+
+.routines-filters {
+  width: 100%;
+  max-width: 1380px;
+  margin: 0 auto;
+}
+
+.routines-status-tabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border: var(--border-hairline) solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.routines-status-tab {
+  border: none;
+  border-radius: 8px;
+  padding: 5px 14px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  background: transparent;
+  cursor: pointer;
+  transition: background-color 100ms ease, color 100ms ease;
+}
+
+.routines-status-tab:hover {
+  color: var(--text-primary);
+}
+
+.routines-status-tab.is-active {
+  background: var(--border);
+  color: var(--text-primary);
+  font-weight: 560;
+}
+
+.routines-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  max-width: 1380px;
+  margin: 0 auto;
+}
+
+.routine-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px;
+  border: var(--border-hairline) solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  transition: border-color 100ms ease, background-color 100ms ease;
+}
+
+.routine-row:hover {
+  border-color: var(--border-strong);
+}
+
+.routine-row.is-off {
+  opacity: 0.62;
+}
+
+.routine-row-open {
+  position: absolute;
+  inset: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-radius: inherit;
+}
+
+.routine-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.routine-row-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.routine-row .routine-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.routine-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.routine-row .routine-schedule {
+  color: var(--text-secondary);
+}
+
+.routine-meta-dot {
+  opacity: 0.7;
+}
+
+.routine-next {
+  font-variant-numeric: tabular-nums;
+}
+
+.routine-row-error {
+  font-size: 12px;
+  color: var(--danger, #e5636a);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 720px;
+}
+
+.routine-row-side {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: none;
+  margin-left: auto;
+}
+
+.routine-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.routine-action {
+  border: var(--border-hairline) solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 12px;
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: border-color 100ms ease, color 100ms ease, background-color 100ms ease;
+}
+
+.routine-action:hover {
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.routine-action.is-primary {
+  background: var(--accent, #3b82f6);
+  border-color: transparent;
+  color: #fff;
+}
+
+.routine-action.is-primary:hover {
+  color: #fff;
+  filter: brightness(1.08);
+}
+
+.routine-action.is-danger {
+  color: var(--danger, #e5636a);
+}
+
+.routine-action:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* ---- 右侧详情面板（官方自动化任务页样式）：点行在右侧打开 ---- */
+
+.routines-view {
+  flex-direction: row;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.routines-main {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  overflow: auto;
+  padding: clamp(20px, 3vw, 40px) clamp(18px, 4vw, 52px) 48px;
+}
+
+.routine-side {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  width: min(480px, 42vw);
+  height: 100%;
+  border-left: var(--border-hairline) solid var(--border);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.routine-side-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 22px 22px 0;
+}
+
+.routine-side-header .routine-detail-title h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 620;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+}
+
+.routine-side-next {
+  padding: 6px 22px 14px;
+  font-size: 12.5px;
+  color: var(--text-tertiary);
+  border-bottom: var(--border-hairline) solid var(--border);
+}
+
+.routine-side-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 18px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.routine-side-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 22px 18px;
+  border-top: var(--border-hairline) solid var(--border);
+}
+
+.routine-row.is-selected {
+  border-color: var(--border-strong);
+  background: var(--border);
+}
+
+@media (max-width: 900px) {
+  .routine-side {
+    position: absolute;
+    inset: 0 0 0 auto;
+    width: min(480px, 92vw);
+    box-shadow: -12px 0 32px rgba(0, 0, 0, 0.25);
+  }
+}
+
+/* ============================================================
+ * v3：视觉对齐官方自动化任务页（布局照搬，仅保留项目筛选增强）
+ * 要点：大标题、通栏圆角搜索、胶囊新建按钮、无框扁平列表行、
+ * 时钟图标、选中=圆角高亮块、右侧面板与页面同底色。
+ * ============================================================ */
+
+.routines-main .routines-header h2 {
+  font-size: 26px;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+}
+
+.routines-main .routines-directory {
+  font-size: 12px;
+  margin-top: 5px;
+}
+
+/* 状态 tab：官方为文字 tab，选中项圆角深色块 */
+.routines-status-tabs {
+  background: transparent;
+  border: none;
+  padding: 0;
+  gap: 4px;
+}
+
+.routines-status-tab {
+  font-size: 14px;
+  padding: 7px 16px;
+  border-radius: 999px;
+  color: var(--text-tertiary);
+}
+
+.routines-status-tab.is-active {
+  background: var(--border);
+  font-weight: 600;
+}
+
+/* 新建：右上胶囊按钮（官方为浅色圆角胶囊） */
+.routines-create {
+  border: none;
+  border-radius: 999px;
+  padding: 9px 20px;
+  font-size: 13.5px;
+  font-weight: 600;
+  background: var(--text-primary);
+  color: var(--bg);
+  cursor: pointer;
+  transition: filter 100ms ease;
+}
+
+.routines-create:hover {
+  filter: brightness(1.12);
+}
+
+/* 搜索：通栏、大圆角、低调边框 */
+.routines-main .routines-search {
+  flex: 1;
+  width: auto;
+  max-width: none;
+  min-width: 220px;
+  border-radius: 12px;
+  padding: 9px 14px;
+  font-size: 13.5px;
+}
+
+.routines-main .routines-header {
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.routines-main .routines-header-actions .routines-refresh {
+  border-radius: 12px;
+}
+
+/* 项目芯片：弱化为次级筛选 */
+.routines-main .routines-tab {
+  border-radius: 999px;
+  font-size: 12.5px;
+}
+
+/* 列表：无框扁平行，交互态 = 圆角高亮块 */
+.routines-list {
+  gap: 2px;
+  margin-top: 4px;
+}
+
+.routine-row {
+  border: none;
+  background: transparent;
+  border-radius: 12px;
+  padding: 12px 14px;
+  gap: 14px;
+  transition: background-color 100ms ease;
+}
+
+.routine-row:hover {
+  background: color-mix(in srgb, var(--border) 45%, transparent);
+  border: none;
+}
+
+.routine-row.is-selected {
+  background: var(--border);
+  border: none;
+}
+
+.routine-row.is-off {
+  opacity: 0.55;
+}
+
+.routine-row-icon {
+  flex: none;
+  color: var(--text-tertiary);
+}
+
+.routine-row .routine-name {
+  font-size: 14.5px;
+  font-weight: 620;
+}
+
+.routine-row-meta {
+  font-size: 12.5px;
+  gap: 5px;
+}
+
+.routine-row-side .routine-switch {
+  flex: none;
+}
+
+.routine-row-actions .routine-action {
+  opacity: 0;
+  transition: opacity 100ms ease, border-color 100ms ease, color 100ms ease;
+}
+
+.routine-row:hover .routine-action,
+.routine-row.is-selected .routine-action,
+.routine-row-actions .routine-action:focus-visible {
+  opacity: 1;
+}
+
+/* 右侧面板：与页面同底色，仅一条分隔线 */
+.routine-side {
+  background: var(--bg);
+  border-left: var(--border-hairline) solid var(--border);
+}
+
+.routine-side-header {
+  padding: 26px 26px 0;
+}
+
+.routine-side-header .routine-detail-title h3 {
+  font-size: 20px;
+}
+
+.routine-side-next {
+  padding: 8px 26px 16px;
+  font-size: 13px;
+}
+
+.routine-side-body {
+  padding: 20px 26px;
+}
+
+.routine-side-footer {
+  padding: 14px 26px 20px;
+}
+
+/* ---- v4：自测反馈修正 —— 通栏搜索、浅色胶囊新建、错误行、footer 间距 ---- */
+
+/* 搜索：官方布局 = tabs 上方的通栏输入框 */
+.routines-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.routines-filters .routines-search {
+  width: 100%;
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-size: 13.5px;
+}
+
+/* 新建：浅色描边胶囊（非实心反色） */
+.routines-create {
+  background: var(--surface);
+  color: var(--text-primary);
+  border: var(--border-hairline) solid var(--border-strong);
+}
+
+.routines-create:hover {
+  filter: none;
+  background: var(--border);
+}
+
+/* 错误行：与摘要行拉开间距，淡红底条 */
+.routine-row-error {
+  margin-top: 4px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: color-mix(in srgb, #e5636a 12%, transparent);
+  white-space: normal;
+  max-width: none;
+}
+
+/* 侧栏 footer 收紧 */
+.routine-side-footer {
+  gap: 6px;
+  padding-top: 10px;
+  padding-bottom: 16px;
+}
+
+/* ============================================================
+ * v5：详情侧栏双 tab（规则 / 任务运行记录），尺寸照抄官方
+ * schedule 页面 bundle 实测值：列表 960px 单列、字阶 20/14/13/12/11
+ * ============================================================ */
+
+/* 列表主列：官方 960px 居中单列 */
+.routines-main .routines-header,
+.routines-main .routines-filters,
+.routines-main .routines-tabs,
+.routines-main .routines-list,
+.routines-main .routines-error,
+.routines-main .routines-loading,
+.routines-main .routines-empty {
+  max-width: 960px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.routines-main .routines-header h2 {
+  font-size: 20px;
+}
+
+.routine-row .routine-name {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.routine-row-meta {
+  font-size: 13px;
+}
+
+.routine-row-error {
+  font-size: 12px;
+}
+
+.routine-row {
+  padding: 13px 12px;
+  gap: 12px;
+}
+
+/* ---- 详情侧栏：tab 行 + 规则卡片 ---- */
+
+.routine-side-tabs {
+  display: flex;
+  gap: 18px;
+  padding: 16px 26px 0;
+  border-bottom: var(--border-hairline) solid var(--border);
+}
+
+.routine-side-tab {
+  border: none;
+  background: transparent;
+  padding: 8px 2px 10px;
+  font-size: 13px;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.routine-side-tab.is-active {
+  color: var(--text-primary);
+  font-weight: 600;
+  border-bottom-color: var(--text-primary);
+}
+
+.routine-prompt-card {
+  border: var(--border-hairline) solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+  background: color-mix(in srgb, var(--border) 30%, transparent);
+  max-height: 300px;
+  overflow: auto;
+}
+
+.routine-prompt-card .routine-detail-prompt {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: 13px;
+  line-height: 1.75;
+  color: var(--text-primary);
+  border: none;
+  background: transparent;
+  padding: 0;
+}
+
+.routine-side-section-label {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+.routine-schedule-card {
+  margin: 0;
+  border: var(--border-hairline) solid var(--border);
+  border-radius: 12px;
+  padding: 4px 14px;
+}
+
+.routine-schedule-card .routine-detail-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 11px 0;
+}
+
+.routine-schedule-card .routine-detail-row + .routine-detail-row {
+  border-top: var(--border-hairline) solid var(--border);
+}
+
+.routine-schedule-card dt {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.routine-schedule-card dd {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-tertiary);
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 60%;
+}
+
+.routine-side-summary {
+  margin: 8px 2px 0;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+/* ---- 运行记录 tab ---- */
+
+.routine-runs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.routine-run-item {
+  border: var(--border-hairline) solid var(--border);
+  border-radius: 12px;
+  padding: 10px 14px;
+}
+
+.routine-run-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.routine-run-time {
+  font-size: 12.5px;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.routine-run-duration {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.routine-run-error {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--danger, #e5636a);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.routine-run-digest {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ============================================================
+ * v6：全量对齐官方 schedule 页样式（数值直接取自官方 bundle CSS）
+ * 关键规格：pageContent 960px + padding 0 clamp(24px,4vw,48px) 48px；
+ * h1 20/500/28；filterTab h28 r14 p0-10 f14；search h36 r12 mb16；
+ * row p8 r12 gap2，rowTitle 500/23，rowSummary 13/21 mt2，
+ * metadata 以 " · " 分隔；detail flex 0 0 47%，gutter 24，
+ * tabsBar h44/tab 13-500/pb13/选中下划线，name 20/500/28，
+ * nextRun 13/20 mb20，ruleRows .5px 边 r16 p0-12，ruleRow minh48，
+ * prompt 14/24 pre-wrap；≤1100 gutter 20，≤760 侧栏全宽。
+ * ============================================================ */
+
+.routines-main .routines-view,
+.routines-view {
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.routines-main {
+  padding: 0 clamp(24px, 4vw, 48px) 48px;
+}
+
+.routines-main .routines-header {
+  margin: 0 0 24px;
+  padding-top: 28px;
+}
+
+.routines-main .routines-header h2 {
+  font-size: 20px;
+  font-weight: 500;
+  line-height: 28px;
+  letter-spacing: normal;
+}
+
+.routines-create {
+  border-radius: 16px;
+  height: 32px;
+  padding: 0 12px;
+  font-size: 13px;
+  line-height: 20px;
+  background: var(--surface);
+  border: var(--border-hairline) solid var(--border-strong);
+}
+
+.routines-status-tab {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 14px;
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--text-tertiary);
+  display: inline-flex;
+  align-items: center;
+}
+
+.routines-status-tab:hover {
+  background: var(--border);
+  color: var(--text-primary);
+}
+
+.routines-status-tab.is-active {
+  background: var(--border);
+  color: var(--text-primary);
+  font-weight: 400;
+}
+
+.routines-filters {
+  flex-direction: column;
+  gap: 0;
+  margin-bottom: 0;
+}
+
+.routines-filters .routines-search {
+  height: 36px;
+  border-radius: 12px;
+  padding: 0 10px;
+  font-size: 14px;
+  margin: 0 0 16px;
+}
+
+.routines-list {
+  gap: 2px;
+}
+
+.routine-row {
+  padding: 8px;
+  border-radius: 12px;
+  gap: 12px;
+}
+
+.routine-row:hover {
+  background: var(--border);
+}
+
+.routine-row.is-selected {
+  background: var(--border);
+}
+
+/* 已关闭行：官方 endedRow 语义 —— 文字降灰，非整行降透明 */
+.routine-row.is-off {
+  opacity: 1;
+}
+
+.routine-row.is-off .routine-name {
+  color: var(--text-tertiary);
+}
+
+.routine-row.is-off .routine-row-meta,
+.routine-row.is-off .routine-next {
+  color: var(--text-tertiary);
+  opacity: 0.75;
+}
+
+.routine-row-icon {
+  width: 16px;
+  height: 20px;
+  margin-top: 2px;
+}
+
+.routine-row .routine-name {
+  font-weight: 500;
+  line-height: 23px;
+}
+
+.routine-row-meta {
+  margin-top: 2px;
+  font-size: 13px;
+  line-height: 21px;
+}
+
+/* 详情侧栏：47% 宽 + 24px gutter（≤1100 → 20px） */
+.routine-side {
+  --detail-gutter: 24px;
+  flex: 0 0 47%;
+  width: auto;
+  border-left: var(--border-hairline) solid var(--border);
+  background: var(--bg);
+}
+
+.routine-side-header {
+  padding: 22px var(--detail-gutter) 0;
+  margin-bottom: 4px;
+}
+
+.routine-side-header .routine-detail-title h3 {
+  font-size: 20px;
+  font-weight: 500;
+  line-height: 28px;
+}
+
+.routine-side-next {
+  padding: 0 var(--detail-gutter);
+  margin: 6px 0 20px;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--text-tertiary);
+  border-bottom: none;
+}
+
+/* tab 栏：44px 高、36px 间距、13-500、选中主题色下划线 */
+.routine-side-tabs {
+  height: 44px;
+  min-height: 44px;
+  padding: 0 var(--detail-gutter);
+  gap: 36px;
+  align-items: flex-end;
+  border-bottom: var(--border-hairline) solid var(--border);
+}
+
+.routine-side-tab {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 16px;
+  padding: 0 0 13px;
+  color: var(--text-tertiary);
+  border-bottom: 2px solid transparent;
+  border-radius: 2px;
+  margin-bottom: -1px;
+}
+
+.routine-side-tab.is-active {
+  color: var(--accent, #3b82f6);
+  border-bottom-color: var(--accent, #3b82f6);
+  font-weight: 500;
+}
+
+.routine-side-body {
+  padding: 24px var(--detail-gutter) 28px;
+}
+
+/* 规则 tab：prompt 卡 + 规则行卡（官方 ruleCard/ruleRows/ruleRow 规格） */
+.routine-prompt-card {
+  border: var(--border-hairline) solid var(--border);
+  border-radius: 16px;
+  padding: 12px;
+  background: var(--bg);
+  max-height: none;
+}
+
+.routine-prompt-card .routine-detail-prompt {
+  font-size: 14px;
+  line-height: 24px;
+}
+
+.routine-side-section-label {
+  margin: 28px 0 8px 10px;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text-tertiary);
+}
+
+.routine-schedule-card {
+  border-radius: 16px;
+  padding: 0 12px;
+}
+
+.routine-schedule-card .routine-detail-row {
+  min-height: 48px;
+}
+
+.routine-schedule-card dt {
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.routine-schedule-card dd {
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.routine-side-summary {
+  margin: 8px 0 0 10px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.routine-side-footer {
+  padding: 20px var(--detail-gutter);
+  border-top: var(--border-hairline) solid var(--border);
+  gap: 8px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.routine-side-footer .routine-detail-hint {
+  margin-right: auto;
+  font-size: 12px;
+}
+
+.routine-side-footer .routine-detail-actions {
+  gap: 8px;
+}
+
+/* 运行记录：官方 delivery 时间线（左竖线 + 节点） */
+.routine-runs-list {
+  gap: 0;
+}
+
+.routine-run-item {
+  border: none;
+  border-radius: 8px;
+  padding: 14px 8px;
+  position: relative;
+}
+
+.routine-run-item:before,
+.routine-run-item:after {
+  content: "";
+  background: var(--border);
+  width: 1px;
+  position: absolute;
+  left: 15px;
+}
+
+.routine-run-item:not(:first-child):before {
+  height: 14px;
+  top: 0;
+}
+
+.routine-run-item:not(:last-child):after {
+  top: 42px;
+  bottom: 0;
+}
+
+.routine-run-item:first-child:not(:last-child):after {
+  top: 28px;
+}
+
+.routine-run-time {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 22px;
+}
+
+.routine-run-digest {
+  font-size: 13px;
+  line-height: 22px;
+  margin-top: 6px;
+  -webkit-line-clamp: 2;
+}
+
+@media (max-width: 1100px) {
+  .routine-side {
+    --detail-gutter: 20px;
+  }
+}
+
+@media (max-width: 760px) {
+  .routine-side {
+    position: fixed;
+    inset: 0 0 0 auto;
+    flex-basis: 100%;
+    width: 100%;
+    border-left: none;
+  }
+}
+
+/* ---- v7：搜索框显式高度（官方 searchField 容器 36px，.5px 边框） ---- */
+
+.routines-main .routines-filters .routines-search {
+  height: 36px;
+  box-sizing: border-box;
+  border: 0.5px solid var(--border-strong);
+}
+
+/* ---- v8：搜索框改官方 DOM 结构（36px 容器 + input 撑满），终结 flex 压缩 ---- */
+
+.routines-main .routines-filters .routines-search {
+  display: flex;
+  align-items: center;
+  height: 36px;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 0.5px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--surface);
+  transition: border-color 0.15s;
+}
+
+.routines-main .routines-filters .routines-search:hover {
+  border-color: var(--border);
+}
+
+.routines-main .routines-filters .routines-search:focus-within {
+  border-color: var(--accent, #3b82f6);
+}
+
+.routines-main .routines-filters .routines-search > input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.routines-main .routines-filters .routines-search > input:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.routines-main .routines-filters .routines-search > input::-webkit-search-cancel-button {
+  display: none;
+}
+
+/* ---- v10：行内操作仅剩图标按钮（运行▶ / 停止■），编辑删除收敛到详情侧栏 ---- */
+
+.routine-action.is-icon {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: var(--text-secondary);
+}
+
+.routine-action.is-icon:hover {
+  color: var(--text-primary);
+}
+
+.routine-action.is-danger.is-icon {
+  color: var(--danger, #e5636a);
+}

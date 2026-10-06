@@ -11619,6 +11619,21 @@ kbd {
   background: transparent;
 }
 
+/* Drag & drop: the group under the dragged row (list view status move). */
+.issue-list-group.is-drop-target .issue-list-group-header {
+  background: color-mix(in srgb, var(--accent-soft) 54%, var(--surface-muted));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-soft) 54%, transparent);
+}
+
+.issue-list-row.is-dragging {
+  opacity: 0.45;
+}
+
+/* Insertion line: the row the dragged row will land above (list view ordering). */
+.issue-list-row.is-drop-before {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
 .issue-list-group-header {
   display: flex;
   align-items: center;
@@ -12412,3 +12427,54 @@ kbd {
   .dashboard-metric { border-left: 0; border-top: var(--border-hairline) solid var(--border); }
   .dashboard-metric:first-child { border-top: 0; }
 }
+
+
+
+/* Compact chrome (?chrome=min, the right-sidebar embed): hide the
+   project-level navigation that makes no sense in a fixed-project panel,
+   keep create / drag / detail / automation / search. */
+.app-shell.compact { grid-template-columns: minmax(0, 1fr); }
+.app-shell.compact .app-nav { display: none; }
+.app-shell.compact .header-project-switcher { display: none; }
+.app-shell.compact .project-home-button,
+.app-shell.compact .breadcrumb-chevron { display: none; }
+.app-shell.compact .workspace-title { padding-left: 8px; }
+.app-shell.compact .view-tabs { display: none; }
+
+/* Compact chrome: read-only project name label (the switcher stays hidden). */
+.app-shell.compact .header-project-static {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+  font-weight: 600;
+  font-size: 14px;
+}
+
+/* Compact chrome: tools live in the header actions row; the separate
+   toolbar row disappears entirely. */
+.app-shell.compact .board-toolbar { display: none; }
+.app-shell.compact .header-actions .toolbar-tools { gap: 6px; }
+.app-shell.compact .header-actions .search-field input { width: 120px; }
+
+/* Narrow detail (right-sidebar): properties aside collapses to a toggle. */
+.issue-detail-layout.properties-collapsed {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+}
+.issue-properties-toggle-row { display: flex; justify-content: flex-end; }
+.issue-properties-toggle {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+.issue-properties-toggle:hover { background: var(--surface-hover); color: var(--text-secondary); }

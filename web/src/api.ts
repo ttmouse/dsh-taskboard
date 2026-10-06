@@ -22,6 +22,9 @@ import type {
   WorkflowWorkspaceRecord,
 } from "./types";
 
+// Re-export for component imports (SideTaskList uses type TaskDraft).
+export type { TaskDraft };
+
 const DEFAULT_USER_ACTOR: ActorIdentity = {
   type: "user",
   id: "local-user",
@@ -330,6 +333,25 @@ export interface RoutineCreateInput {
   overlap?: string;
   timeoutMin?: number;
   deliver?: string[];
+}
+
+/** 一条历史运行记录（/api/routines/:name/runs，按开始时间倒序）。 */
+export interface RoutineRunRecord {
+  runId?: string;
+  routine?: string;
+  status?: string | null;
+  startedAt?: number | null;
+  finishedAt?: number | null;
+  durationMs?: number | null;
+  exitCode?: number | null;
+  error?: string | null;
+  digest?: string | null;
+  sessionId?: string | null;
+}
+
+/** 读取一个例程的运行历史（新→旧，最多 30 条）。 */
+export async function getRoutineRuns(name: string, signal?: AbortSignal): Promise<{ runs: RoutineRunRecord[] }> {
+  return request(`/api/routines/${encodeURIComponent(name)}/runs`, { signal });
 }
 
 /** 新建例程（写入 ~/.dsh/routines/<name>.yaml）。 */

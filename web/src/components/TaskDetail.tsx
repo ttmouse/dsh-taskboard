@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -359,6 +359,11 @@ export function TaskDetail({
   onAnnounce,
 }: TaskDetailProps) {
   const { language, locale, text } = useTaskboardI18n();
+  // Narrow containers (the right-sidebar iframe) collapse the properties
+  // aside by default: the column would otherwise eat most of the pane
+  // width. The main panel stays wide and keeps the aside open.
+  const narrowContainer = useMemo(() => window.innerWidth <= 720, []);
+  const [propertiesCollapsed, setPropertiesCollapsed] = useState(narrowContainer);
   const [currentTask, setCurrentTask] = useState(task);
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description);
@@ -846,7 +851,23 @@ export function TaskDetail({
       aria-label={text(`${task.identifier} 议题详情`, `${task.identifier} issue details`)}
     >
       <div className="issue-detail-scroll">
-        <div className="issue-detail-layout">
+        <div className={`issue-detail-layout${propertiesCollapsed ? " properties-collapsed" : ""}`}>
+          {narrowContainer && (
+            <div className="issue-properties-toggle-row">
+              <button
+                type="button"
+                className="issue-properties-toggle"
+                onClick={() => setPropertiesCollapsed((current) => !current)}
+                aria-expanded={!propertiesCollapsed}
+              >
+                <LinearIcon
+                  name="chevronDown"
+                  style={propertiesCollapsed ? undefined : { transform: "rotate(180deg)" }}
+                />
+                {propertiesCollapsed ? text("显示属性", "Show properties") : text("隐藏属性", "Hide properties")}
+              </button>
+            </div>
+          )}
           <div className="issue-detail-main">
             <article className="issue-editor" aria-label={text("议题内容", "Issue content")}>
               <div className="issue-editor-content">
@@ -1379,6 +1400,7 @@ export function TaskDetail({
             </section>
           </div>
 
+          {!propertiesCollapsed && (
           <aside className="issue-properties" aria-label={text("议题属性", "Issue properties")}>
             <div className="detail-primary-actions">
               <button
@@ -1630,6 +1652,7 @@ export function TaskDetail({
               )}</span>}
             </div>
           </aside>
+          )}
         </div>
       </div>
 

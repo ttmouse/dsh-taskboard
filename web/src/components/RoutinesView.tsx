@@ -9,8 +9,10 @@ import {
   runRoutine,
   stopRoutine,
   updateRoutine,
+  getRoutineRuns,
   type RoutineCreateInput,
   type RoutineInfo,
+  type RoutineRunRecord,
 } from "../api";
 import type { Project } from "../types";
 import { useTaskboardI18n } from "../i18n";
@@ -33,6 +35,34 @@ function formatTime(timestamp: number | null | undefined): string {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+/** 相对时长描述（对齐官方「(4小时后)」的口吻），分钟以下归一。 */
+function formatRelative(timestamp: number | null | undefined, text: (zh: string, en: string) => string): string {
+  if (!timestamp) return "";
+  const diff = timestamp - Date.now();
+  const abs = Math.abs(diff);
+  const minutes = Math.round(abs / 60_000);
+  let value: string;
+  if (minutes < 1) value = text("<1 分钟", "<1 min");
+  else if (minutes < 60) value = text(`${minutes} 分钟`, `${minutes} min`);
+  else if (minutes < 60 * 24) {
+    const hours = Math.floor(minutes / 60);
+    const rest = minutes % 60;
+    value = rest > 0 ? text(`${hours} 小时 ${rest} 分`, `${hours}h ${rest}m`) : text(`${hours} 小时`, `${hours}h`);
+  } else {
+    const days = Math.floor(minutes / (60 * 24));
+    const hours = Math.floor((minutes % (60 * 24)) / 60);
+    value = hours > 0 ? text(`${days} 天 ${hours} 小时`, `${days}d ${hours}h`) : text(`${days} 天`, `${days}d`);
+  }
+  return diff >= 0 ? text(`${value}后`, `in ${value}`) : text(`${value}前`, `${value} ago`);
+}
+
+/** 官方风格的「下次计划时间」行：10月6日 20:35 (4小时后)。 */
+function formatNextRun(routine: RoutineInfo, text: (zh: string, en: string) => string): string {
+  if (routine.paused) return text("已关闭", "Off");
+  if (!routine.nextRunAt) return "—";
+  return `${formatTime(routine.nextRunAt)} (${formatRelative(routine.nextRunAt, text)})`;
 }
 
 function formatDuration(ms: number | null | undefined): string {
@@ -68,16 +98,20 @@ const EMPTY_FORM: RoutineCreateInput = {
   deliver: ["file"],
 };
 
+/** 状态筛选：全部 / 已开启 / 已关闭。 */
+type StatusFilter = "all" | "on" | "off";
+
 interface RoutinesViewProps {
   onClose?: () => void;
 }
 
-/** 例程列表视图：展示 dsh-routines 目录下的所有例程、最近运行状态，并支持增删改查。 */
+/** 例程列表视图：官方自动化任务页的列表布局 + 项目维度筛选。 */
 export function RoutinesView({ onClose }: RoutinesViewProps) {
   const { text } = useTaskboardI18n();
   const [routines, setRoutines] = useState<RoutineInfo[] | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [directory, setDirectory] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -91,6 +125,9 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
   const [search, setSearch] = useState("");
   /** 详情对话框：存例程名，渲染时从最新列表取数据，轮询刷新后详情同步更新。 */
   const [detailName, setDetailName] = useState<string | null>(null);
+  /** 详情侧栏 tab：规则 / 任务运行记录。 */
+  const [sideTab, setSideTab] = useState<"rules" | "runs">("rules");
+  const [runs, setRuns] = useState<RoutineRunRecord[] | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -120,6 +157,18 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
+  }, [detailName]);
+
+  // 切换详情目标时重置 tab 并拉取运行历史
+  useEffect(() => {
+    setSideTab("rules");
+    setRuns(null);
+    if (!detailName) return;
+    const controller = new AbortController();
+    getRoutineRuns(detailName, controller.signal)
+      .then((data) => setRuns(data.runs))
+      .catch(() => setRuns([]));
+    return () => controller.abort();
   }, [detailName]);
 
   const submitCreate = async () => {
@@ -197,6 +246,8 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
     : (routines ?? []);
   const searchQuery = search.trim().toLowerCase();
   const filteredRoutines = visibleRoutines.filter((routine) => {
+    if (statusFilter === "on" && routine.paused) return false;
+    if (statusFilter === "off" && !routine.paused) return false;
     if (!searchQuery) return true;
     return routine.name.toLowerCase().includes(searchQuery)
       || (routine.cwd ?? "").toLowerCase().includes(searchQuery)
@@ -208,24 +259,23 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
     ? (routines ?? []).find((routine) => routine.name === detailName) ?? null
     : null;
 
+  const statusTabs: Array<{ key: StatusFilter; label: string }> = [
+    { key: "all", label: text("全部", "All") },
+    { key: "on", label: text("已开启", "Enabled") },
+    { key: "off", label: text("已关闭", "Disabled") },
+  ];
+
   return (
     <div className="routines-view" aria-label={text("自动化", "Automation")}>
+      <div className="routines-main">
       <div className="routines-header">
         <div>
-          <h2>{text("自动化", "Automation")}</h2>
+          <h2>{text("自动化任务", "Automations")}</h2>
           {directory && <p className="routines-directory" title={directory}>{directory}</p>}
         </div>
         <div className="routines-header-actions">
-          <input
-            type="search"
-            className="routines-search"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder={text("搜索自动化任务…", "Search automations…")}
-            aria-label={text("搜索自动化任务", "Search automations")}
-          />
           <button type="button" className="routines-create" onClick={() => { setCreating(true); setError(null); }}>
-            {text("新建自动化", "New automation")}
+            ＋ {text("新建", "New")}
           </button>
           <button type="button" className="routines-refresh" onClick={() => void load()} disabled={loading}>
             {text("刷新", "Refresh")}
@@ -235,6 +285,33 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
           )}
         </div>
       </div>
+
+      <div className="routines-filters">
+        <div className="routines-search">
+          <input
+            type="search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder={text("搜索自动化任务…", "Search automations…")}
+            aria-label={text("搜索自动化任务", "Search automations")}
+          />
+        </div>
+        <div className="routines-status-tabs" role="tablist" aria-label={text("按状态筛选", "Filter by status")}>
+          {statusTabs.map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              role="tab"
+              aria-selected={statusFilter === tab.key}
+              className={`routines-status-tab${statusFilter === tab.key ? " is-active" : ""}`}
+              onClick={() => setStatusFilter(tab.key)}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {routines && projects.length > 0 && (
         <div className="routines-tabs" role="tablist" aria-label={text("按项目筛选", "Filter by project")}>
           <button
@@ -244,7 +321,7 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
             className={`routines-tab${activeProjectId === null ? " is-active" : ""}`}
             onClick={() => setActiveProjectId(null)}
           >
-            {text("全部", "All")}
+            {text("全部项目", "All projects")}
           </button>
           {projects.filter((project) => project.workspacePath).map((project) => (
             <button
@@ -260,77 +337,46 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
           ))}
         </div>
       )}
+
       {error && <p className="routines-error" role="alert">{error}</p>}
       {loading && routines === null ? (
         <p className="routines-loading">{text("正在读取自动化…", "Loading automations…")}</p>
       ) : !routines || routines.length === 0 ? (
-        <p className="routines-empty">{text("暂无自动化。在看板里开启某个项目的自动认领，或点「新建自动化」添加。", "No automations yet.")}</p>
+        <p className="routines-empty">{text("暂无自动化。在看板里开启某个项目的自动认领，或点「新建」添加。", "No automations yet.")}</p>
       ) : filteredRoutines.length === 0 ? (
         <p className="routines-empty">
-          {searchQuery
+          {searchQuery || statusFilter !== "all" || activeProjectId
             ? text("没有匹配的自动化任务。", "No matching automations.")
             : text("该项目暂无自动化任务。可在任务看板中开启自动认领。", "No automation tasks for this project.")}
         </p>
       ) : (
-        <div className="routines-grid">
+        <div className="routines-list">
           {filteredRoutines.map((routine) => {
-            const status = statusInfo(routine.lastRun?.status ?? null, text);
             return (
-              <article className="routine-card" key={routine.name}>
-                {/* 覆盖点击层：点击卡片主体打开详情（对齐 .task-card-open） */}
+              <article className={`routine-row${routine.paused ? " is-off" : ""}${detailName === routine.name ? " is-selected" : ""}`} key={routine.name}>
+                {/* 覆盖点击层：点击行主体打开详情 */}
                 <button
                   type="button"
-                  className="routine-card-open"
+                  className="routine-row-open"
                   onClick={() => setDetailName(routine.name)}
                   aria-label={`${routine.name} · ${text("查看详情", "View details")}`}
                 />
-                <header className="routine-card-header">
-                  <strong className="routine-name">{routine.name}</strong>
-                  {isClaimRoutine(routine.name) && <span className="routine-badge">认领</span>}
-                  <span className={`routine-status is-${status.tone}`}>{status.label}</span>
-                </header>
-                <div className="routine-meta">
-                  <span className="routine-schedule">{describeSchedule(routine.schedule, text)}</span>
-                  {routine.timezone && <span className="routine-timezone">{routine.timezone}</span>}
-                  {routine.profile && <span className="routine-profile">{routine.profile}</span>}
-                </div>
-                {routine.cwd && (
-                  <div className="routine-row">
-                    <span className="routine-row-label">{text("目录", "cwd")}</span>
-                    <span className="routine-row-value routine-cwd" title={routine.cwd}>{routine.cwd}</span>
+                <div className="routine-row-main">
+                  <div className="routine-row-title">
+                    <svg className="routine-row-icon" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+                      <circle cx="8" cy="8" r="6.4" fill="none" stroke="currentColor" strokeWidth="1.3" />
+                      <path d="M8 4.6V8l2.4 1.6" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+                    </svg>
+                    <strong className="routine-name">{routine.name}</strong>
+                    {isClaimRoutine(routine.name) && <span className="routine-badge">认领</span>}
                   </div>
-                )}
-                <div className="routine-row">
-                  <span className="routine-row-label">{text("最近运行", "Last run")}</span>
-                  <span className="routine-row-value">
-                    {formatTime(routine.lastRun?.startedAt)}
-                    {routine.lastRun?.durationMs != null && <> · {formatDuration(routine.lastRun.durationMs)}</>}
-                  </span>
+                  <div className="routine-row-meta">
+                    <span className="routine-schedule">{describeSchedule(routine.schedule, text)}</span>
+                    <span className="routine-meta-dot">·</span>
+                    <span className="routine-next">{text("下次计划时间", "Next")}: {formatNextRun(routine, text)}</span>
+                  </div>
                 </div>
-                <div className="routine-row">
-                  <span className="routine-row-label">{text("下次运行", "Next run")}</span>
-                  <span className="routine-row-value">
-                    {routine.paused ? text("已关闭", "Off") : formatTime(routine.nextRunAt)}
-                  </span>
-                </div>
-                {routine.lastRun?.digest && <p className="routine-digest">{routine.lastRun.digest}</p>}
-                {routine.lastRun?.error && (
-                  <p className="routine-error" title={routine.lastRun.error}>
-                    {routine.lastRun.status === "skipped"
-                      ? (routine.lastRun.check
-                        ? text("本轮已跳过（没有待认领的任务）。", "This run was skipped (no tasks to claim).")
-                        : text("上次运行未结束，本次到点已自动跳过。", "Previous run still in progress; this run was skipped."))
-                      : routine.lastRun.error}
-                  </p>
-                )}
-                <div className="routine-switch-row">
-                  <span>
-                    {isClaimRoutine(routine.name)
-                      ? (routine.paused
-                        ? text("认领已关闭", "Claim off")
-                        : text("认领已开启", "Claim on"))
-                      : (routine.paused ? text("已暂停", "Paused") : text("启用中", "Enabled"))}
-                  </span>
+                <div className="routine-row-side">
                   <button
                     type="button"
                     role="switch"
@@ -343,41 +389,40 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
                   >
                     <span aria-hidden="true" />
                   </button>
-                </div>
-                <div className="routine-actions">
-                  <button
-                    type="button"
-                    className="is-primary"
-                    disabled={runningName === routine.name}
-                    onClick={() => void submitRun(routine.name)}
-                  >
-                    {runningName === routine.name
-                      ? text("触发中…", "Triggering…")
-                      : ranName === routine.name
-                        ? text("已触发 ✓", "Triggered ✓")
-                        : text("测试执行", "Run now")}
-                  </button>
-                  {routine.lastRun?.status === "running" && (
-                    <button type="button" className="is-danger" onClick={() => void submitStop(routine.name)}>
-                      {text("停止", "Stop")}
+                  <div className="routine-row-actions">
+                    <button
+                      type="button"
+                      className="routine-action is-icon"
+                      aria-label={runningName === routine.name
+                        ? text("触发中…", "Running…")
+                        : text("运行", "Run")}
+                      title={runningName === routine.name
+                        ? text("触发中…", "Running…")
+                        : ranName === routine.name
+                          ? text("已触发 ✓", "Triggered ✓")
+                          : text("运行", "Run")}
+                      disabled={runningName === routine.name}
+                      onClick={() => void submitRun(routine.name)}
+                    >
+                      <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+                        <path d="M5 3.4v9.2a.6.6 0 0 0 .9.5l7.2-4.6a.6.6 0 0 0 0-1L5.9 2.9a.6.6 0 0 0-.9.5z" fill="currentColor" />
+                      </svg>
                     </button>
-                  )}
-                  {!isClaimRoutine(routine.name) && (
-                    <>
-                      <button type="button" onClick={() => { setEditing(routine); setRawEdit(routine.raw ?? ""); setError(null); }}>
-                        {text("编辑", "Edit")}
+                    {routine.lastRun?.status === "running" && (
+                      <button type="button" className="routine-action is-danger is-icon" aria-label={text("停止", "Stop")} title={text("停止", "Stop")} onClick={() => void submitStop(routine.name)}>
+                        <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+                          <rect x="4" y="4" width="8" height="8" rx="1.2" fill="currentColor" />
+                        </svg>
                       </button>
-                      <button type="button" className="is-danger" onClick={() => setConfirmDelete(routine.name)}>
-                        {text("删除", "Delete")}
-                      </button>
-                    </>
-                  )}
+                    )}
+                  </div>
                 </div>
               </article>
             );
           })}
         </div>
       )}
+      </div>
 
       {creating && (
         <div className="routines-modal">
@@ -449,31 +494,62 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
       )}
 
       {detailRoutine && (
-        <div
-          className="routine-detail"
+        <aside
+          className="routine-side"
           role="dialog"
-          aria-modal="true"
           aria-label={detailRoutine.name}
-          onClick={() => setDetailName(null)}
         >
-          <div className="routine-detail-box" onClick={(event) => event.stopPropagation()}>
-            <header className="routine-detail-header">
-              <div className="routine-detail-title">
-                <h3>{detailRoutine.name}</h3>
-                {isClaimRoutine(detailRoutine.name) && <span className="routine-badge">认领</span>}
-                <span className={`routine-status is-${statusInfo(detailRoutine.lastRun?.status ?? null, text).tone}`}>
-                  {statusInfo(detailRoutine.lastRun?.status ?? null, text).label}
-                </span>
-              </div>
-              <div className="routine-detail-header-actions">
-                <button type="button" className="routine-detail-close" onClick={() => setDetailName(null)} aria-label={text("关闭", "Close")}>×</button>
-              </div>
-            </header>
-            <div className="routine-detail-body">
-              <dl className="routine-detail-rows">
+          <header className="routine-side-header">
+            <div className="routine-detail-title">
+              <h3>{detailRoutine.name}</h3>
+              {isClaimRoutine(detailRoutine.name) && <span className="routine-badge">认领</span>}
+              <span className={`routine-status is-${statusInfo(detailRoutine.lastRun?.status ?? null, text).tone}`}>
+                {statusInfo(detailRoutine.lastRun?.status ?? null, text).label}
+              </span>
+            </div>
+            <div className="routine-detail-header-actions">
+              <button type="button" className="routine-detail-close" onClick={() => setDetailName(null)} aria-label={text("关闭", "Close")}>×</button>
+            </div>
+          </header>
+          <div className="routine-side-next">
+            {text("下次运行", "Next run")} {formatNextRun(detailRoutine, text)}
+          </div>
+          <div className="routine-side-tabs" role="tablist">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={sideTab === "rules"}
+              className={`routine-side-tab${sideTab === "rules" ? " is-active" : ""}`}
+              onClick={() => setSideTab("rules")}
+            >
+              {text("规则", "Rules")}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={sideTab === "runs"}
+              className={`routine-side-tab${sideTab === "runs" ? " is-active" : ""}`}
+              onClick={() => setSideTab("runs")}
+            >
+              {text("任务运行记录", "Run history")}
+            </button>
+          </div>
+          {sideTab === "rules" ? (
+          <div className="routine-side-body">
+              {detailRoutine.prompt && (
+                <div className="routine-prompt-card">
+                  <pre className="routine-detail-prompt">{detailRoutine.prompt}</pre>
+                </div>
+              )}
+              <div className="routine-side-section-label">{text("运行时间", "Schedule")}</div>
+              <dl className="routine-schedule-card">
                 <div className="routine-detail-row">
-                  <dt>{text("调度", "Schedule")}</dt>
+                  <dt>{text("重复", "Repeat")}</dt>
                   <dd>{describeSchedule(detailRoutine.schedule, text)}</dd>
+                </div>
+                <div className="routine-detail-row">
+                  <dt>{text("频率", "Cron")}</dt>
+                  <dd className="routine-detail-mono">{detailRoutine.schedule ?? "—"}</dd>
                 </div>
                 {detailRoutine.timezone && (
                   <div className="routine-detail-row">
@@ -481,16 +557,16 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
                     <dd>{detailRoutine.timezone}</dd>
                   </div>
                 )}
-                {detailRoutine.profile && (
-                  <div className="routine-detail-row">
-                    <dt>Profile</dt>
-                    <dd>{detailRoutine.profile}</dd>
-                  </div>
-                )}
                 {detailRoutine.cwd && (
                   <div className="routine-detail-row">
                     <dt>{text("目录", "cwd")}</dt>
                     <dd title={detailRoutine.cwd}>{detailRoutine.cwd}</dd>
+                  </div>
+                )}
+                {detailRoutine.profile && (
+                  <div className="routine-detail-row">
+                    <dt>Profile</dt>
+                    <dd>{detailRoutine.profile}</dd>
                   </div>
                 )}
                 {detailRoutine.overlap && (
@@ -505,70 +581,36 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
                     <dd>{text(`${detailRoutine.timeoutMin} 分钟`, `${detailRoutine.timeoutMin} min`)}</dd>
                   </div>
                 )}
-                {Array.isArray(detailRoutine.deliver) && detailRoutine.deliver.length > 0 && (
-                  <div className="routine-detail-row">
-                    <dt>{text("交付", "Deliver")}</dt>
-                    <dd>{detailRoutine.deliver.join(", ")}</dd>
-                  </div>
-                )}
               </dl>
-
-              <section className="routine-detail-section">
-                <h4>{text("最近运行", "Last run")}</h4>
-                {detailRoutine.lastRun ? (
-                  <dl className="routine-detail-rows">
-                    <div className="routine-detail-row">
-                      <dt>{text("开始", "Started")}</dt>
-                      <dd>{formatTime(detailRoutine.lastRun.startedAt)}</dd>
-                    </div>
-                    <div className="routine-detail-row">
-                      <dt>{text("耗时", "Duration")}</dt>
-                      <dd>{formatDuration(detailRoutine.lastRun.durationMs)}</dd>
-                    </div>
-                    {detailRoutine.lastRun.finishedAt != null && (
-                      <div className="routine-detail-row">
-                        <dt>{text("结束", "Finished")}</dt>
-                        <dd>{formatTime(detailRoutine.lastRun.finishedAt)}</dd>
+              <p className="routine-side-summary">{describeSchedule(detailRoutine.schedule, text)}</p>
+          </div>
+          ) : (
+          <div className="routine-side-body">
+              {runs === null ? (
+                <p className="routine-detail-empty">{text("正在读取运行记录…", "Loading run history…")}</p>
+              ) : runs.length === 0 ? (
+                <p className="routine-detail-empty">{text("该例程尚未运行。", "This routine has not run yet.")}</p>
+              ) : (
+                <div className="routine-runs-list">
+                  {runs.map((run) => {
+                    const info = statusInfo(run.status ?? null, text);
+                    return (
+                      <div className="routine-run-item" key={run.runId ?? `${run.routine}-${run.startedAt}`}>
+                        <div className="routine-run-head">
+                          <span className={`routine-status is-${info.tone}`}>{info.label}</span>
+                          <span className="routine-run-time">{formatTime(run.startedAt ?? null)}</span>
+                          <span className="routine-run-duration">{formatDuration(run.durationMs)}</span>
+                        </div>
+                        {run.error && <div className="routine-run-error" title={run.error}>{run.error}</div>}
+                        {run.digest && <div className="routine-run-digest" title={run.digest}>{run.digest}</div>}
                       </div>
-                    )}
-                    {detailRoutine.lastRun.exitCode != null && (
-                      <div className="routine-detail-row">
-                        <dt>{text("退出码", "Exit code")}</dt>
-                        <dd>{detailRoutine.lastRun.exitCode}</dd>
-                      </div>
-                    )}
-                    {detailRoutine.lastRun.sessionId && (
-                      <div className="routine-detail-row">
-                        <dt>{text("会话", "Session")}</dt>
-                        <dd className="routine-detail-mono" title={detailRoutine.lastRun.sessionId}>{detailRoutine.lastRun.sessionId}</dd>
-                      </div>
-                    )}
-                    {detailRoutine.lastRun.error && (
-                      <div className="routine-detail-row">
-                        <dt>{text("错误", "Error")}</dt>
-                        <dd className="routine-detail-error" title={detailRoutine.lastRun.error}>{detailRoutine.lastRun.error}</dd>
-                      </div>
-                    )}
-                    {detailRoutine.lastRun.digest && (
-                      <div className="routine-detail-row">
-                        <dt>{text("摘要", "Digest")}</dt>
-                        <dd>{detailRoutine.lastRun.digest}</dd>
-                      </div>
-                    )}
-                  </dl>
-                ) : (
-                  <p className="routine-detail-empty">{text("该例程尚未运行。", "This routine has not run yet.")}</p>
-                )}
-              </section>
-
-              {detailRoutine.prompt && (
-                <section className="routine-detail-section">
-                  <h4>{text("任务说明", "Prompt")}</h4>
-                  <pre className="routine-detail-prompt">{detailRoutine.prompt}</pre>
-                </section>
+                    );
+                  })}
+                </div>
               )}
-            </div>
-            <footer className="routine-detail-footer">
+          </div>
+          )}
+            <footer className="routine-side-footer">
               <span className="routine-detail-hint">
                 {isClaimRoutine(detailRoutine.name)
                   ? text("认领例程由看板「自动认领」开关驱动。", "Claim routines are driven by the board's auto-claim switch.")
@@ -582,10 +624,10 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
                   onClick={() => void submitRun(detailRoutine.name)}
                 >
                   {runningName === detailRoutine.name
-                    ? text("触发中…", "Triggering…")
+                    ? text("触发中…", "Running…")
                     : ranName === detailRoutine.name
                       ? text("已触发 ✓", "Triggered ✓")
-                      : text("测试执行", "Run now")}
+                      : text("运行", "Run")}
                 </button>
                 {detailRoutine.lastRun?.status === "running" && (
                   <button type="button" className="is-danger" onClick={() => void submitStop(detailRoutine.name)}>
@@ -619,8 +661,7 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
                 )}
               </div>
             </footer>
-          </div>
-        </div>
+        </aside>
       )}
     </div>
   );

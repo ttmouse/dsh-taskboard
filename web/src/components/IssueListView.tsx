@@ -1,4 +1,4 @@
-import { useState, type KeyboardEvent, type MouseEvent, type RefObject } from "react";
+import { useState, type DragEvent, type KeyboardEvent, type MouseEvent, type RefObject } from "react";
 import { assigneeTargetForActor } from "../actors";
 import { taskPriorityLabel, taskStatusLabel, useTaskboardI18n } from "../i18n";
 import { labelPresentation } from "../labels";
@@ -22,6 +22,8 @@ interface IssueListViewProps {
   onOpenTask: (task: Task) => void;
   onOpenConversation: (conversation: TaskCardPresentation["conversations"][number]) => void;
   onUpdate: (task: Task, changes: Partial<TaskDraft>) => Promise<Task>;
+  /** Drag & drop: move a task into a status group, optionally before a row. */
+  onMoveTask: (status: TaskStatus, taskId: string, beforeTaskId?: string | null) => void;
 }
 
 function createdDate(value: string, locale: string) {
@@ -42,13 +44,40 @@ export function IssueListView({
   onOpenTask,
   onOpenConversation,
   onUpdate,
+  onMoveTask,
 }: IssueListViewProps) {
   const { language, locale, text } = useTaskboardI18n();
   const [collapsed, setCollapsed] = useState(() => new Set(COLLAPSED_BY_DEFAULT));
   const [priorityMenuTaskId, setPriorityMenuTaskId] = useState<string | null>(null);
+  const [dragTaskId, setDragTaskId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ status: TaskStatus; beforeTaskId: string | null } | null>(null);
 
   function stopRow(event: MouseEvent | KeyboardEvent) {
     event.stopPropagation();
+  }
+
+  /**
+   * Row the pointer sits above inside a group: the dragged row itself is
+   * skipped, and `null` means "after every row" (append). Mirrors the board
+   * column's insertion rule so both surfaces order tasks the same way.
+   */
+  function dropBeforeTaskId(container: HTMLElement, clientY: number): string | null {
+    const rows = Array.from(container.querySelectorAll<HTMLElement>("[data-task-id]"))
+      .filter((row) => row.dataset.taskId !== dragTaskId);
+    const hit = rows.find((row) => clientY < row.getBoundingClientRect().top + row.offsetHeight / 2);
+    return hit?.dataset.taskId ?? null;
+  }
+
+  /** Drop a dragged row onto a status group at the pointer's position. */
+  function handleDrop(event: DragEvent<HTMLElement>, status: TaskStatus) {
+    event.preventDefault();
+    const taskId =
+      event.dataTransfer.getData("application/x-taskboard-task") ||
+      event.dataTransfer.getData("text/plain");
+    const beforeTaskId = dropBeforeTaskId(event.currentTarget, event.clientY);
+    setDropTarget(null);
+    setDragTaskId(null);
+    if (taskId) onMoveTask(status, taskId, beforeTaskId);
   }
 
   function toggleStatus(status: TaskStatus) {
@@ -68,7 +97,22 @@ export function IssueListView({
           const isCollapsed = collapsed.has(status);
           const statusLabel = taskStatusLabel(language, status);
           return (
-            <section className={`issue-list-group status-${status}`} key={status}>
+            <section
+              className={`issue-list-group status-${status}${dropTarget?.status === status ? " is-drop-target" : ""}`}
+              key={status}
+              onDragOver={(event) => {
+                if (dragTaskId === null) return;
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "move";
+                setDropTarget({ status, beforeTaskId: dropBeforeTaskId(event.currentTarget, event.clientY) });
+              }}
+              onDragLeave={(event) => {
+                if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) {
+                  setDropTarget((current) => (current?.status === status ? null : current));
+                }
+              }}
+              onDrop={(event) => handleDrop(event, status)}
+            >
               <button className="issue-list-group-header" type="button" onClick={() => toggleStatus(status)} aria-expanded={!isCollapsed}>
                 <LinearIcon name={isCollapsed ? "chevronRight" : "chevronDown"} />
                 <span className="issue-list-status-icon"><StatusIcon status={status} /></span>
@@ -81,10 +125,22 @@ export function IssueListView({
                     const assigneeTarget = assigneeTargetForActor(task.assignee, currentUser) ?? "current-user";
                     return (
                       <div
-                        className={`issue-list-row${presentations[task.id]?.unread ? " is-unread" : ""}`}
+                        className={`issue-list-row${presentations[task.id]?.unread ? " is-unread" : ""}${dragTaskId === task.id ? " is-dragging" : ""}${dropTarget?.status === status && dropTarget.beforeTaskId === task.id ? " is-drop-before" : ""}`}
                         role="button"
                         tabIndex={0}
+                        draggable
+                        data-task-id={task.id}
                         key={task.id}
+                        onDragStart={(event) => {
+                          setDragTaskId(task.id);
+                          event.dataTransfer.effectAllowed = "move";
+                          event.dataTransfer.setData("application/x-taskboard-task", task.id);
+                          event.dataTransfer.setData("text/plain", task.id);
+                        }}
+                        onDragEnd={() => {
+                          setDragTaskId(null);
+                          setDropTarget(null);
+                        }}
                         onClick={() => onOpenTask(task)}
                         onKeyDown={(event) => {
                           if (event.key === "Enter" || event.key === " ") onOpenTask(task);

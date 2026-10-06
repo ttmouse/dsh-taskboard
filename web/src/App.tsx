@@ -577,6 +577,10 @@ function LocalRealtimeSync({
 export function App() {
   const query = useMemo(() => new URLSearchParams(getTaskboardLocation().search), []);
   const embedded = query.get("host") === "codex";
+  // Compact chrome (?chrome=min): the right-sidebar embed — the left nav,
+  // the project switcher, and the view tabs are hidden; everything else
+  // (create, drag, detail, automation menu, search) stays.
+  const compact = query.get("chrome") === "min";
   // host=dsh enables the parent-message protocol (theme sync etc.) while
   // keeping automation on the direct local API path.
   const hostMode = query.get("host");
@@ -609,7 +613,15 @@ export function App() {
   const [filters, setFilters] = useState(readTaskFilters);
   const [showEmptyColumns, setShowEmptyColumns] = useState(readShowEmptyColumns);
   const [columnVisibilityByProject, setColumnVisibilityByProject] = useState(readColumnVisibilityByProject);
-  const [boardView, setBoardView] = useState<BoardView>("issues");
+  const [boardView, setBoardView] = useState<BoardView>(() => {
+    // Initial view from the URL (?view=list), used by the right-sidebar
+    // embed so the compact panel opens straight onto the list. Absent or
+    // unknown values fall back to the board.
+    const view = getTaskboardLocation().searchParams.get("view");
+    return view === "list" || view === "gantt" || view === "dashboard" || view === "workflow"
+      ? view
+      : "issues";
+  });
   const [ganttZoom, setGanttZoom] = useState<GanttZoom>("week");
   const [ganttHideCompleted, setGanttHideCompleted] = useState(false);
   const [ganttTodayRequest, setGanttTodayRequest] = useState(0);
@@ -2109,6 +2121,76 @@ export function App() {
   }
 
   const contextName = workspaceName(hostContext?.workspacePath);
+  // Compact chrome reuses the same tools node in the header actions row, so
+  // the sidebar spends one row instead of two on search/filter.
+  const toolbarTools = (boardView === "issues" || boardView === "list" || boardView === "gantt") ? (
+    <div className="toolbar-tools">
+            <label className={`search-field${search ? " has-value" : ""}`} title={text("搜索议题 (/)", "Search issues (/)")} >
+              <LinearIcon className="search-icon" name="search" />
+              <span className="sr-only">{text("搜索议题", "Search issues")}</span>
+              <input
+                id="task-search"
+                type="search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder={text("搜索议题…", "Search issues…")}
+              />
+              {!search && <kbd>/</kbd>}
+            </label>
+            {boardView === "gantt" && (
+              <div className="gantt-toolbar-controls">
+                <label className="gantt-hide-completed">
+                  <input type="checkbox" checked={ganttHideCompleted} onChange={(event) => setGanttHideCompleted(event.target.checked)} />
+                  <i><LinearIcon name="check" /></i>
+                  <span>{text("隐藏已完成", "Hide completed")}</span>
+                </label>
+                <button type="button" className="gantt-today-button" onClick={() => setGanttTodayRequest((current) => current + 1)}>{text("今天", "Today")}</button>
+                <div className="gantt-view-menu-wrap">
+                  <button type="button" className="gantt-view-menu-trigger" aria-label={text("时间轴视图选项", "Timeline view options")} aria-expanded={ganttViewMenuOpen} onClick={() => setGanttViewMenuOpen((current) => !current)}>
+                    <LinearIcon name="more" />
+                  </button>
+                  {ganttViewMenuOpen && (
+                    <div className="gantt-view-menu" role="menu">
+                      {GANTT_ZOOM_OPTIONS.map((value) => (
+                        <button type="button" role="menuitemradio" aria-checked={ganttZoom === value} className={ganttZoom === value ? "active" : ""} onClick={() => { setGanttZoom(value); setGanttViewMenuOpen(false); }} key={value}>
+                          <span>{language === "zh"
+                            ? { day: "日视图", week: "周视图", month: "月视图" }[value]
+                            : { day: "Day", week: "Week", month: "Month" }[value]}</span>
+                          {ganttZoom === value && <LinearIcon name="check" />}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+            <TaskFilterMenu
+              tasks={tasks}
+              search={search}
+              labels={availableLabels}
+              filters={filters}
+              onChange={setFilters}
+            />
+            {boardView === "issues" && (
+              <BoardSettingsMenu
+                showEmptyColumns={showEmptyColumns}
+                onShowEmptyColumnsChange={updateShowEmptyColumns}
+              />
+            )}
+            {(search || activeFilterCount > 0) && (
+              <button
+                className="clear-filter"
+                type="button"
+                aria-label="清除筛选"
+                title="清除筛选"
+                onClick={() => { setSearch(""); setFilters(EMPTY_TASK_FILTERS); }}
+              >
+                <LinearIcon name="close" />
+              </button>
+            )}
+    </div>
+  ) : null;
+
   const headerProjectName = selectedProject?.name ?? "任务面板";
   const appShellStyle = embedded
     ? { "--codex-titlebar-left-inset": `${hostContext?.titlebarLeftInset ?? 0}px` } as CSSProperties
@@ -2116,7 +2198,7 @@ export function App() {
 
   return (
     <TaskboardLanguageProvider language={language}>
-    <div className={`app-shell${embedded ? " embedded" : ""}`} style={appShellStyle}>
+    <div className={`app-shell${embedded ? " embedded" : ""}${compact ? " compact" : ""}`} style={appShellStyle}>
       {taskboardMetadata && taskboardMetadata.mode !== "cloud" && (
         <LocalRealtimeSync
           selectedProjectId={selectedProjectId}
@@ -2216,6 +2298,10 @@ export function App() {
                 </button>
               )}
               {selectedProjectId && <span className="breadcrumb-chevron" aria-hidden="true"><LinearIcon name="chevronRight" /></span>}
+              {/* Compact chrome: show the project name read-only (no switching). */}
+              {compact && selectedProjectId && (
+                <span className="header-project-static" title={headerProjectName}>{headerProjectName}</span>
+              )}
               {selectedProjectId ? (
                 <div className="header-project-switcher" data-project-switcher>
                   <button
@@ -2311,6 +2397,7 @@ export function App() {
                 onChange={(options) => void saveProjectAutomation(options)}
               />
             )}
+            {compact && toolbarTools}
             {selectedProjectId && boardView !== "workflow" && (
               <button
                 className="icon-button header-create-button"
@@ -2373,71 +2460,7 @@ export function App() {
               </button>
             )}
           </div>
-          {(boardView === "issues" || boardView === "list" || boardView === "gantt") && <div className="toolbar-tools">
-            <label className={`search-field${search ? " has-value" : ""}`} title={text("搜索议题 (/)", "Search issues (/)")} >
-              <LinearIcon className="search-icon" name="search" />
-              <span className="sr-only">{text("搜索议题", "Search issues")}</span>
-              <input
-                id="task-search"
-                type="search"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder={text("搜索议题…", "Search issues…")}
-              />
-              {!search && <kbd>/</kbd>}
-            </label>
-            {boardView === "gantt" && (
-              <div className="gantt-toolbar-controls">
-                <label className="gantt-hide-completed">
-                  <input type="checkbox" checked={ganttHideCompleted} onChange={(event) => setGanttHideCompleted(event.target.checked)} />
-                  <i><LinearIcon name="check" /></i>
-                  <span>{text("隐藏已完成", "Hide completed")}</span>
-                </label>
-                <button type="button" className="gantt-today-button" onClick={() => setGanttTodayRequest((current) => current + 1)}>{text("今天", "Today")}</button>
-                <div className="gantt-view-menu-wrap">
-                  <button type="button" className="gantt-view-menu-trigger" aria-label={text("时间轴视图选项", "Timeline view options")} aria-expanded={ganttViewMenuOpen} onClick={() => setGanttViewMenuOpen((current) => !current)}>
-                    <LinearIcon name="more" />
-                  </button>
-                  {ganttViewMenuOpen && (
-                    <div className="gantt-view-menu" role="menu">
-                      {GANTT_ZOOM_OPTIONS.map((value) => (
-                        <button type="button" role="menuitemradio" aria-checked={ganttZoom === value} className={ganttZoom === value ? "active" : ""} onClick={() => { setGanttZoom(value); setGanttViewMenuOpen(false); }} key={value}>
-                          <span>{language === "zh"
-                            ? { day: "日视图", week: "周视图", month: "月视图" }[value]
-                            : { day: "Day", week: "Week", month: "Month" }[value]}</span>
-                          {ganttZoom === value && <LinearIcon name="check" />}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-            <TaskFilterMenu
-              tasks={tasks}
-              search={search}
-              labels={availableLabels}
-              filters={filters}
-              onChange={setFilters}
-            />
-            {boardView === "issues" && (
-              <BoardSettingsMenu
-                showEmptyColumns={showEmptyColumns}
-                onShowEmptyColumnsChange={updateShowEmptyColumns}
-              />
-            )}
-            {(search || activeFilterCount > 0) && (
-              <button
-                className="clear-filter"
-                type="button"
-                aria-label="清除筛选"
-                title="清除筛选"
-                onClick={() => { setSearch(""); setFilters(EMPTY_TASK_FILTERS); }}
-              >
-                <LinearIcon name="close" />
-              </button>
-            )}
-          </div>}
+          {toolbarTools}
         </div>}
 
         {(loadError || actionError) && (
@@ -2585,6 +2608,7 @@ export function App() {
             onOpenTask={openTaskDetail}
             onOpenConversation={openTaskConversation}
             onUpdate={updateTaskProperties}
+            onMoveTask={(status, taskId, beforeTaskId) => finishTaskDrop(status, taskId, beforeTaskId ?? null)}
           />
         ) : boardView === "gantt" ? (
           <Suspense fallback={<div className="workflow-board-loading">正在打开甘特图…</div>}>
