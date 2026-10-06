@@ -17,3 +17,4 @@ src-tauri/target/
 .dsh/
 .reasonix/
 refs/
+tmp/
