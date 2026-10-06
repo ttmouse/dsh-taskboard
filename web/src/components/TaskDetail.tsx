@@ -442,6 +442,8 @@ export function TaskDetail({
   const commentAttachmentInputRef = useRef<HTMLInputElement>(null);
   const editCommentImageInputRef = useRef<HTMLInputElement>(null);
   const editingUploadedAttachmentsRef = useRef<Map<string, Attachment>>(new Map());
+  const detailScrollRef = useRef<HTMLDivElement | null>(null);
+  const landedTaskRef = useRef<string | null>(null);
   const draft = serializeInlineMedia(commentSegments);
   const commentInlineImages = inlineMediaImages(commentSegments);
   const editingDraft = serializeInlineMedia(editingSegments);
@@ -499,6 +501,25 @@ export function TaskDetail({
     );
     return () => controller.abort();
   }, [commentsRevision, task.activityKey, task.id]);
+
+  /**
+   * Landing scroll: the timeline is append-only, so on open the newest work
+   * sits at the bottom. If the latest entry is the agent's, the human hasn't
+   * read it yet — land there (chat-app behavior), once per open. If the
+   * latest entry is the human's own, nothing new waits — stay at the top
+   * where the title and description live.
+   */
+  useEffect(() => {
+    if (commentsLoading) return;
+    if (landedTaskRef.current === task.id) return;
+    landedTaskRef.current = task.id;
+    const latest = comments[comments.length - 1];
+    if (latest?.authorType !== "agent") return;
+    requestAnimationFrame(() => {
+      const scroller = detailScrollRef.current;
+      if (scroller) scroller.scrollTop = scroller.scrollHeight;
+    });
+  }, [commentsLoading, comments, task.id]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -585,7 +606,7 @@ export function TaskDetail({
     const saved = await saveTask({ status: "done" }, "status");
     if (!saved) return;
     try {
-      const comment = await createComment(saved.id, text("✅ 确认完成", "✅ Accepted"));
+      const comment = await createComment(saved.id, text("确认完成", "Accepted"));
       setComments((current) => [...current, comment]);
       onAnnounce(text(`${saved.identifier} 已验收。`, `${saved.identifier} accepted.`));
     } catch (error) {
@@ -933,7 +954,8 @@ export function TaskDetail({
   ].sort((left, right) => (
     left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id)
   ));
-  const foldsInto = (item: (typeof timelineItems)[number], comment: (typeof timelineItems)[number]["comment"]) => (
+  type TimelineItem = (typeof timelineItems)[number];
+  const foldsInto = (item: Extract<TimelineItem, { kind: "change" }>, comment: Extract<TimelineItem, { kind: "comment" }>["comment"]) => (
     item.activity.actorName === comment.authorName
     && (() => {
       const gap = Date.parse(item.createdAt) - Date.parse(comment.createdAt);
@@ -967,7 +989,7 @@ export function TaskDetail({
       className="issue-detail"
       aria-label={text(`${task.identifier} 议题详情`, `${task.identifier} issue details`)}
     >
-      <div className="issue-detail-scroll">
+      <div className="issue-detail-scroll" ref={detailScrollRef}>
         <div className={`issue-detail-layout${propertiesCollapsed ? " properties-collapsed" : ""}`}>
           {narrowContainer && (
             <div className="issue-properties-toggle-row">
@@ -1464,6 +1486,28 @@ export function TaskDetail({
                 </div>
               )}
 
+              {/* The gate stands at the end of the evidence chain: read the
+                  issue top to bottom, and the decision waits beside the
+                  composer — the same pattern as PR merge / review approval.
+                  Not the top-right icon row: that shelf is for repeatable
+                  utilities, not one-shot decisions. */}
+              {currentTask.status === "in_review" && (
+                <div className="accept-gate-banner" data-testid="accept-gate-banner">
+                  <span className="accept-gate-text">
+                    {text("这个议题已完成，等你确认。", "This issue is done and waiting for your acceptance.")}
+                  </span>
+                  <button
+                    className="button primary gate-accept-button"
+                    type="button"
+                    disabled={savingProperty === "status"}
+                    title={text("验收通过并关闭这个议题", "Accept the work and close this issue")}
+                    onClick={() => void acceptTask()}
+                  >
+                    {text("确认完成", "Accept")}
+                  </button>
+                </div>
+              )}
+
               <form className="comment-composer" onSubmit={(event) => { event.preventDefault(); void submitComment(); }}>
                 <div className="composer-author">
                   <ActorAvatar
@@ -1606,22 +1650,10 @@ export function TaskDetail({
                 onOpenChange={(open) => setPropertyMenu(open ? "status" : null)}
                 onChange={(status) => void saveTask({ status }, "status")}
               />
-              {/* 关口动作独立成按钮: acceptance is never a side effect of
-                  commenting — the comment box reworks, this button accepts.
-                  Accepting posts the user's own acceptance message after the
-                  status flip, so the timeline carries a first-class record of
-                  who accepted and when. */}
-              {currentTask.status === "in_review" && (
-                <button
-                  className="button primary gate-accept-button"
-                  type="button"
-                  disabled={savingProperty === "status"}
-                  title={text("验收通过并关闭这个议题", "Accept the work and close this issue")}
-                  onClick={() => void acceptTask()}
-                >
-                  {text("确认完成", "Accept")}
-                </button>
-              )}
+              {/* The gate action renders in the main flow's accept banner,
+                  not here: the properties pane is collapsible and a gate you
+                  can't see is not a gate. Acceptance is still never a side
+                  effect of commenting — see acceptTask. */}
             </div>
             <div className="detail-property-row">
               <span className="detail-property-label">{text("优先级", "Priority")}</span>

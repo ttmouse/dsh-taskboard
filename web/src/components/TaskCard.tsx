@@ -46,6 +46,7 @@ interface BoardTaskCardProps extends CommonTaskCardProps {
   statusIndex: number;
   onMove: (task: Task, status: TaskStatus) => void;
   onOpenThread: (threadId: string) => void;
+  onComplete?: (task: Task) => void;
 }
 
 /** 上游完整卡片接口（由 OtherTasksPanel 等上游组件调用） */
@@ -373,6 +374,7 @@ function BoardTaskCard({
   onDragStart,
   onDragEnd,
   onOpenThread,
+  onComplete,
 }: BoardTaskCardProps) {
   const dueDate = task.dueDate
     ? new Intl.DateTimeFormat("zh-CN", { month: "short", day: "numeric" }).format(new Date(`${task.dueDate}T12:00:00`))
@@ -392,7 +394,7 @@ function BoardTaskCard({
 
   return (
     <article
-      className={`task-card priority-${task.priority}${isDragging ? " is-dragging" : ""}${dragShift ? " is-drag-shifted" : ""}${isMoving ? " is-moving" : ""}${isSettling ? " is-settling" : ""}${isContextMenuOpen ? " is-context-open" : ""}`}
+      className={`task-card status-${task.status} priority-${task.priority}${isDragging ? " is-dragging" : ""}${dragShift ? " is-drag-shifted" : ""}${isMoving ? " is-moving" : ""}${isSettling ? " is-settling" : ""}${isContextMenuOpen ? " is-context-open" : ""}`}
       style={dragShift ? { transform: `translate3d(0, ${dragShift}px, 0)` } : undefined}
       draggable={!isMoving}
       aria-labelledby={`task-${task.id}-title`}
@@ -430,6 +432,18 @@ function BoardTaskCard({
             </>
           )}
         </span>
+        {task.status === "in_review" && onComplete && (
+          <button
+            className="task-card-complete"
+            type="button"
+            aria-label={`完成 ${task.identifier}`}
+            title="验收通过：状态改为完成并记录你的验收"
+            onClick={stopThen(() => onComplete(task))}
+          >
+            <img src={completeIcon} alt="" aria-hidden="true" />
+            <span>完成</span>
+          </button>
+        )}
         <ActorAvatar actor={task.assignee} className="card-assignee-avatar" />
         <div className="card-actions" aria-label="移动议题" style={{ pointerEvents: "auto" }}>
           <button

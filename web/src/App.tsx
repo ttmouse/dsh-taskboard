@@ -20,6 +20,7 @@ import {
 } from "../../shared/taskboard-automation-options.mjs";
 import {
   ApiError,
+  acceptIssue,
   addTaskRelation,
   archiveTask as archiveTaskRequest,
   createTask as createTaskRequest,
@@ -1841,6 +1842,23 @@ export function App() {
     }
   }
 
+  /**
+   * Acceptance from the board card: the human verified the work out in the
+   * product, not in the issue text, so the gate follows them — flip to done
+   * and post their acceptance message, then resync the board.
+   */
+  async function acceptIssueFromCard(task: Task) {
+    setActionError(null);
+    try {
+      await acceptIssue(task, text("确认完成", "Accepted"));
+      if (selectedProjectId) void refreshTasks(selectedProjectId, { quiet: true });
+      setAnnouncement(text(`${task.identifier} 已验收。`, `${task.identifier} accepted.`));
+    } catch (error) {
+      setActionError(errorMessage(error));
+      if (selectedProjectId) void refreshTasks(selectedProjectId, { quiet: true });
+    }
+  }
+
   async function mutateTaskRelation(
     action: "add" | "remove",
     task: Task,
@@ -2736,6 +2754,7 @@ export function App() {
                   onDrop={finishTaskDrop}
                   onOpenThread={openThread}
                   onHide={(hiddenStatus) => updateColumnVisibility(hiddenStatus, false)}
+                  onComplete={(task) => void acceptIssueFromCard(task)}
                 />
               ))}
               {hiddenStatuses.length > 0 && (

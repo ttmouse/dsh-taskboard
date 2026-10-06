@@ -4169,10 +4169,28 @@ kbd {
 /* Gate action: accepting the work is its own button, never a side effect of
    leaving a comment. */
 .gate-accept-button {
-  margin-left: 8px;
-  height: 26px;
-  padding: 0 12px;
+  height: 30px;
+  padding: 0 14px;
   font-size: 12px;
+  flex-shrink: 0;
+}
+
+/* Acceptance banner in the main flow — the properties pane may be collapsed,
+   but an issue waiting for the human always shows its gate here. */
+.accept-gate-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 16px 0;
+  padding: 14px 18px;
+  border: 1px solid rgba(128, 128, 128, 0.25);
+  border-radius: 12px;
+  background: rgba(128, 128, 128, 0.06);
+}
+
+.accept-gate-text {
+  font-size: 13px;
 }
 
 /* Status flips folded into the comment that caused them (one deliverable). */

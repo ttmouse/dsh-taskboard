@@ -76,6 +76,7 @@ interface BoardColumnProps {
   onDrop: (status: TaskStatus, taskId: string, beforeTaskId: string | null) => void;
   onOpenThread: (threadId: string) => void;
   onHide: (status: TaskStatus) => void;
+  onComplete?: (task: Task) => void;
 }
 
 export function BoardColumn({
@@ -98,6 +99,7 @@ export function BoardColumn({
   onDrop,
   onOpenThread,
   onHide,
+  onComplete,
 }: BoardColumnProps) {
   const details = STATUS_DETAILS[status];
   const [dropBeforeTaskId, setDropBeforeTaskId] = useState<string | null | undefined>();
@@ -208,6 +210,7 @@ export function BoardColumn({
               onDragStart={onDragStart}
               onDragEnd={onDragEnd}
               onOpenThread={onOpenThread}
+              onComplete={onComplete}
             />
           );
         })}

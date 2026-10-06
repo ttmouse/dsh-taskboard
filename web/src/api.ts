@@ -697,6 +697,20 @@ export async function createComment(taskId: string, body: string, threadId?: str
   return data.comment;
 }
 
+/**
+ * The acceptance gate, shared by every entry point (detail banner, board
+ * card). The status flip lands first — `done` is outside the dispatch gate,
+ * so the acceptance message can never be mistaken for a "keep going" order —
+ * then the acceptance message is posted in the user's own voice.
+ */
+export async function acceptIssue(task: Task, message: string): Promise<Comment> {
+  const data = await request<{ task: Task }>(`/api/tasks/${encodeURIComponent(task.id)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ version: task.version, status: "done" }),
+  });
+  return createComment(data.task.id, message);
+}
+
 export async function updateComment(comment: Comment, body: string, threadId?: string): Promise<Comment> {
   const data = await request<{ comment: Comment }>(
     `/api/comments/${encodeURIComponent(comment.id)}`,
