@@ -27,11 +27,12 @@ test('a failing teardown step never skips closing the server', async () => {
       order.push('route')
       throw new Error('webserver is gone')
     },
+    disposeChatEngine: async () => order.push('chat-engine'),
     closeServer: async () => order.push('server'),
   }, (message) => logs.push(message))
 
-  assert.deepEqual(order, ['claims', 'timer', 'route', 'server'], 'the server is always closed last')
-  assert.deepEqual(results, [false, true, false, true])
+  assert.deepEqual(order, ['claims', 'timer', 'route', 'chat-engine', 'server'], 'the server is always closed last')
+  assert.deepEqual(results, [false, true, false, true, true])
   assert.equal(logs.length, 2, 'both failures are reported')
 })
 

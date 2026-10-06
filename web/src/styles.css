@@ -4128,6 +4128,69 @@ kbd {
   overflow-wrap: anywhere;
 }
 
+/* Question card: the agent's answer list, rendered as buttons. Picking one
+   posts it as a comment — same gesture as typing, no second model to learn. */
+.comment-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 0 16px 14px;
+}
+
+.comment-option-button {
+  padding: 5px 12px;
+  border: var(--border-hairline) solid var(--border-strong, var(--border));
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 100ms ease, border-color 100ms ease;
+}
+
+.comment-option-button:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: var(--accent);
+}
+
+.comment-option-button:disabled {
+  color: var(--text-tertiary);
+  cursor: default;
+}
+
+.comment-options.is-stale { opacity: 0.6; }
+
+.comment-options-stale {
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+/* Gate action: accepting the work is its own button, never a side effect of
+   leaving a comment. */
+.gate-accept-button {
+  margin-left: 8px;
+  height: 26px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+/* Status flips folded into the comment that caused them (one deliverable). */
+.comment-folded-change {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0 16px 12px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.comment-folded-change svg {
+  width: 12px;
+  height: 12px;
+}
+
 .comment-body .issue-description-document {
   display: block;
 }
@@ -8716,6 +8779,140 @@ kbd {
 
 .ai-chat-config-submenu > button > span:not(:has(strong)) {
   display: block;
+}
+
+/* Model picker: a host engine can expose hundreds of models, so the list is
+   filtered by a search field and grouped by provider. */
+.ai-chat-model-list {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.ai-chat-model-search {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  margin: 0 6px 4px;
+  padding: 0 8px;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-muted);
+  color: var(--text-tertiary);
+}
+
+.ai-chat-model-search:focus-within {
+  border-color: var(--border-strong);
+}
+
+.ai-chat-model-search svg {
+  flex: none;
+  width: 12px;
+  height: 12px;
+}
+
+.ai-chat-model-search input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.ai-chat-model-search input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.ai-chat-model-scroll {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.ai-chat-model-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.ai-chat-model-group > p {
+  margin: 6px 0 2px;
+  padding: 0 10px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+.ai-chat-model-empty {
+  margin: 10px;
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+
+/* Rows live inside a provider group, so the row rules declared for direct
+   children of the menu (grid, padding, left-aligned label, transparent
+   background) have to apply to grouped rows as well. */
+.ai-chat-model-group > button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 16px;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 14px;
+  text-align: left;
+}
+
+.ai-chat-model-group > button:hover {
+  background: var(--surface-hover);
+}
+
+/* Keyboard-navigated row (the mouse hover uses the same surface colour). */
+.ai-chat-option-menu button.is-highlighted {
+  background: var(--surface-hover);
+}
+
+/* Exactly one row carries the surface colour: the pointer moves the highlight
+   on real movement (`onMouseMove`), so hover must not paint a second row while
+   the keyboard drives the same list. */
+.ai-chat-option-menu > button:hover,
+.ai-chat-config-menu > button:hover,
+.ai-chat-model-group > button:hover,
+.ai-chat-permission-menu > button:hover {
+  background: transparent;
+}
+
+.ai-chat-model-group > button > span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.ai-chat-model-group > button strong {
+  overflow: hidden;
+  color: inherit;
+  font-weight: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-chat-model-group > button svg {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  color: var(--accent);
 }
 
 .ai-chat-toolbar-spacer {

@@ -33,6 +33,20 @@ function detailText(value) {
   }
 }
 
+/** Codex config/metadata warnings are informational, not failures. */
+const INFORMATIONAL_CODEX_ERRORS = [
+  /is ignoring \d+ unrecognized configuration setting/i,
+  /Model metadata for .+ not found/i,
+  // Resuming a recorded session with a different model: codex continues and
+  // only advises, so it must not read as a failed turn.
+  /session was recorded with model .+ but is resuming with/i,
+];
+
+function isInformationalCodexError(message) {
+  return typeof message === "string"
+    && INFORMATIONAL_CODEX_ERRORS.some((pattern) => pattern.test(message));
+}
+
 function itemStatus(rawType, item) {
   if (typeof item.status === "string") return cappedText(item.status);
   return rawType.slice("item.".length);
@@ -147,6 +161,18 @@ function normalizedItem(rawType, item) {
   }
 
   const message = errorMessage(item.message ?? item.error);
+  if (isInformationalCodexError(message)) {
+    // Codex reports configuration/metadata warnings as `item.type === "error"`.
+    // Keeping them in the log is useful, but as a hidden type: misconfiguration
+    // of an unrelated setting must not read as a failed turn in the panel.
+    return {
+      kind: "event",
+      type: "config_warning",
+      role: "activity",
+      content: message,
+      data: { ...baseData, status: "warning" },
+    };
+  }
   return {
     kind: "event",
     type: item.type,

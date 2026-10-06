@@ -42,10 +42,12 @@ import {
   reasoningEffortForModel,
 } from "../aiChatState";
 import type {
+  AiChatBuiltinSandbox,
   AiChatCatalog,
   AiChatEvent,
   AiChatAttachmentInput,
   AiChatModel,
+  AiChatPermissionOption,
   AiChatRun,
   AiChatSandbox,
   AiChatSkill,
@@ -118,6 +120,19 @@ type PanelResizeSession = {
 };
 
 const LAST_THREAD_KEY = "taskboard.aiChat.lastThreadId";
+/** Threads whose 完全权限 choice the user already acknowledged (per thread). */
+const DANGER_CONFIRMED_KEY = "taskboard.aiChat.dangerConfirmedThreads";
+
+function loadDangerConfirmedThreads(): string[] {
+  const stored = taskboardStorage.getItem(DANGER_CONFIRMED_KEY);
+  if (!stored) return [];
+  try {
+    const parsed = JSON.parse(stored);
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+}
 const PANEL_GEOMETRY_KEY = "taskboard.aiChat.panelGeometry";
 const PANEL_EDGE_GAP = 8;
 const PANEL_MIN_WIDTH = 420;
@@ -147,10 +162,12 @@ const COMPOSER_HTML_BLOCKS = new Set([
   "SECTION",
 ]);
 const COMPOSER_HTML_IGNORED = new Set(["SCRIPT", "STYLE", "SVG"]);
-const SANDBOX_LABELS: Record<AiChatSandbox, readonly [string, string]> = {
-  "read-only": ["请求批准", "Ask for approval"],
-  "workspace-write": ["替我审批", "Approve selected actions"],
-  "danger-full-access": ["完全访问权限", "Full access"],
+// Built-in copy mirrors the DSH composer's own permission dictionary, so the
+// panel reads the same whether the host names the preset or leaves it raw.
+const SANDBOX_LABELS: Record<AiChatBuiltinSandbox, readonly [string, string]> = {
+  "read-only": ["仅可查看", "Read Only"],
+  "workspace-write": ["工作区内修改", "Workspace Write"],
+  "danger-full-access": ["完全权限", "Full access"],
 };
 
 function clampPanelGeometry(geometry: PanelGeometry): PanelGeometry {
@@ -184,13 +201,13 @@ function loadPanelGeometry(): PanelGeometry {
   }
 }
 
-const SANDBOX_DESCRIPTIONS: Record<AiChatSandbox, readonly [string, string]> = {
+const SANDBOX_DESCRIPTIONS: Record<AiChatBuiltinSandbox, readonly [string, string]> = {
   "read-only": ["编辑外部文件和使用互联网时始终询问", "Always ask before editing external files or using the internet"],
   "workspace-write": ["仅对检测到的风险操作请求批准", "Ask only for operations that are detected as risky"],
   "danger-full-access": ["不受限制地访问互联网和您电脑上的任何文件", "Access the internet and any file on your computer without restrictions"],
 };
 
-const SANDBOX_ICONS: Record<AiChatSandbox, "hand" | "terminal" | "shieldAlert"> = {
+const SANDBOX_ICONS: Record<AiChatBuiltinSandbox, "hand" | "terminal" | "shieldAlert"> = {
   "read-only": "hand",
   "workspace-write": "terminal",
   "danger-full-access": "shieldAlert",
@@ -603,10 +620,43 @@ function messageFor(error: unknown): AiChatError {
   return error instanceof Error ? error.message : AI_CHAT_UNAVAILABLE_ERROR;
 }
 
-function isAiChatSandbox(value: string): value is AiChatSandbox {
+function isAiChatSandbox(value: string): value is AiChatBuiltinSandbox {
   return value === "read-only"
     || value === "workspace-write"
     || value === "danger-full-access";
+}
+
+/** Icon for any permission value: the trio's own glyph, a neutral one otherwise. */
+function sandboxIcon(value: string): "hand" | "terminal" | "shieldAlert" {
+  return isAiChatSandbox(value) ? SANDBOX_ICONS[value] : "shieldAlert";
+}
+
+// The live `auto` preset is contributed by the host (not part of the codex
+// trio), and the host catalog carries only its raw key, so its copy lives here
+// next to the built-ins — the same wording the DSH composer shows.
+const EXTRA_PERMISSION_LABELS: Record<string, readonly [string, string]> = {
+  auto: ["Auto review", "Auto review"],
+};
+
+const EXTRA_PERMISSION_DESCRIPTIONS: Record<string, readonly [string, string]> = {
+  auto: [
+    "无沙箱运行；每次原生工具调用和 PTC 内层调用前，由同一模型进行实验性审查。",
+    "Run without a sandbox after an experimental same-model review of every native tool call and PTC inner call.",
+  ],
+};
+
+/** Localized label for a permission value, falling back to the raw preset id. */
+function sandboxLabelText(value: string, text: (zh: string, en: string) => string): string {
+  if (isAiChatSandbox(value)) return text(...SANDBOX_LABELS[value]);
+  const extra = EXTRA_PERMISSION_LABELS[value];
+  return extra ? text(...extra) : value;
+}
+
+/** Localized description for a permission value, when one exists. */
+function sandboxDescriptionText(value: string, text: (zh: string, en: string) => string): string | null {
+  if (isAiChatSandbox(value)) return text(...SANDBOX_DESCRIPTIONS[value]);
+  const extra = EXTRA_PERMISSION_DESCRIPTIONS[value];
+  return extra ? text(...extra) : null;
 }
 
 function dateLabel(value: string, locale: string): string {
@@ -1009,8 +1059,16 @@ export function AiChat({
   const [selectedSkillIndex, setSelectedSkillIndex] = useState(0);
   const [composerSkillTokens, setComposerSkillTokens] = useState<ComposerSkillToken[]>([]);
   const [pendingDangerInput, setPendingDangerInput] = useState<PendingDangerInput | null>(null);
+  /** Permission value awaiting the selection-time risk confirmation. */
+  const [pendingSandboxConfirm, setPendingSandboxConfirm] = useState<string | null>(null);
+  const [dangerConfirmedThreads, setDangerConfirmedThreads] = useState<string[]>(
+    loadDangerConfirmedThreads,
+  );
   const [unread, setUnread] = useState(false);
   const [draftModel, setDraftModel] = useState("");
+  const [modelQuery, setModelQuery] = useState("");
+  /** Highlighted row of the open popup menu (keyboard navigation). */
+  const [menuHighlight, setMenuHighlight] = useState(0);
   const [draftEffort, setDraftEffort] = useState("");
   const [draftSandbox, setDraftSandbox] = useState<AiChatSandbox>("workspace-write");
   const [settingsSaving, setSettingsSaving] = useState(false);
@@ -1357,9 +1415,12 @@ export function AiChat({
     }
     const sandbox = draftOrigin && activeCatalog?.sandboxes.includes(draftSandbox)
       ? draftSandbox
-      : activeCatalog?.sandboxes.find(
-          (candidate): candidate is AiChatSandbox => candidate === "workspace-write",
-        ) ?? activeCatalog?.sandboxes.find(isAiChatSandbox);
+      : activeCatalog?.defaultSandbox
+        && activeCatalog.sandboxes.includes(activeCatalog.defaultSandbox)
+        ? activeCatalog.defaultSandbox
+        : activeCatalog?.sandboxes.find(
+            (candidate) => candidate === "workspace-write",
+          ) ?? activeCatalog?.sandboxes.find(isAiChatSandbox);
     if (sandbox) setDraftSandbox(sandbox);
   }, [activeCatalog, draftOrigin, restoreDraftSettings, snapshot?.thread.id]);
 
@@ -1404,7 +1465,135 @@ export function AiChat({
     [activeCatalog?.skills, skillMention?.query],
   );
   const selectedModel = activeCatalog?.models.find((model) => model.slug === draftModel) ?? null;
-  const availableSandboxes = (activeCatalog?.sandboxes ?? []).filter(isAiChatSandbox);
+  // A host engine can expose hundreds of models, so the picker filters instead
+  // of asking the user to scroll: match on the display name, the raw
+  // `provider::model` slug, and the provider description.
+  const modelMatches = useMemo(() => {
+    const models = activeCatalog?.models ?? [];
+    const query = modelQuery.trim().toLocaleLowerCase();
+    if (!query) return models;
+    return models.filter((model) => (
+      `${model.displayName} ${model.slug} ${model.description ?? ""}`
+        .toLocaleLowerCase()
+        .includes(query)
+    ));
+  }, [activeCatalog?.models, modelQuery]);
+
+  const modelHighlightIndex = useMemo(
+    () => new Map(modelMatches.map((model, index) => [model.slug, index])),
+    [modelMatches],
+  );
+  const modelGroups = useMemo(() => {
+    const groups = new Map<string, { key: string; label: string; models: AiChatModel[] }>();
+    for (const model of modelMatches) {
+      const key = model.slug.split("::")[0] || "";
+      let group = groups.get(key);
+      if (!group) {
+        group = {
+          key,
+          label: model.displayName.split(" · ")[0] || key,
+          models: [],
+        };
+        groups.set(key, group);
+      }
+      group.models.push(model);
+    }
+    return [...groups.values()];
+  }, [modelMatches]);
+
+  const hostPermissions = activeCatalog?.permissions;
+  // The host engine publishes its own preset catalog (label + description, the
+  // same copy the DSH composer shows). The codex engine has none, so its three
+  // sandboxes are rendered from the panel's built-in copy instead.
+  const permissionOptions = useMemo<AiChatPermissionOption[]>(() => {
+    const hostOptions = hostPermissions?.options ?? [];
+    if (hostOptions.length > 0) return hostOptions;
+    return (activeCatalog?.sandboxes ?? [])
+      .filter(isAiChatSandbox)
+      .map((sandbox) => ({
+        value: sandbox,
+        name: text(...SANDBOX_LABELS[sandbox]),
+        description: text(...SANDBOX_DESCRIPTIONS[sandbox]),
+      }));
+  }, [activeCatalog?.sandboxes, hostPermissions?.options, text]);
+
+  // One flat list per menu so ArrowUp/ArrowDown/Enter can drive the same rows
+  // the mouse clicks (`activateMenuItem` runs the row's own action).
+  const menuItems = useMemo(() => {
+    if (menu === "model") {
+      return [
+        () => setMenu("model-list"),
+        () => setMenu("effort-list"),
+      ];
+    }
+    if (menu === "model-list") {
+      return modelMatches.map((model) => () => void chooseModel(model));
+    }
+    if (menu === "effort-list" && selectedModel) {
+      return selectedModel.supportedReasoningEfforts.map(
+        (effort) => () => void chooseEffort(effort),
+      );
+    }
+    if (menu === "sandbox") {
+      return permissionOptions.map((option) => () => void chooseSandbox(option.value));
+    }
+    return [];
+  }, [menu, modelMatches, permissionOptions, selectedModel]);
+
+  // A freshly opened menu starts on the current value (the row the user would
+  // expect Enter to re-select), and typing in the model search restarts at the
+  // first match.
+  useEffect(() => {
+    if (menu === "model-list") {
+      const index = modelMatches.findIndex((model) => model.slug === draftModel);
+      setMenuHighlight(index >= 0 ? index : 0);
+      return;
+    }
+    if (menu === "effort-list") {
+      const index = selectedModel?.supportedReasoningEfforts.indexOf(draftEffort) ?? -1;
+      setMenuHighlight(index >= 0 ? index : 0);
+      return;
+    }
+    if (menu === "sandbox") {
+      const index = permissionOptions.findIndex((option) => option.value === draftSandbox);
+      setMenuHighlight(index >= 0 ? index : 0);
+      return;
+    }
+    setMenuHighlight(0);
+  }, [menu, modelQuery, modelMatches, draftModel, draftEffort, draftSandbox, permissionOptions, selectedModel]);
+
+  useEffect(() => {
+    if (!panelOpen || !menu || menuItems.length === 0) return;
+    function handleMenuKeys(event: KeyboardEvent) {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        event.stopPropagation();
+        setMenuHighlight((current) => {
+          const next = event.key === "ArrowDown" ? current + 1 : current - 1;
+          return (next + menuItems.length) % menuItems.length;
+        });
+        return;
+      }
+      if (event.key === "Home" || event.key === "End") {
+        event.preventDefault();
+        event.stopPropagation();
+        setMenuHighlight(event.key === "Home" ? 0 : menuItems.length - 1);
+        return;
+      }
+      if (event.key === "Enter") {
+        const activate = menuItems[menuHighlight];
+        if (!activate) return;
+        event.preventDefault();
+        event.stopPropagation();
+        activate();
+      }
+    }
+    document.addEventListener("keydown", handleMenuKeys, true);
+    return () => document.removeEventListener("keydown", handleMenuKeys, true);
+  }, [menu, menuHighlight, menuItems, panelOpen]);
+  const selectedPermission = permissionOptions.find(
+    (option) => option.value === draftSandbox,
+  ) ?? null;
   const currentRun = snapshot?.thread.currentRun
     ?? snapshot?.runs.find((run) => run.status === "running")
     ?? null;
@@ -1611,9 +1800,11 @@ export function AiChat({
       );
       const sandbox = targetCatalog.sandboxes.includes(inheritedSettings.sandbox)
         ? inheritedSettings.sandbox
-        : targetCatalog.sandboxes.find(
-          (candidate): candidate is AiChatSandbox => candidate === "workspace-write",
-        ) ?? targetCatalog.sandboxes.find(isAiChatSandbox) ?? inheritedSettings.sandbox;
+        : targetCatalog.defaultSandbox && targetCatalog.sandboxes.includes(targetCatalog.defaultSandbox)
+          ? targetCatalog.defaultSandbox
+          : targetCatalog.sandboxes.find(
+            (candidate) => candidate === "workspace-write",
+          ) ?? targetCatalog.sandboxes.find(isAiChatSandbox) ?? inheritedSettings.sandbox;
       const settings = {
         model: normalized?.model ?? inheritedSettings.model,
         reasoningEffort: normalized?.reasoningEffort ?? inheritedSettings.reasoningEffort,
@@ -1704,8 +1895,42 @@ export function AiChat({
     await saveThreadSettings({ reasoningEffort });
   }
 
-  async function chooseSandbox(sandbox: AiChatSandbox) {
+  function rememberDangerThread(threadId: string | null) {
+    if (!threadId) return;
+    setDangerConfirmedThreads((current) => {
+      if (current.includes(threadId)) return current;
+      const next = [...current, threadId];
+      taskboardStorage.setItem(DANGER_CONFIRMED_KEY, JSON.stringify(next));
+      return next;
+    });
+  }
+
+  function forgetDangerThread(threadId: string | null) {
+    if (!threadId) return;
+    setDangerConfirmedThreads((current) => {
+      if (!current.includes(threadId)) return current;
+      const next = current.filter((id) => id !== threadId);
+      taskboardStorage.setItem(DANGER_CONFIRMED_KEY, JSON.stringify(next));
+      return next;
+    });
+  }
+
+  /**
+   * 完全权限 is acknowledged once per thread (the same contract the DSH composer
+   * uses), never per message; switching away and back asks again.
+   */
+  async function chooseSandbox(sandbox: string) {
     setMenu(null);
+    if (sandbox === "danger-full-access") {
+      setDraftSandbox(sandbox);
+      if (!selectedThreadId || dangerConfirmedThreads.includes(selectedThreadId)) {
+        await saveThreadSettings({ sandbox });
+        return;
+      }
+      setPendingSandboxConfirm(sandbox);
+      return;
+    }
+    forgetDangerThread(selectedThreadId);
     setDraftSandbox(sandbox);
     await saveThreadSettings({ sandbox });
   }
@@ -1878,7 +2103,12 @@ export function AiChat({
     let thread = snapshot?.thread ?? null;
     const creatingThread = !thread;
     const messageSandbox = thread?.sandbox ?? draftSandbox;
-    if (needsDangerConfirmation(messageSandbox, dangerConfirmed)) {
+    // A thread whose 完全权限 choice was already acknowledged sends without the
+    // per-message dialog; the flag still travels with every turn, because the
+    // server refuses a danger-full-access turn that does not confirm it.
+    const dangerOk = dangerConfirmed
+      || (thread !== null && dangerConfirmedThreads.includes(thread.id));
+    if (needsDangerConfirmation(messageSandbox, dangerOk)) {
       setPendingDangerInput({
         message: trimmed,
         skillIds: submittedSkillIds,
@@ -1890,6 +2120,7 @@ export function AiChat({
     if (creatingThread && clearSubmittedDraft) resetComposer();
     if (!thread) thread = await createThreadForDraftOrigin();
     if (!thread) return;
+    if (dangerOk) rememberDangerThread(thread.id);
     const messageSkillIds = (
       boundSkillIds !== undefined || catalogLoadedProjectId === thread.origin.projectId
     ) ? submittedSkillIds : [];
@@ -1899,7 +2130,7 @@ export function AiChat({
       const turnInput = buildTurnInput(
         trimmed,
         messageSkillIds,
-        dangerConfirmed,
+        dangerOk,
         messageAttachments,
       );
       if (clearSubmittedDraft && !creatingThread) {
@@ -2504,8 +2735,10 @@ export function AiChat({
                   }
                   onClick={() => setMenu((current) => current === "sandbox" ? null : "sandbox")}
                 >
-                  <LinearIcon name={SANDBOX_ICONS[draftSandbox]} />
-                  {text(...SANDBOX_LABELS[draftSandbox])}
+                  <LinearIcon name={sandboxIcon(draftSandbox)} />
+                  {(selectedPermission?.name && selectedPermission.name !== selectedPermission.value
+                    ? selectedPermission.name
+                    : sandboxLabelText(draftSandbox, text))}
                   <LinearIcon name="chevronDown" />
                 </button>
                 {menu === "sandbox" && (
@@ -2516,31 +2749,45 @@ export function AiChat({
                   >
                     <header>
                       <span>{text("应如何批准 AI 操作？", "How should AI operations be approved?")}</span>
-                      <a
-                        href="https://developers.openai.com/codex/security"
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        {text("了解更多", "Learn more")}
-                      </a>
+                      {!hostPermissions && (
+                        <a
+                          href="https://developers.openai.com/codex/security"
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          {text("了解更多", "Learn more")}
+                        </a>
+                      )}
                     </header>
-                    {availableSandboxes.map((sandbox) => (
-                      <button
-                        className={sandbox === "danger-full-access" ? "is-danger" : undefined}
-                        type="button"
-                        role="menuitemradio"
-                        aria-checked={sandbox === draftSandbox}
-                        key={sandbox}
-                        onClick={() => void chooseSandbox(sandbox)}
-                      >
-                        <LinearIcon name={SANDBOX_ICONS[sandbox]} />
-                        <span>
-                          <strong>{text(...SANDBOX_LABELS[sandbox])}</strong>
-                          <small>{text(...SANDBOX_DESCRIPTIONS[sandbox])}</small>
-                        </span>
-                        {sandbox === draftSandbox && <LinearIcon name="check" />}
-                      </button>
-                    ))}
+                    {permissionOptions.map((option, index) => {
+                      const description = option.description
+                        ?? sandboxDescriptionText(option.value, text);
+                      return (
+                        <button
+                          className={[
+                            option.value === "danger-full-access" ? "is-danger" : "",
+                            index === menuHighlight ? "is-highlighted" : "",
+                          ].filter(Boolean).join(" ") || undefined}
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked={option.value === draftSandbox}
+                          key={option.value}
+                          onMouseMove={() => setMenuHighlight(index)}
+                          onClick={() => void chooseSandbox(option.value)}
+                        >
+                          <LinearIcon name={sandboxIcon(option.value)} />
+                          <span>
+                            <strong>
+                              {option.name && option.name !== option.value
+                                ? option.name
+                                : sandboxLabelText(option.value, text)}
+                            </strong>
+                            {description ? <small>{description}</small> : null}
+                          </span>
+                          {option.value === draftSandbox && <LinearIcon name="check" />}
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -2564,9 +2811,9 @@ export function AiChat({
                       : "model"
                   ))}
                 >
-                  <span>{modelDisplayName(
-                    selectedModel?.displayName ?? (draftModel || text("模型", "Model")),
-                  )}</span>
+                  <span>{selectedModel
+                    ? modelDisplayName(selectedModel.displayName)
+                    : (draftModel || text("模型", "Model"))}</span>
                   <span className="ai-chat-model-effort">
                     {EFFORT_LABELS[draftEffort]
                       ? text(...EFFORT_LABELS[draftEffort])
@@ -2580,12 +2827,25 @@ export function AiChat({
                     role="menu"
                     aria-label={text("模型与推理强度", "Model and reasoning effort")}
                   >
-                    <button type="button" onClick={() => setMenu("model-list")}>
+                    <button
+                      className={menuHighlight === 0 ? "is-highlighted" : undefined}
+                      type="button"
+                      onMouseMove={() => setMenuHighlight(0)}
+                      onClick={() => {
+                        setModelQuery("");
+                        setMenu("model-list");
+                      }}
+                    >
                       <span>{text("模型", "Model")}</span>
                       <strong>{modelDisplayName(selectedModel?.displayName ?? draftModel)}</strong>
                       <LinearIcon name="chevronRight" />
                     </button>
-                    <button type="button" onClick={() => setMenu("effort-list")}>
+                    <button
+                      className={menuHighlight === 1 ? "is-highlighted" : undefined}
+                      type="button"
+                      onMouseMove={() => setMenuHighlight(1)}
+                      onClick={() => setMenu("effort-list")}
+                    >
                       <span>{text("推理强度", "Reasoning effort")}</span>
                       <strong>{EFFORT_LABELS[draftEffort]
                         ? text(...EFFORT_LABELS[draftEffort])
@@ -2601,29 +2861,49 @@ export function AiChat({
                     aria-label={text("选择模型", "Select model")}
                   >
                     <header>
-                      <button
-                        type="button"
-                        aria-label={text("返回模型与推理强度", "Back to model and reasoning effort")}
-                        onClick={() => setMenu("model")}
-                      >
-                        <LinearIcon name="chevronLeft" />
-                      </button>
                       <strong>{text("模型", "Model")}</strong>
                     </header>
-                    {(activeCatalog?.models ?? []).map((model) => (
-                      <button
-                        type="button"
-                        role="menuitemradio"
-                        aria-checked={model.slug === draftModel}
-                        key={model.slug}
-                        onClick={() => void chooseModel(model)}
-                      >
-                        <span>
-                          <strong>{modelDisplayName(model.displayName)}</strong>
-                        </span>
-                        {model.slug === draftModel && <LinearIcon name="check" />}
-                      </button>
-                    ))}
+                    <div className="ai-chat-model-search">
+                      <LinearIcon name="search" />
+                      <input
+                        autoFocus
+                        type="search"
+                        value={modelQuery}
+                        aria-label={text("检索模型", "Search models")}
+                        placeholder={text("检索模型…", "Search models…")}
+                        onChange={(event) => setModelQuery(event.target.value)}
+                      />
+                    </div>
+                    <div className="ai-chat-model-scroll">
+                      {modelGroups.length === 0 && (
+                        <p className="ai-chat-model-empty">
+                          {text("没有匹配的模型", "No matching model")}
+                        </p>
+                      )}
+                      {modelGroups.map((group) => (
+                        <div className="ai-chat-model-group" key={group.key}>
+                          <p>{group.label}</p>
+                          {group.models.map((model) => (
+                            <button
+                              className={modelHighlightIndex.get(model.slug) === menuHighlight
+                                ? "is-highlighted"
+                                : undefined}
+                              type="button"
+                              role="menuitemradio"
+                              aria-checked={model.slug === draftModel}
+                              key={model.slug}
+                              onMouseMove={() => setMenuHighlight(modelHighlightIndex.get(model.slug) ?? 0)}
+                              onClick={() => void chooseModel(model)}
+                            >
+                              <span>
+                                <strong>{modelDisplayName(model.displayName)}</strong>
+                              </span>
+                              {model.slug === draftModel && <LinearIcon name="check" />}
+                            </button>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
                 {menu === "effort-list" && selectedModel && (
@@ -2633,21 +2913,16 @@ export function AiChat({
                     aria-label={text("选择推理强度", "Select reasoning effort")}
                   >
                     <header>
-                      <button
-                        type="button"
-                        aria-label={text("返回模型与推理强度", "Back to model and reasoning effort")}
-                        onClick={() => setMenu("model")}
-                      >
-                        <LinearIcon name="chevronLeft" />
-                      </button>
                       <strong>{text("推理强度", "Reasoning effort")}</strong>
                     </header>
-                    {selectedModel.supportedReasoningEfforts.map((effort) => (
+                    {selectedModel.supportedReasoningEfforts.map((effort, index) => (
                       <button
+                        className={index === menuHighlight ? "is-highlighted" : undefined}
                         type="button"
                         role="menuitemradio"
                         aria-checked={effort === draftEffort}
                         key={effort}
+                        onMouseMove={() => setMenuHighlight(index)}
                         onClick={() => void chooseEffort(effort)}
                       >
                         <span>{EFFORT_LABELS[effort] ? text(...EFFORT_LABELS[effort]) : effort}</span>
@@ -2688,13 +2963,45 @@ export function AiChat({
             </div>
           </div>
 
+          {pendingSandboxConfirm !== null && (
+            <div className="ai-chat-confirm-backdrop">
+              <div className="ai-chat-confirm" role="alertdialog" aria-modal="true" aria-labelledby="ai-chat-permission-confirm-title">
+                <strong id="ai-chat-permission-confirm-title">
+                  {text("启用完全权限？", "Enable full access?")}
+                </strong>
+                <p>{text(
+                  "启用后，本对话的后续消息不再逐条确认，AI 可以直接访问工作区之外的文件和命令。仅建议在你信任后续任务时使用。",
+                  "Full access lets this conversation run without per-message approval, including files and commands outside the workspace. Only use it when you trust the following tasks.",
+                )}</p>
+                <div>
+                  <button type="button" onClick={() => setPendingSandboxConfirm(null)}>
+                    {text("取消", "Cancel")}
+                  </button>
+                  <button
+                    className="is-danger"
+                    type="button"
+                    onClick={() => {
+                      const value = pendingSandboxConfirm;
+                      setPendingSandboxConfirm(null);
+                      rememberDangerThread(selectedThreadId);
+                      setDraftSandbox(value);
+                      void saveThreadSettings({ sandbox: value });
+                    }}
+                  >
+                    {text("启用完全权限", "Enable full access")}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {dangerConfirmOpen && (
             <div className="ai-chat-confirm-backdrop">
               <div className="ai-chat-confirm" role="alertdialog" aria-modal="true" aria-labelledby="ai-chat-confirm-title">
                 <strong id="ai-chat-confirm-title">{text("允许完全访问？", "Allow full access?")}</strong>
                 <p>{text(
-                  "本次消息允许 AI 访问工作区之外的文件和命令。确认只对本次发送生效。",
-                  "This message lets AI access files and commands outside the workspace. This approval applies only to this message.",
+                  "本对话将允许 AI 访问工作区之外的文件和命令；确认后本对话不再逐条询问，切换权限后会重新询问。",
+                  "This conversation lets AI access files and commands outside the workspace. After this approval it stops asking per message; switching the permission asks again.",
                 )}</p>
                 <div>
                   <button type="button" onClick={() => setPendingDangerInput(null)}>

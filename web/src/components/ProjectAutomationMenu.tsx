@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import type { AutomationReasoningEffort } from "../../../shared/taskboard-automation-options.mjs";
 import { TaskboardIcon } from "./TaskboardIcon";
 import { useTaskboardI18n } from "../i18n";
+import { listClaimSessions, type ClaimSessionInfo } from "../api";
 
 type AutomationStatus = "ACTIVE" | "PAUSED";
 type IntervalMinutes = 5 | 10 | 15 | 30 | 60;
@@ -14,6 +15,12 @@ interface AutomationOptions {
   /** 认领模型：'' = 跟随 agent-default-model。 */
   model: string;
   reasoningEffort: AutomationReasoningEffort;
+  /**
+   * 承接会话：'new' 每轮新建；'fixed' 固定挂在 sessionId 那个对话下；
+   * 'task' 续在该议题上次的对话里。
+   */
+  sessionMode: "new" | "fixed" | "task";
+  sessionId: string | null;
 }
 
 interface AutomationState extends AutomationOptions {
@@ -22,6 +29,8 @@ interface AutomationState extends AutomationOptions {
 
 interface ProjectAutomationMenuProps {
   automation?: Partial<AutomationState>;
+  /** 当前项目 id：固定会话模式下列出本项目的历史承接会话。 */
+  projectId?: string;
   /** 认领模型目录（来自 /api/automation/models）。 */
   models: string[];
   /** 供应商 id → 显示名（如 opencode、DeepSeek）。 */
@@ -29,6 +38,8 @@ interface ProjectAutomationMenuProps {
   pending: boolean;
   error: string | null;
   unavailableReason: string | null;
+  /** The host's server half understands the claim-conversation fields. */
+  sessionBindingSupported?: boolean;
   onOpen: () => void;
   onChange: (options: AutomationOptions) => void;
 }
@@ -39,14 +50,18 @@ const DEFAULT_OPTIONS: AutomationOptions = {
   intervalMinutes: 5,
   model: "",
   reasoningEffort: "high",
+  sessionMode: "new",
+  sessionId: null,
 };
 
 export function ProjectAutomationMenu({
   automation,
+  projectId,
   models,
   pending,
   error,
   unavailableReason,
+  sessionBindingSupported = false,
   modelLabels,
   onOpen,
   onChange,
@@ -62,6 +77,7 @@ export function ProjectAutomationMenu({
   const [position, setPosition] = useState({ left: 0, top: 0, ready: false });
   const [draft, setDraft] = useState<AutomationOptions>(DEFAULT_OPTIONS);
   const [modelFilter, setModelFilter] = useState("");
+  const [claimSessions, setClaimSessions] = useState<ClaimSessionInfo[]>([]);
   const [modelOpen, setModelOpen] = useState(false);
   const [modelFocused, setModelFocused] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -194,6 +210,16 @@ export function ProjectAutomationMenu({
     submitChange({ ...draft, model: choice });
   };
 
+  // 固定会话的候选来自本项目的历史承接轮次（运行记录聚合）。
+  useEffect(() => {
+    if (!open || !projectId || draft.sessionMode !== "fixed") return;
+    let cancelled = false;
+    void listClaimSessions(projectId)
+      .then((sessions) => { if (!cancelled) setClaimSessions(sessions); })
+      .catch(() => { if (!cancelled) setClaimSessions([]); });
+    return () => { cancelled = true; };
+  }, [open, projectId, draft.sessionMode]);
+
   useEffect(() => {
     if (!open) return;
     dirtyRef.current = false;
@@ -304,6 +330,49 @@ export function ProjectAutomationMenu({
           ))}
         </select>
       </label>
+      {sessionBindingSupported && (
+      <label className="project-automation-field">
+        <span>{text("承接会话", "Conversation")}</span>
+        <select
+          value={draft.sessionMode}
+          disabled={disabled}
+          onChange={(event) => {
+            const raw = event.target.value;
+            const mode = raw === "fixed" ? "fixed" : raw === "task" ? "task" : "new";
+            submitChange({
+              ...draft,
+              sessionMode: mode,
+              sessionId: mode === "fixed" ? (draft.sessionId ?? claimSessions[0]?.sessionId ?? null) : null,
+            });
+          }}
+        >
+          <option value="new">{text("每次新建", "New each round")}</option>
+          <option value="fixed">{text("固定一个对话", "One conversation")}</option>
+          <option value="task">{text("续在议题自己的对话", "The issue's own conversation")}</option>
+        </select>
+      </label>
+      )}
+      {sessionBindingSupported && draft.sessionMode === "fixed" && (
+        <label className="project-automation-field">
+          <span>{text("挂到", "Attach to")}</span>
+          <select
+            value={draft.sessionId ?? ""}
+            disabled={disabled || claimSessions.length === 0}
+            onChange={(event) => submitChange({ ...draft, sessionId: event.target.value || null })}
+          >
+            {claimSessions.length === 0 && (
+              <option value="">{text("暂无历史承接会话", "No past rounds yet")}</option>
+            )}
+            {claimSessions.map((session) => (
+              <option key={session.sessionId} value={session.sessionId}>
+                {`${session.sessionId.slice(-8)} · ${session.rounds} ${text("轮", "rounds")}${
+                  session.startedAt ? ` · ${sessionDate(session.startedAt)}` : ""
+                }`}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       {models.length > 0 && (
         <label className="project-automation-field project-automation-field-model">
           <span>{text("认领模型", "Claim model")}</span>
@@ -404,4 +473,10 @@ export function ProjectAutomationMenu({
       {menu}
     </>
   );
+}
+
+/** 候选会话的日期短标签（挂载目标下拉用）。 */
+function sessionDate(value: number): string {
+  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
+    .format(new Date(value));
 }

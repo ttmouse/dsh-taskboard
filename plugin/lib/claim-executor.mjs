@@ -24,12 +24,14 @@ const ACTIVE = new Map()
  * (recorded `failed`); `disposed` makes dispose idempotent across the stop
  * path and the executor's own `finally`.
  */
-function claimControl(handle, projectId, startedAt) {
+function claimControl(handle, projectId, startedAt, shared = false) {
   let stopped = false
   return {
     handle,
     projectId,
     startedAt,
+    /** True for a resumed conversation the human also uses: never dispose it. */
+    shared,
     stopped: () => stopped,
     requestStop: () => {
       stopped = true
@@ -178,10 +180,37 @@ function resolveAgentOptions(ctx, model, log) {
  * Execute one claim in-process: create the agent (standard preset, project
  * cwd), followup with the skill-driven prompt, wait for the turn to end in
  * the durable log, then dispose. Run record written on start and finish.
+ *
+ * Conversation binding (issue 09582F74F86A-13):
+ *   • default — a fresh session per round, owned here, disposed at the end;
+ *   • `resumeSessionId` — attach to an existing conversation (`agents.get`
+ *     when it is already live, `agents.resume` otherwise). Such a session is
+ *     SHARED with the human: this executor never disposes it, so the
+ *     conversation (and whatever the user typed in it) survives the round.
+ *
+ * When `fetchQueuedComments` is supplied (dispatch runs for one issue), a
+ * comment the human adds *while the run is working* is not lost: after each
+ * turn ends the executor asks for comments written since the last turn and,
+ * if there are any, delivers them as one more followup and keeps going — the
+ * "排队，下一轮开始时送达" contract. Bounded so a chatty thread cannot loop
+ * forever.
+ * @param options - ctx, project, model, prompt, log, optional queue reader,
+ *   optional sessionId / resumeSessionId.
  * @returns {Promise<boolean>} true when the turn ended (ok or error).
  */
-export async function executeClaimInProcess({ ctx, project, model, prompt, log }) {
-  const sessionId = `claim-${project.id.slice(0, 8)}-${randomUUID().slice(0, 8)}`
+export async function executeClaimInProcess({
+  ctx,
+  project,
+  model,
+  prompt,
+  log,
+  fetchQueuedComments = null,
+  sessionId: requestedSessionId = null,
+  resumeSessionId = null,
+}) {
+  const sessionId = requestedSessionId ?? resumeSessionId ?? `claim-${project.id.slice(0, 8)}-${randomUUID().slice(0, 8)}`
+  /** A resumed/attached conversation belongs to the human: never dispose it. */
+  const shared = resumeSessionId !== null
   const startedAt = Date.now()
   let handle
   const runRecord = await writeRunRecord(project, {
@@ -205,23 +234,48 @@ export async function executeClaimInProcess({ ctx, project, model, prompt, log }
   }
 
   try {
-    handle = await ctx.agents.create({
-      sessionId,
-      meta: {
-        cwd: project.workspacePath,
-        ...(claimPreset !== null ? { agentPreset: claimPreset.id } : {}),
-      },
-      ...(claimPreset !== null
-        ? {
-            setup: async (agentCtx) => {
-              await ctx.get('agentPresets').mount(agentCtx, claimPreset.id)
-            },
-          }
-        : {}),
-      agentOptions: resolveAgentOptions(ctx, model, log),
-    })
+    if (shared) {
+      // Attach to the human's conversation: reuse the live agent when the
+      // session is already open, otherwise resume it from its durable log.
+      const live = ctx.agents.get(sessionId)
+      handle = live !== undefined
+        ? { agent: live, dispose: async () => {} }
+        // Registry form: `resume(options)` — one argument. (The two-argument
+        // `resume(ownerCtx, options)` belongs to the AgentFactory contract; the
+        // registry reads the options object directly, so passing a context
+        // first makes it read `resumeSessionId` off the proxied context and
+        // fail with "cannot get property resumeSessionId without injection".)
+        : await ctx.agents.resume({
+            resumeSessionId: sessionId,
+            agentOptions: resolveAgentOptions(ctx, model, log),
+            ...(claimPreset !== null
+              ? {
+                  setup: async (agentCtx) => {
+                    await ctx.get('agentPresets').mount(agentCtx, claimPreset.id)
+                  },
+                }
+              : {}),
+          })
+      log(`[claim] ${project.id}: attached to shared conversation ${sessionId}`)
+    } else {
+      handle = await ctx.agents.create({
+        sessionId,
+        meta: {
+          cwd: project.workspacePath,
+          ...(claimPreset !== null ? { agentPreset: claimPreset.id } : {}),
+        },
+        ...(claimPreset !== null
+          ? {
+              setup: async (agentCtx) => {
+                await ctx.get('agentPresets').mount(agentCtx, claimPreset.id)
+              },
+            }
+          : {}),
+        agentOptions: resolveAgentOptions(ctx, model, log),
+      })
+    }
   } catch (error) {
-    const message = `agent create failed: ${error instanceof Error ? error.message : String(error)}`
+    const message = `agent ${shared ? 'resume' : 'create'} failed: ${error instanceof Error ? error.message : String(error)}`
     log(`[claim] ${project.id}: ${message}`)
     if (runRecord) {
       await writeRunRecordFinal(runRecord.runId, project, {
@@ -237,7 +291,7 @@ export async function executeClaimInProcess({ ctx, project, model, prompt, log }
     return false
   }
 
-  const control = claimControl(handle, project.id, startedAt)
+  const control = claimControl(handle, project.id, startedAt, shared)
   ACTIVE.set(sessionId, control)
   try {
     // The prompt message MUST carry a stable id: dsh-session persists
@@ -245,29 +299,48 @@ export async function executeClaimInProcess({ ctx, project, model, prompt, log }
     // that every message event has an identified message (`Message.id` is
     // required). Omitting it writes a session that later fails history
     // replay with "session event at seq N lacks an identified message".
+    log(`[claim] ${project.id}: kicked in-process session ${sessionId} (${project.name})`)
+    // Wait for the durable log to record a turn/end, then dispose. A queued
+    // human comment (written while this run works) starts one more turn.
+    const deadline = Date.now() + 60 * 60 * 1000
+    let events = []
+    const readEvents = () => {
+      try {
+        events = ctx.sessions.get(sessionId)?.events ?? events
+      } catch {
+        // keep the last readable snapshot
+      }
+      return events
+    }
+    const countTurnEnds = () => readEvents().filter((event) => event.type === 'turn/end').length
+    const waitForTurnEnd = async (baseline) => {
+      while (Date.now() < deadline && ACTIVE.has(sessionId)) {
+        if (countTurnEnds() > baseline) return true
+        await sleep(2000)
+      }
+      return false
+    }
+
+    let baseline = countTurnEnds()
     handle.agent.followup({
       id: randomUUID(),
       role: 'user',
       content: [{ type: 'text', text: prompt }],
       source: { kind: 'user' },
     })
-    log(`[claim] ${project.id}: kicked in-process session ${sessionId} (${project.name})`)
-    // Wait for the durable log to record a turn/end, then dispose.
-    const deadline = Date.now() + 60 * 60 * 1000
-    let finished = false
-    let events = []
-    while (Date.now() < deadline && ACTIVE.has(sessionId)) {
-      try {
-        const session = ctx.sessions.get(sessionId)
-        events = session?.events ?? []
-        if (events.some((event) => event.type === 'turn/end')) {
-          finished = true
-          break
-        }
-      } catch {
-        break
-      }
-      await sleep(2000)
+    let finished = await waitForTurnEnd(baseline)
+    for (let queuedRounds = 0; finished && fetchQueuedComments !== null && queuedRounds < 3; queuedRounds += 1) {
+      const queued = await fetchQueuedComments().catch(() => [])
+      if (!Array.isArray(queued) || queued.length === 0) break
+      log(`[claim] ${project.id}: delivering ${queued.length} queued comment(s) to ${sessionId}`)
+      baseline = countTurnEnds()
+      handle.agent.followup({
+        id: randomUUID(),
+        role: 'user',
+        content: [{ type: 'text', text: queued.join('\n\n') }],
+        source: { kind: 'user' },
+      })
+      finished = await waitForTurnEnd(baseline)
     }
     const stoppedByUser = control.stopped()
     const digest = digestFromEvents(events)
@@ -291,7 +364,7 @@ export async function executeClaimInProcess({ ctx, project, model, prompt, log }
     return finished
   } finally {
     ACTIVE.delete(sessionId)
-    if (!control.disposed) {
+    if (!control.disposed && !control.shared) {
       control.disposed = true
       try {
         await control.handle.dispose()
@@ -308,6 +381,12 @@ export async function stopClaimSession(sessionId, log) {
   if (!control) return false
   ACTIVE.delete(sessionId)
   control.requestStop()
+  if (control.shared) {
+    // The conversation belongs to the human: interrupt this round's turn but
+    // leave the session live, so whatever they typed in it survives.
+    log(`[claim] interrupted shared conversation ${sessionId} (session kept)`)
+    return true
+  }
   if (!control.disposed) {
     control.disposed = true
     try {

@@ -456,9 +456,7 @@ export class TaskboardDatabase {
         codex_thread_id TEXT,
         model TEXT NOT NULL,
         reasoning_effort TEXT NOT NULL,
-        sandbox TEXT NOT NULL CHECK (sandbox IN (
-          'read-only', 'workspace-write', 'danger-full-access'
-        )),
+        sandbox TEXT NOT NULL,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -501,6 +499,66 @@ export class TaskboardDatabase {
 
     `);
 
+    // AI chat threads formerly restricted `sandbox` to the codex trio. The
+    // permission value is now an engine-owned preset id (the DSH engine mirrors
+    // the host's own picker, which can add presets such as `auto`), so the
+    // column keeps no CHECK; older databases are rebuilt once.
+    const aiThreadSql = this.database.prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'ai_chat_threads'",
+    ).get()?.sql ?? "";
+    if (aiThreadSql.includes("sandbox IN (")) {
+      this.database.exec("PRAGMA foreign_keys = OFF; BEGIN IMMEDIATE");
+      try {
+        this.database.exec(`
+          CREATE TABLE ai_chat_threads_permission_migration (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            status TEXT NOT NULL CHECK (status IN ('idle', 'running', 'failed')),
+            origin_project_id TEXT NOT NULL,
+            origin_project_name TEXT NOT NULL,
+            origin_workspace_path TEXT NOT NULL,
+            origin_issue_id TEXT,
+            origin_issue_identifier TEXT,
+            codex_thread_id TEXT,
+            model TEXT NOT NULL,
+            reasoning_effort TEXT NOT NULL,
+            sandbox TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          );
+
+          INSERT INTO ai_chat_threads_permission_migration (
+            id, title, status, origin_project_id, origin_project_name,
+            origin_workspace_path, origin_issue_id, origin_issue_identifier,
+            codex_thread_id, model, reasoning_effort, sandbox, created_at, updated_at
+          )
+          SELECT
+            id, title, status, origin_project_id, origin_project_name,
+            origin_workspace_path, origin_issue_id, origin_issue_identifier,
+            codex_thread_id, model, reasoning_effort, sandbox, created_at, updated_at
+          FROM ai_chat_threads;
+
+          DROP TABLE ai_chat_threads;
+          ALTER TABLE ai_chat_threads_permission_migration RENAME TO ai_chat_threads;
+
+          CREATE INDEX IF NOT EXISTS ai_chat_threads_updated
+            ON ai_chat_threads(updated_at DESC, id);
+        `);
+        this.database.exec("COMMIT");
+      } catch (error) {
+        this.database.exec("ROLLBACK");
+        throw error;
+      } finally {
+        this.database.exec("PRAGMA foreign_keys = ON");
+      }
+      const violation = this.database.prepare("PRAGMA foreign_key_check").get();
+      if (violation) {
+        throw new Error(
+          `AI chat permission migration produced a foreign key violation in '${violation.table}'`,
+        );
+      }
+    }
+
     const projectColumns = this.database.prepare("PRAGMA table_info(projects)").all();
     if (!projectColumns.some((column) => column.name === "workspace_path")) {
       this.database.exec("ALTER TABLE projects ADD COLUMN workspace_path TEXT");
@@ -519,6 +577,17 @@ export class TaskboardDatabase {
     }
     if (!projectColumns.some((column) => column.name === "automation_check_command")) {
       this.database.exec("ALTER TABLE projects ADD COLUMN automation_check_command TEXT");
+    }
+    // Claim conversation binding (issue 09582F74F86A-13): 'new' keeps the old
+    // one-conversation-per-round behaviour, 'fixed' reuses a chosen one.
+    if (!projectColumns.some((column) => column.name === "automation_session_mode")) {
+      this.database.exec("ALTER TABLE projects ADD COLUMN automation_session_mode TEXT NOT NULL DEFAULT 'new'");
+    }
+    if (!projectColumns.some((column) => column.name === "automation_session_id")) {
+      this.database.exec("ALTER TABLE projects ADD COLUMN automation_session_id TEXT");
+    }
+    if (!projectColumns.some((column) => column.name === "automation_session_turns")) {
+      this.database.exec("ALTER TABLE projects ADD COLUMN automation_session_turns INTEGER NOT NULL DEFAULT 0");
     }
 
     const taskColumns = this.database.prepare("PRAGMA table_info(tasks)").all();
@@ -819,7 +888,8 @@ export class TaskboardDatabase {
   /** Read a project's claim-automation record (enabled flag + interval + last run). */
   getProjectAutomation(id) {
     const row = this.database.prepare(`
-      SELECT automation_enabled, automation_interval_minutes, automation_model, last_claim_at
+      SELECT automation_enabled, automation_interval_minutes, automation_model, last_claim_at,
+             automation_session_mode, automation_session_id, automation_session_turns
       FROM projects WHERE id = ?
     `).get(id);
     if (!row) {
@@ -830,19 +900,56 @@ export class TaskboardDatabase {
       intervalMinutes: row.automation_interval_minutes,
       model: row.automation_model ?? null,
       lastClaimAt: row.last_claim_at ?? null,
+      /**
+       * 'new'   = a fresh conversation per round;
+       * 'fixed' = one chosen conversation for every round;
+       * 'task'  = continue in the conversation that last handled this issue.
+       */
+      sessionMode: row.automation_session_mode === "fixed"
+        ? "fixed"
+        : row.automation_session_mode === "task" ? "task" : "new",
+      /** The chosen conversation id while sessionMode is 'fixed'. */
+      sessionId: row.automation_session_id ?? null,
+      /** Rounds delivered into that conversation (rotation counter). */
+      sessionTurns: Number(row.automation_session_turns ?? 0),
     };
   }
 
   /** Persist a project's claim-automation switch (config lives in the board DB). */
-  setProjectAutomation(id, { enabled, intervalMinutes, model }) {
+  setProjectAutomation(id, { enabled, intervalMinutes, model, sessionMode, sessionId, sessionTurns }) {
     const existing = this.getProjectAutomation(id);
     const nextModel = model === undefined ? existing.model : (model || null);
+    const nextMode = sessionMode === undefined
+      ? existing.sessionMode
+      : (sessionMode === "fixed" ? "fixed" : sessionMode === "task" ? "task" : "new");
+    // Switching back to 'new' clears the target, so a later switch to 'fixed'
+    // can never silently resume a conversation the human did not re-pick.
+    const nextSessionId = nextMode === "new"
+      ? null
+      : sessionId === undefined
+        ? existing.sessionId
+        : (sessionId || null);
+    const nextTurns = nextMode === "new"
+      ? 0
+      : sessionId !== undefined && sessionId !== existing.sessionId
+        ? 0
+        : (sessionTurns === undefined ? existing.sessionTurns : Number(sessionTurns) || 0);
     this.database.prepare(`
       UPDATE projects
       SET automation_enabled = ?, automation_interval_minutes = ?, automation_model = ?,
+          automation_session_mode = ?, automation_session_id = ?, automation_session_turns = ?,
           updated_at = ?
       WHERE id = ?
-    `).run(enabled ? 1 : 0, intervalMinutes ?? existing.intervalMinutes, nextModel, now(), id);
+    `).run(
+      enabled ? 1 : 0,
+      intervalMinutes ?? existing.intervalMinutes,
+      nextModel,
+      nextMode,
+      nextSessionId,
+      nextTurns,
+      now(),
+      id,
+    );
     return this.getProjectAutomation(id);
   }
 

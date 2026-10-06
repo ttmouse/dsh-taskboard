@@ -29,8 +29,8 @@ import { TaskboardSettingsCard } from './settings-card'
 interface PanelIconProps {
   /** Requested square edge in pixels (16 expanded, 18 in the collapsed rail). */
   size: number
-  /** Whether this panel is the selected main panel. */
-  active: boolean
+  /** Whether this panel is the selected main panel (absent outside the panel row). */
+  active?: boolean
 }
 
 /** Panel component props (the `t` seat of the registered locale namespace). */
@@ -57,8 +57,16 @@ interface PanelSpec {
   Icon: (props: PanelIconProps) => ReactElement
 }
 
-/** Taskboard row glyph: a board with a divider column. */
-function TaskboardIcon({ size }: PanelIconProps): ReactElement {
+/**
+ * Task glyph, shared by every taskboard entry point (the sidebar row and the
+ * conversation-header button): the shell's own task-list artwork, inlined.
+ * This is the geometry of `IconChecklistOutlineRegular` from
+ * @deepseek-ai/dsh-client-ui-primitives (two bullets with rules, strokeWidth
+ * 1, 16px box) — inlined rather than imported so this bundle keeps no
+ * dependency on the primitives package, and used instead of a board mark
+ * because both seats stand for the project's *tasks*.
+ */
+function TasksIcon({ size }: PanelIconProps): ReactElement {
   return (
     <svg
       viewBox="0 0 16 16"
@@ -66,13 +74,15 @@ function TaskboardIcon({ size }: PanelIconProps): ReactElement {
       height={size}
       fill="none"
       stroke="currentColor"
-      strokeWidth={1.3}
+      strokeWidth={1}
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
     >
-      <rect x="2" y="2.5" width="12" height="11" rx="1.5" />
-      <path d="M2 6.5h12M6.5 6.5v7" />
+      <path d="M3.75 6.25C4.7165 6.25 5.5 5.4665 5.5 4.5C5.5 3.5335 4.7165 2.75 3.75 2.75C2.7835 2.75 2 3.5335 2 4.5C2 5.4665 2.7835 6.25 3.75 6.25Z" />
+      <path d="M7.5 4.5H13.5" />
+      <path d="M3.75 13.25C4.7165 13.25 5.5 12.4665 5.5 11.5C5.5 10.5335 4.7165 9.75 3.75 9.75C2.7835 9.75 2 10.5335 2 11.5C2 12.4665 2.7835 13.25 3.75 13.25Z" />
+      <path d="M7.5 11.5H13.5" />
     </svg>
   )
 }
@@ -102,7 +112,7 @@ const TASKBOARD_PANEL: PanelSpec = {
   order: 20,
   url: '/dsh-taskboard/',
   entryLabelKey: 'entry.label',
-  Icon: TaskboardIcon,
+  Icon: TasksIcon,
 }
 
 /** The automation panel: the global routines list page (standalone mode). */
@@ -140,6 +150,34 @@ const SIDE_FRAME_STYLE = {
   width: '100%',
   height: '100%',
   minHeight: 0,
+} as const
+
+/**
+ * Conversation-header glyph button. The shell's own header actions (the
+ * scheduled-task catalog) are 28×28 round icon buttons in
+ * `--dsw-alias-label-tertiary` that fill on hover, so this entry uses the same
+ * measurements and tokens — inline styles, no owned stylesheet, so nothing
+ * here can drift from (or survive) the module system's style ownership.
+ */
+const HEADER_BUTTON_STYLE = {
+  width: 28,
+  height: 28,
+  padding: 0,
+  border: 0,
+  borderRadius: 28,
+  background: 'transparent',
+  color: 'var(--dsw-alias-label-tertiary)',
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  flex: 'none',
+  cursor: 'pointer',
+} as const
+
+/** Hover state of the header button, matching the shell's icon-button fill. */
+const HEADER_BUTTON_HOVER_STYLE = {
+  color: 'var(--dsw-alias-label-secondary)',
+  background: 'var(--dsw-alias-interactive-bg-hover)',
 } as const
 
 /** GUI theme attribute (ui-theme writes it on <body>); absence means light. */
@@ -301,6 +339,8 @@ interface SessionsService {
     }
   }
   binding(id: string): { session: SessionPromptFace } | undefined
+  /** Re-pull the persisted session baseline (single-flight in the shell). */
+  refresh(): Promise<void>
 }
 interface WorkspacesService {
   create(input: { path: string }): Promise<{ id: string }>
@@ -376,6 +416,17 @@ interface SidebarRightTabsService {
   register(definition: SidebarRightTabDefinition): () => void
 }
 
+/**
+ * Minimal structural face of the injected right sidebar (the fields this
+ * plugin uses of the official `sidebarRight` service, see
+ * @deepseek-ai/dsh-client-ui-sidebar-right README §Extension seats). `openTab`
+ * expands the column and opens — or reveals — the page type's tab in the
+ * on-screen session.
+ */
+interface SidebarRightService {
+  openTab(kind: string, options?: { params?: Record<string, unknown> }): void
+}
+
 /** Locale namespace this plugin owns. */
 const NS = 'dsh-taskboard'
 
@@ -391,6 +442,7 @@ const DICTIONARIES = {
     'card.description': '完整 SQLite 任务板：看板/列表/甘特/工作流/仪表盘/AI 对话。卡片执行直接驱动 DSH 会话。',
     'card.storage': '数据存储于本机 SQLite（~/.dsh/storages/dsh-taskboard）。',
     'sidepanel.label': '任务',
+    'header.open': '打开任务看板',
     'sidepanel.guide.title': '任务',
     'sidepanel.guide.description': '查看当前项目的任务列表',
     'sidepanel.empty': '当前会话不属于任何看板项目。',
@@ -406,6 +458,7 @@ const DICTIONARIES = {
     'card.description': 'Full SQLite taskboard: board/list/gantt/workflow/dashboard/AI chat. Card execution drives real DSH sessions.',
     'card.storage': 'Data is stored in a local SQLite database (~/.dsh/storages/dsh-taskboard).',
     'sidepanel.label': 'Tasks',
+    'header.open': 'Open taskboard',
     'sidepanel.guide.title': 'Tasks',
     'sidepanel.guide.description': 'Browse the current project\'s task list',
     'sidepanel.empty': 'This session does not belong to any board project.',
@@ -556,12 +609,18 @@ function mountExecutionBridge(
  * board in the center column and nothing opens in another tab or another GUI
  * instance. A session the shell cannot address is logged and left alone.
  * @param uiWorkspace - injected shell UI-navigation service.
+ * @param refreshSessions - re-pulls the client's session baseline; a claim
+ *   session the executor disposed moments ago is still persisted on disk, but
+ *   its `api-session/removed` frame already dropped it from this client's
+ *   catalog, so without the re-pull `openSession` refuses with "unknown
+ *   session" and the click silently does nothing.
  * @param frame - current board iframe (messages must come from it).
  * @param closePanels - returns the center column to the conversation.
  * @param extraFrames - right-sidebar frames that may also issue the command.
  */
 function mountOpenThreadBridge(
   uiWorkspace: UiWorkspaceService,
+  refreshSessions: () => Promise<void>,
   frame: () => HTMLIFrameElement | undefined,
   closePanels: () => void,
   extraFrames: () => Array<HTMLIFrameElement | undefined> = () => [],
@@ -574,11 +633,18 @@ function mountOpenThreadBridge(
     const threadId = (data.payload as { threadId?: unknown } | undefined)?.threadId
     if (typeof threadId !== 'string' || threadId === '') return
     closePanels()
-    try {
-      uiWorkspace.openSession(threadId)
-    } catch (error: unknown) {
-      console.warn(`taskboard: cannot open conversation ${threadId}`, error)
-    }
+    void (async () => {
+      try {
+        // One baseline re-pull before the navigation; cheap (single-flight in
+        // the session controller) and it re-admits sessions this client had
+        // already dropped. Open with whatever baseline we got even if the
+        // refresh failed.
+        await refreshSessions().catch(() => {})
+        uiWorkspace.openSession(threadId)
+      } catch (error: unknown) {
+        console.warn(`taskboard: cannot open conversation ${threadId}`, error)
+      }
+    })()
   }
 
   window.addEventListener('message', onMessage)
@@ -619,6 +685,37 @@ async function resolveProjectForSession(sessionId: string, sessions: SessionsSer
   return candidates.find((project) => project.workspacePath === cwd)
     ?? candidates.find((project) => cwd.startsWith(`${project.workspacePath}/`))
     ?? null
+}
+
+/**
+ * Conversation-header action: one icon button that reveals the right
+ * sidebar's taskboard tab for the session it is drawn in, so the current
+ * session's project tasks are one click away from anywhere in the chat —
+ * the same entry point the official scheduled-task catalog uses for its own
+ * panel.
+ * @param props - the session the header belongs to, the open action, and the
+ *   plugin locale binder the shell injects into slot components.
+ */
+function TaskboardHeaderAction({ sessionId, onOpen, t }: {
+  sessionId: string
+  onOpen: (sessionId: string) => void
+  t: (key: string) => string
+}): ReactElement {
+  const [hover, setHover] = useState(false)
+  const label = t('header.open')
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={() => onOpen(sessionId)}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={hover ? { ...HEADER_BUTTON_STYLE, ...HEADER_BUTTON_HOVER_STYLE } : HEADER_BUTTON_STYLE}
+    >
+      <TasksIcon size={16} />
+    </button>
+  )
 }
 
 /** Guide artwork for the tasks entry: a checklist glyph. */
@@ -703,7 +800,7 @@ function SideTasksBody({ sessionId, sessions, onFrame, t, locale }: {
  * execution/open-thread bridges, locale dictionaries, and the settings card.
  * @param ctx - client root context with sessions/workspaces/locale/slots/layout.
  */
-export const inject = ['sessions', 'workspaces', 'locale', 'slots', 'layout', 'sidebarRightTabs', 'uiWorkspace']
+export const inject = ['sessions', 'workspaces', 'locale', 'slots', 'layout', 'sidebarRightTabs', 'sidebarRight', 'uiWorkspace']
 
 export function apply(ctx: {
   effect(fn: () => () => void, label: string): void
@@ -713,6 +810,7 @@ export function apply(ctx: {
   slots: SlotsService
   layout: LayoutService
   sidebarRightTabs: SidebarRightTabsService
+  sidebarRight: SidebarRightService
   uiWorkspace: UiWorkspaceService
 }): void {
   const frames = new Map<string, FrameRef>(PANELS.map((panel) => [panel.name, { current: undefined }]))
@@ -807,6 +905,32 @@ export function apply(ctx: {
     locale: NS,
   }, () => t('sidepanel.label'))), 'dsh-taskboard: right-sidebar tab title')
 
+  /** Reveal this session's taskboard tab in the right sidebar (never throwing into the shell). */
+  const openSideTasks = (sessionId: string): void => {
+    try {
+      ctx.sidebarRight.openTab(SIDE_TAB_KIND, { params: { sessionId } })
+    } catch (error: unknown) {
+      console.warn('taskboard: cannot open the right-sidebar taskboard tab', error)
+    }
+  }
+
+  // The conversation header's quick entry: the same icon row the official
+  // scheduled-task catalog lives in, opening the right-sidebar tab registered
+  // above. A session-scoped list slot, so the button is drawn per conversation
+  // and knows which session it opens for. The slot orders entries ascending,
+  // and the session-log "more actions" (···) menu registers at the default
+  // order 0 — this sits just left of it, right of the open-in-app (-10) and
+  // schedule (-5) entries.
+  ctx.effect(() => ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({
+    name: 'conversation.session.header.utilities',
+    id: 'taskboard-open',
+    order: -1,
+    locale: NS,
+    inject: (sessionId: unknown) => ({ sessionId: sessionId as string }),
+  }, (props: { sessionId: string; t: (key: string) => string }) => (
+    <TaskboardHeaderAction sessionId={props.sessionId} onOpen={openSideTasks} t={props.t} />
+  ))), 'dsh-taskboard: conversation header entry')
+
   // The settings card asks to open the board.
   ctx.effect(() => {
     const onRequestOpen = (): void => openPanel(TASKBOARD_PANEL.name)
@@ -823,6 +947,7 @@ export function apply(ctx: {
 
   ctx.effect(() => mountOpenThreadBridge(
     ctx.uiWorkspace,
+    () => ctx.sessions.refresh(),
     () => frames.get(TASKBOARD_PANEL.name)?.current,
     () => ctx.layout.selectPanel(null),
     () => [...sideFrames].map((ref) => ref.current),

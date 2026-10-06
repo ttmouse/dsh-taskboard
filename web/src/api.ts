@@ -268,12 +268,43 @@ export interface AutomationStateView {
   intervalMinutes: number | null;
   model: string | null;
   lastClaimAt: number | null;
+  /** 'new' per round · 'fixed' one chosen conversation · 'task' the issue's own. */
+  sessionMode?: "new" | "fixed" | "task";
+  /** The chosen conversation while sessionMode is 'fixed'. */
+  sessionId?: string | null;
+  /** Rounds delivered into that conversation (rotation counter). */
+  sessionTurns?: number;
 }
 
 export interface AutomationUpdateInput {
   enabled: boolean;
   intervalMinutes?: number;
   automationModel?: string | null;
+  sessionMode?: "new" | "fixed" | "task";
+  sessionId?: string | null;
+  sessionTurns?: number;
+}
+
+/** One candidate conversation for the fixed-session setting. */
+export interface ClaimSessionInfo {
+  sessionId: string;
+  startedAt: number | null;
+  status: string | null;
+  /** Rounds already delivered into this conversation. */
+  rounds: number;
+  digest: string | null;
+}
+
+/** 本项目历史承接会话（固定对话模式的候选，来自运行记录）。 */
+export async function listClaimSessions(
+  projectId: string,
+  signal?: AbortSignal,
+): Promise<ClaimSessionInfo[]> {
+  const data = await request<{ sessions: ClaimSessionInfo[] }>(
+    `/api/projects/${encodeURIComponent(projectId)}/claim-sessions`,
+    { signal },
+  );
+  return data.sessions;
 }
 
 /** 认领模型目录（host 半从 ctx.llm 枚举全部 provider 写入 models.json）。 */

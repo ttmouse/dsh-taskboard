@@ -19,6 +19,7 @@ Every task carries a `version` integer. **All mutations must include the version
 | GET | `/api/tasks?projectId=<id>&status=<status>` | List tasks. Filters: `projectId`, `status`, `archived`, ... |
 | GET | `/api/tasks/<id>` | Task detail (includes current `version`, title, description, status, labels, relations, ...) |
 | POST | `/api/tasks` | Create `{projectId, title, description?, status?, priority?, labels?, dueDate?, ...}` |
+| PATCH | `/api/tasks/<id>` | Edit fields `{version, title?, description?, status?, priority?, labels?}` — **flat body, no `changes` wrapper**; this is how labels are applied |
 | POST | `/api/tasks/<id>/move` | Move status `{version, status}` — statuses: `backlog, todo, in_progress, in_review, blocked, done, canceled` |
 | POST | `/api/tasks/<id>/archive` | Archive `{version}` |
 | POST | `/api/tasks/<id>/restore` | Restore `{version}` |
@@ -36,8 +37,10 @@ Status flow: `todo` → (claim) → `in_progress` → (verify + comment) → `in
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/api/tasks/<taskId>/relations/<type>/<relatedTaskId>` | Add relation `{version}` — types: `parent`, `sub`, `blocks`, `blocked-by`, `relates-to`, `duplicates` |
+| POST | `/api/tasks/<taskId>/relations/<type>/<relatedTaskId>` | Add relation `{version}` — types: `parent`, `blocks`, `blocked_by`, `related` |
 | DELETE | `/api/tasks/<taskId>/relations/<type>/<relatedTaskId>` | Remove relation `{version}` |
+
+Relation types are **underscore-only**; the server rejects `blocked-by` / `sub` / `relates-to` / `duplicates` with 400 `INVALID_FIELD`. Direction: `POST /api/tasks/A/relations/blocked_by/B` records **B blocks A**; `parent` records the related task as the parent of the path task; `related` is symmetric. Read them back as `relations.blockedBy` / `blocks` / `parent` / `subIssues` / `related`.
 
 ## Examples
 
@@ -51,6 +54,13 @@ AGENT_HEADERS=(-H "X-Taskboard-Client: taskctl" \
 curl -s "$BASE/api/tasks?projectId=<projectId>&status=todo"
 # Read one task (get its latest version)
 curl -s "$BASE/api/tasks/<taskId>"
+# Edit fields — apply triage labels this way (not via /move). Body is flat: `changes` is rejected.
+curl -s -X PATCH "$BASE/api/tasks/<taskId>" "${AGENT_HEADERS[@]}" \
+  -H 'Content-Type: application/json' \
+  -d '{"version": <latestVersion>, "labels": ["ready-for-agent"]}'
+# Blocking edge: <blocker> blocks <taskId>
+curl -s -X POST "$BASE/api/tasks/<taskId>/relations/blocked_by/<blocker>" "${AGENT_HEADERS[@]}" \
+  -H 'Content-Type: application/json' -d '{"version": <latestVersion>}'
 # Claim it (write -> agent headers; threadId links the task to this session)
 curl -s -X POST "$BASE/api/tasks/<taskId>/move" "${AGENT_HEADERS[@]}" \
   -H 'Content-Type: application/json' \

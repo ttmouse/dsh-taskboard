@@ -52,6 +52,17 @@ const CODEX_AGENT_ACTOR = {
   name: "AI Agent",
   avatarUrl: null,
 };
+
+/**
+ * Statuses where the board is *waiting for the human* — a comment there is an
+ * instruction ("do it again / keep going"), so the host is asked to run one
+ * round for that task right away instead of waiting for the next sweep.
+ *
+ * `todo` is deliberately NOT in this set: an issue that was never started is a
+ * note, and a comment on it must not spend a run. `in_progress` is not in it
+ * either: a run is already live and picks the comment up at its next turn.
+ */
+const DISPATCH_GATE_STATUSES = new Set(["in_review", "blocked"]);
 const CONTENT_TYPES = new Map([
   [".css", "text/css; charset=utf-8"],
   [".html", "text/html; charset=utf-8"],
@@ -817,16 +828,20 @@ function parseTaskFilters(searchParams) {
   return { projectId, status: statusValue ?? undefined, archived };
 }
 
+/**
+ * Permission preset id. The built-in codex sandboxes are the historical set,
+ * but a host engine may offer its own presets (the DSH engine mirrors the
+ * host's permission picker, including `auto` and configured names), so the
+ * request layer only enforces the shape and the engine's catalog decides
+ * whether a value is actually selectable.
+ */
 function parseAiSandbox(value) {
   if (value === undefined) return undefined;
-  if (!["read-only", "workspace-write", "danger-full-access"].includes(value)) {
-    throw new ApiError(
-      400,
-      "INVALID_SANDBOX",
-      "'sandbox' must be read-only, workspace-write, or danger-full-access",
-    );
+  const sandbox = stringField(value, "sandbox", { maxLength: 64 });
+  if (sandbox === "") {
+    throw new ApiError(400, "INVALID_SANDBOX", "'sandbox' cannot be empty");
   }
-  return value;
+  return sandbox;
 }
 
 function parseAiSetting(value, name, maxLength) {
@@ -977,6 +992,8 @@ function parseAiTurn(body) {
 class EventHub {
   constructor() {
     this.clients = new Set();
+    /** In-process listeners (the plugin host lives in this process). */
+    this.listeners = new Set();
     this.keepAlive = setInterval(() => {
       for (const response of this.clients) response.write(": keep-alive\n\n");
     }, 20_000);
@@ -995,6 +1012,18 @@ class EventHub {
     request.once("close", () => this.clients.delete(response));
   }
 
+  /**
+   * Subscribe to every emitted event from inside this process — the board
+   * server runs in the plugin host, so the host can react to a user action
+   * (a comment) without polling. Listener errors never break the HTTP reply.
+   * @param listener - receives the same event object SSE clients get.
+   * @returns idempotent unsubscribe.
+   */
+  subscribe(listener) {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
   emit(type, value) {
     const event = {
       type,
@@ -1005,12 +1034,20 @@ class EventHub {
     };
     const message = `event: ${type}\ndata: ${JSON.stringify(event)}\n\n`;
     for (const response of this.clients) response.write(message);
+    for (const listener of this.listeners) {
+      try {
+        listener(event);
+      } catch (error) {
+        console.error("taskboard event listener failed:", error);
+      }
+    }
   }
 
   close() {
     clearInterval(this.keepAlive);
     for (const response of this.clients) response.end();
     this.clients.clear();
+    this.listeners.clear();
   }
 }
 
@@ -1664,6 +1701,13 @@ function parseRoutineName(value) {
 /** Reserved stem of claim-routine names (taskboard-claim-<projectId prefix>). */
 const CLAIM_ROUTINE_PREFIX = "taskboard-claim-";
 
+/**
+ * Claim conversation id stem: `claim-<projectId 前 8>-<随机 8>`, minted by the
+ * host half. The prefix lets the board reject a fixed-session target that is
+ * not one of this project's own claim rounds.
+ */
+const CLAIM_SESSION_PREFIX = "claim-";
+
 /** Resolve a claim-routine name to its project record, or null. */
 function claimProjectByName(database, name) {
   if (!name.startsWith(CLAIM_ROUTINE_PREFIX)) return null;
@@ -1728,6 +1772,9 @@ export function createTaskboardServer(options = {}) {
     codexExecutable: resolved.codexExecutable,
     codexStatePath: resolved.codexStatePath,
     manageTaskboardSkillPath: resolved.skillPath,
+    // Host-injected turn engine (the DSH plugin runs turns on in-process DSH
+    // sessions); absent for the standalone server, which keeps the codex engine.
+    agentEngine: options.agentEngine,
   });
   const aiEventResponses = new Set();
 
@@ -2123,7 +2170,7 @@ export function createTaskboardServer(options = {}) {
         }
         const body = await readJson(request);
         assertPlainObject(body);
-        assertAllowedKeys(body, new Set(["enabled", "intervalMinutes", "automationModel"]));
+        assertAllowedKeys(body, new Set(["enabled", "intervalMinutes", "automationModel", "sessionMode", "sessionId", "sessionTurns"]));
         if (typeof body.enabled !== "boolean") {
           throw new ApiError(400, "INVALID_FIELD", "'enabled' must be a boolean");
         }
@@ -2140,9 +2187,81 @@ export function createTaskboardServer(options = {}) {
         const automationModel = body.automationModel === undefined
           ? undefined
           : stringField(body.automationModel, "automationModel", { nullable: true, maxLength: 128 });
-        const automation = database.setProjectAutomation(projectId, { enabled, intervalMinutes, model: automationModel });
+        // Claim conversation binding: 'fixed' points every round at one of this
+        // project's own claim conversations — never an arbitrary session, and
+        // never one belonging to another project.
+        let sessionMode;
+        if (body.sessionMode !== undefined) {
+          sessionMode = stringField(body.sessionMode, "sessionMode", { required: true, maxLength: 16 });
+          if (sessionMode !== "new" && sessionMode !== "fixed" && sessionMode !== "task") {
+            throw new ApiError(400, "INVALID_FIELD", "'sessionMode' must be 'new', 'fixed' or 'task'");
+          }
+        }
+        const sessionId = body.sessionId === undefined
+          ? undefined
+          : stringField(body.sessionId, "sessionId", { nullable: true, maxLength: 128 });
+        if (sessionId) {
+          const prefix = `${CLAIM_SESSION_PREFIX}${projectId.slice(0, 8)}-`;
+          if (!sessionId.startsWith(prefix)) {
+            throw new ApiError(400, "INVALID_FIELD", `'sessionId' must be one of this project's claim conversations (${prefix}…)`);
+          }
+        }
+        const currentAutomation = database.getProjectAutomation(projectId);
+        if ((sessionMode ?? currentAutomation.sessionMode) === "fixed"
+          && !(sessionId ?? currentAutomation.sessionId)) {
+          throw new ApiError(400, "INVALID_FIELD", "'sessionId' is required when 'sessionMode' is 'fixed'");
+        }
+        let sessionTurns;
+        if (body.sessionTurns !== undefined) {
+          if (!Number.isInteger(body.sessionTurns) || body.sessionTurns < 0) {
+            throw new ApiError(400, "INVALID_FIELD", "'sessionTurns' must be a non-negative integer");
+          }
+          sessionTurns = body.sessionTurns;
+        }
+        const automation = database.setProjectAutomation(projectId, {
+          enabled,
+          intervalMinutes,
+          model: automationModel,
+          sessionMode,
+          sessionId,
+          sessionTurns,
+        });
         events.emit("project.automation", { projectId, automation });
         return sendJson(response, 200, { automation });
+      }
+
+      // Candidate conversations for the fixed-session setting: this project's
+      // own claim rounds, one row per conversation (newest first).
+      const claimSessionsRoute = pathname.match(/^\/api\/projects\/([^/]+)\/claim-sessions$/);
+      if (claimSessionsRoute && request.method === "GET") {
+        if ([...url.searchParams.keys()].length > 0) {
+          throw new ApiError(400, "UNKNOWN_QUERY_PARAMETER", "GET /api/projects/:id/claim-sessions does not accept query parameters");
+        }
+        const projectId = decodeURIComponent(claimSessionsRoute[1]);
+        validateProjectId(projectId);
+        const project = database.getProject(projectId);
+        if (!project) {
+          throw new ApiError(404, "NOT_FOUND", `Project '${projectId}' not found`);
+        }
+        const routineName = `${CLAIM_ROUTINE_PREFIX}${projectId.slice(0, 12)}`;
+        const runs = await listRoutineRuns(resolved.routinesDirectory, project.workspacePath ?? null, routineName, 100);
+        const bySession = new Map();
+        for (const run of runs) {
+          if (typeof run.sessionId !== "string" || run.sessionId === "") continue;
+          const known = bySession.get(run.sessionId);
+          if (known) {
+            known.rounds += 1;
+            continue;
+          }
+          bySession.set(run.sessionId, {
+            sessionId: run.sessionId,
+            startedAt: run.startedAt ?? null,
+            status: run.status ?? null,
+            rounds: 1,
+            digest: typeof run.digest === "string" ? run.digest.slice(0, 160) : null,
+          });
+        }
+        return sendJson(response, 200, { sessions: [...bySession.values()].slice(0, 20) });
       }
 
       // Claim model catalog: written by the host half from ctx.llm.listModels()
@@ -2507,6 +2626,13 @@ export function createTaskboardServer(options = {}) {
           });
           const task = database.getTask(taskId);
           events.emit("comment.created", { comment, task });
+          // 评论即执行: a human comment on a board that is waiting for the human
+          // is an instruction, not a note — ask the host (same process) to run
+          // one round for this task now. Agent comments never trigger this
+          // (loop guard), and neither do queued/never-started issues.
+          if (comment.authorType === "user" && DISPATCH_GATE_STATUSES.has(task.status)) {
+            events.emit("task.dispatch-requested", { task, comment });
+          }
           return sendJson(response, 201, { comment });
         }
         return methodNotAllowed(response, ["GET", "POST"]);
@@ -2773,6 +2899,7 @@ export function createTaskboardServer(options = {}) {
   return {
     database,
     aiChat,
+    events,
     server,
     options: resolved,
     async listen({ host = "127.0.0.1", port = resolvePort() } = {}) {

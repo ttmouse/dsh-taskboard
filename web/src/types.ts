@@ -53,7 +53,15 @@ export interface TaskboardCapabilities {
   localAiChat: boolean;
 }
 
-export type AiChatSandbox = "read-only" | "workspace-write" | "danger-full-access";
+/**
+ * Permission value for a chat thread. The built-in codex sandboxes are
+ * `read-only` / `workspace-write` / `danger-full-access`; a host engine mirrors
+ * its own permission picker, which can offer more presets (e.g. `auto`), so the
+ * value is an opaque id validated against the catalog the engine reports.
+ */
+export type AiChatSandbox = string;
+/** The historically built-in sandbox ids (the codex engine's full set). */
+export type AiChatBuiltinSandbox = "read-only" | "workspace-write" | "danger-full-access";
 export type AiChatThreadStatus = "idle" | "running" | "failed";
 export type AiChatRunStatus = "running" | "completed" | "failed" | "interrupted";
 
@@ -80,10 +88,27 @@ export interface AiChatAttachmentInput {
   dataBase64: string;
 }
 
+/** One selectable permission preset, presentation included. */
+export interface AiChatPermissionOption {
+  value: string;
+  name: string;
+  description?: string;
+}
+
 export interface AiChatCatalog {
   models: AiChatModel[];
   skills: AiChatSkill[];
   sandboxes: string[];
+  /** Preset the engine pins when a thread carries no usable choice. */
+  defaultSandbox?: string | null;
+  /**
+   * The host's own permission catalog. Absent for the codex engine, whose three
+   * sandboxes are rendered from the panel's built-in copy instead.
+   */
+  permissions?: {
+    options: AiChatPermissionOption[];
+    defaultPreset?: string | null;
+  } | null;
 }
 
 export interface AiChatOrigin {

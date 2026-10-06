@@ -76,6 +76,7 @@ import {
   type RelationMutationResult,
 } from "./IssueRelations";
 import { TaskPropertyPicker } from "./TaskPropertyPicker";
+import { CommentOptions } from "./CommentOptions";
 import { buildIssueUrl } from "../issueRoute";
 import copyIdIcon from "../assets/figma-taskboard/copy-id.svg";
 import copyLinkIcon from "../assets/figma-taskboard/copy-link.svg";
@@ -211,6 +212,41 @@ const RELATION_LABELS: Record<IssueRelationType, readonly [string, string]> = {
   blocked_by: ["阻塞于", "Blocked by"],
   related: ["相关议题", "Related issue"],
 };
+
+/**
+ * The comment box's placeholder IS the rule: it says what sending will do for
+ * the state this issue is in right now, so nobody has to learn the board's
+ * status semantics or pick a mode. One line, shown exactly when it matters.
+ * @param status - the issue's current status.
+ * @param text - the zh/en picker from the detail panel.
+ */
+function commentPlaceholder(
+  status: TaskStatus,
+  text: (zh: string, en: string) => string,
+): string {
+  switch (status) {
+    case "in_review":
+      return text(
+        "写下要改的地方 —— 发送后它立刻改这一版",
+        "Describe the change — sending makes it rework this version",
+      );
+    case "blocked":
+      return text(
+        "回答它，或说下一步 —— 发送后它继续",
+        "Answer it or say what's next — sending continues the run",
+      );
+    case "in_progress":
+      return text(
+        "先说一句 —— 它会在这一轮结束后接上",
+        "Say it now — it is picked up when this round ends",
+      );
+    case "todo":
+    case "backlog":
+      return text("记一笔（不会启动）", "Leave a note (nothing starts)");
+    default:
+      return text("记一笔", "Leave a note");
+  }
+}
 
 function activityValue(
   field: string,
@@ -538,6 +574,25 @@ export function TaskDetail({
     }
   }
 
+  /**
+   * The acceptance gate, as one gesture: the human's own message plus the
+   * status flip. Status lands first — `done` is outside the dispatch gate, so
+   * the acceptance comment can never be mistaken for a "keep going" order —
+   * then the acceptance message is posted in the user's own voice, so the
+   * timeline reads: they accepted, here is when, in their words.
+   */
+  async function acceptTask() {
+    const saved = await saveTask({ status: "done" }, "status");
+    if (!saved) return;
+    try {
+      const comment = await createComment(saved.id, text("✅ 确认完成", "✅ Accepted"));
+      setComments((current) => [...current, comment]);
+      onAnnounce(text(`${saved.identifier} 已验收。`, `${saved.identifier} accepted.`));
+    } catch (error) {
+      setCommentsError(messageFor(error));
+    }
+  }
+
   async function applyRelationMutation(
     mutation: () => Promise<RelationMutationResult>,
   ): Promise<RelationMutationResult> {
@@ -659,6 +714,27 @@ export function TaskDetail({
           : "评论已发布。",
       );
       requestAnimationFrame(() => composerRef.current?.focus());
+    } catch (error) {
+      setCommentsError(messageFor(error));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  /**
+   * Post a plain-text comment. The question card's answer buttons use this:
+   * picking an answer IS writing that comment, so the same server path runs
+   * (and, on a waiting issue, the same instant handoff to the agent).
+   */
+  async function postPlainComment(body: string) {
+    const trimmed = body.trim();
+    if (trimmed === "" || submitting) return;
+    setSubmitting(true);
+    setCommentsError(null);
+    try {
+      const comment = await createComment(task.id, trimmed);
+      setComments((current) => [...current, comment]);
+      onAnnounce(text("已回答。", "Answered."));
     } catch (error) {
       setCommentsError(messageFor(error));
     } finally {
@@ -827,7 +903,20 @@ export function TaskDetail({
   const visibleTaskAttachments = attachments.filter(
     (attachment) => !markdownIncludesAttachment(description, attachment),
   );
-  const activityTimeline = [
+  /** Newest comment timestamp: a question card older than it is already answered. */
+  const latestCommentAt = comments.reduce<string | null>(
+    (latest, comment) => (latest === null || comment.createdAt > latest ? comment.createdAt : latest),
+    null,
+  );
+  /**
+   * One deliverable, not three log lines: a status flip that rides on a
+   * comment from the same actor within two minutes is folded into that
+   * comment's entry instead of showing up as its own card. The fold is
+   * direction-agnostic — the agent comments first and flips after, the
+   * accept button flips first and speaks after; both read as one card.
+   */
+  const foldedChanges = new Map<string, Array<{ id: string; after: unknown }>>();
+  const timelineItems = [
     ...taskActivities.flatMap((activity) => activity.changes.map((change, index) => ({
       kind: "change" as const,
       id: `${activity.id}-${index}`,
@@ -844,6 +933,34 @@ export function TaskDetail({
   ].sort((left, right) => (
     left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id)
   ));
+  const foldsInto = (item: (typeof timelineItems)[number], comment: (typeof timelineItems)[number]["comment"]) => (
+    item.activity.actorName === comment.authorName
+    && (() => {
+      const gap = Date.parse(item.createdAt) - Date.parse(comment.createdAt);
+      return Number.isFinite(gap) && Math.abs(gap) <= 120_000;
+    })()
+  );
+  const activityTimeline = timelineItems.filter((item, index) => {
+    if (item.kind !== "change" || item.change.field !== "status") return true;
+    // Fold forward: the flip follows the comment (agent flow).
+    const previous = timelineItems[index - 1];
+    if (previous?.kind === "comment" && foldsInto(item, previous.comment)) {
+      const bucket = foldedChanges.get(previous.comment.id) ?? [];
+      bucket.push({ id: item.id, after: item.change.after });
+      foldedChanges.set(previous.comment.id, bucket);
+      return false;
+    }
+    // Fold backward: the flip precedes the comment (accept flow — status
+    // must land first so the comment can't trip the dispatch gate).
+    const next = timelineItems[index + 1];
+    if (next?.kind === "comment" && foldsInto(item, next.comment)) {
+      const bucket = foldedChanges.get(next.comment.id) ?? [];
+      bucket.push({ id: item.id, after: item.change.after });
+      foldedChanges.set(next.comment.id, bucket);
+      return false;
+    }
+    return true;
+  });
 
   return (
     <section
@@ -1279,6 +1396,22 @@ export function TaskDetail({
                       ) : (
                         comment.body && <div className="comment-body"><DescriptionDocument value={comment.body} /></div>
                       )}
+                      <CommentOptions
+                        body={comment.body}
+                        stale={latestCommentAt !== null && latestCommentAt > comment.createdAt}
+                        disabled={submitting}
+                        onPick={(answer) => void postPlainComment(answer)}
+                      />
+                      {(foldedChanges.get(comment.id) ?? []).map((folded) => (
+                        <p className="comment-folded-change" key={folded.id}>
+                          <LinearIcon name="chevronRight" />
+                          <span>
+                            {text("状态", "Status")}
+                            {" → "}
+                            <strong>{activityValue("status", folded.after, language, locale, text)}</strong>
+                          </span>
+                        </p>
+                      ))}
                       {comment.attachments.some(
                         (attachment) => !markdownIncludesAttachment(comment.body, attachment),
                       ) && (
@@ -1344,7 +1477,7 @@ export function TaskDetail({
                   ref={composerRef}
                   className="comment-inline-media"
                   segments={commentSegments}
-                  placeholder={text("留下评论…", "Leave a comment…")}
+                  placeholder={commentPlaceholder(currentTask.status, text)}
                   ariaLabel={text("留下评论", "Leave a comment")}
                   onChange={setCommentSegments}
                   onError={setCommentsError}
@@ -1473,6 +1606,22 @@ export function TaskDetail({
                 onOpenChange={(open) => setPropertyMenu(open ? "status" : null)}
                 onChange={(status) => void saveTask({ status }, "status")}
               />
+              {/* 关口动作独立成按钮: acceptance is never a side effect of
+                  commenting — the comment box reworks, this button accepts.
+                  Accepting posts the user's own acceptance message after the
+                  status flip, so the timeline carries a first-class record of
+                  who accepted and when. */}
+              {currentTask.status === "in_review" && (
+                <button
+                  className="button primary gate-accept-button"
+                  type="button"
+                  disabled={savingProperty === "status"}
+                  title={text("验收通过并关闭这个议题", "Accept the work and close this issue")}
+                  onClick={() => void acceptTask()}
+                >
+                  {text("确认完成", "Accept")}
+                </button>
+              )}
             </div>
             <div className="detail-property-row">
               <span className="detail-property-label">{text("优先级", "Priority")}</span>

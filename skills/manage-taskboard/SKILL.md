@@ -69,3 +69,26 @@ Every write response returns the task's current `version`. Every mutation must c
 9. Move work that cannot continue to `blocked`, and work that will not continue to `canceled`.
 
 For version conflicts outside the initial claim, read the issue again, reconcile the newer state, and retry with its current version.
+
+## Woken by a comment (评论即执行)
+
+When a human comments on an issue that is `in_review` or `blocked`, the host starts one round right away — no waiting for the next scheduled claim. That round's prompt already names the issue and quotes the comment:
+
+1. Read the issue (`GET /api/tasks/<id>`) and all its comments (plus attachments) first.
+2. Treat that comment as the task: change the plan, rework the implementation, or answer and continue.
+3. Finish with **one** summary comment (key changes / verification / remaining risks) and move the issue back to `in_review`; move it to `blocked` with the reason when you genuinely cannot continue.
+4. Handle only that issue — do not pick another, create new issues, or reorder anything.
+
+A comment landing while you are still working is delivered to you as one more message when the current turn ends; treat it the same way.
+
+## Question card (asking the human to choose)
+
+When you need a decision, list the answers in a fenced block inside your comment — the board renders them as buttons, and clicking one posts that answer as the human's comment (which starts the next round):
+
+````text
+```taskboard-options
+["按 A 方案改", "按 B 方案改"]
+```
+````
+
+Keep it to 2–4 genuinely distinct options and write the question itself outside the block. Once a later comment exists the card is marked stale.

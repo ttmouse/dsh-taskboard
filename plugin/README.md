@@ -20,7 +20,12 @@ dsh web 宿主进程                         浏览器 GUI
 ```
 
 - **host 半**（`lib/index.mjs`）：cordis 插件，在宿主进程内以进程内方式启动上游看板的 server（`node:sqlite`，零 npm 依赖，随插件 vendored 到 `vendor/`），仅监听回环端口；通过 `ctx.webServer.register({ kind: 'prefix', path: '/dsh-taskboard' })` 把完整应用（静态资源 + `/api` + SSE）同源代理到 GUI webserver。
-- **client 半**（`src/client/index.ts` → `lib/client.js`）：注入侧边栏「任务看板」入口，在中间列挂载同源 iframe。复用官方插件家族的挂载协议：`data-dsh-taskboard-active` 激活属性 + `dsh-panel-activate` 事件，与 SSH 面板互斥。
+- **client 半**（`src/client/index.tsx` → `lib/client.js`）：走 DSH 官方 slot 契约注册入口（与官方 Plugins / 定时任务面板同一套协议），**不再有 DOM 注入或自定义互斥 CSS**。当前占用的座位：
+  - `sidebar.panellist` + `main`（keyed）——左侧栏两个面板行（任务看板 `order 20`、自动化 `order 30`）与中间列 iframe 视图；面板选中/互斥由 shell 的 layout store 负责。
+  - `sidebar.right.pane.tab` / `sidebar.right.pane.tab.title`（配 `ctx.sidebarRightTabs.register`，kind `taskboard-tasks`）——右栏「任务」tab，按当前会话 `cwd` 匹配看板项目后内嵌列表视图。
+  - `conversation.session.header.utilities`（id `taskboard-open`，`order -1`）——会话头部快捷入口：点击调 `ctx.sidebarRight.openTab('taskboard-tasks', { params: { sessionId } })`（该 API 内部会展开右栏，插件不必管展开态）。此槽是 **list 槽，按 `(priority, order)` 升序左→右**；本机其它占用：`open-in-app` `-10`、官方定时任务 `schedule-catalog` `-5`、会话日志「更多操作 ⋯」不写 order（默认 `0`），所以 `-1` 正好落在「⋯」左侧——改动这个数字前先确认同槽其它占用者的 order，不要与 `0` 打平（同 order 只能靠注册顺序决定）。
+  - `web-ui.plugin.item`——设置面板里的插件卡片。
+  图标统一用官方 `IconChecklistOutlineRegular` 的任务清单几何（内联路径，不引 primitives 包），头部入口与左侧栏任务看板行共用同一图形。
 - **数据**：`~/.dsh/storages/dsh-taskboard/taskboard.sqlite`（可配置）。
 - **工作区同步**：host 半通过 `ctx.workspaceRegistry.list()` 把 DSH 工作区自动同步为看板项目（项目 id = 工作区 id，`workspace_path` = 工作区路径），启动即同步 + 周期刷新；看板不再创建独立项目，「全局」保留为不挂工作区任务的收纳处。
 
@@ -87,13 +92,16 @@ dsh web
 | `syncIntervalMs` | `60000` | 工作区 → 项目同步间隔（ms，0 关闭周期同步） |
 | `routinesEnabled` | `true` | 认领例程管理（开关 ⇄ ~/.dsh/routines/taskboard-claim-*.yaml） |
 
-## 与官方 dsh-task-board 的关系
+## 与同座位插件的关系
 
-本插件与 `@linxin666/dsh-client-ui-task-board` 共用同一面板互斥协议（`data-dsh-taskboard-active` / `dsh-panel-activate`）。若两者同时安装，侧边栏会出现两个「任务看板」入口，且官方版的隐藏规则（`!important`）会盖住本插件的视图。二选一：本插件已把自身的显示规则提到更高特异性（元素类型选择器 + `!important`），但建议直接禁用官方版：
+- **`dsh-task-board`**（`github:xuanlanwuta/dsh-task-board`，v1.0.0，本机 web profile 已装且 `disabled: false`）：同样占用会话头部座位（id `kanban-toggle`，`order -10`），并以 `shell.overlay` 渲染自己的看板浮层。它与本插件不共享代码或状态；实测在普通会话里它不渲染任何头部按钮（该槽运行时只有 open-in-app / 本插件 / 会话日志三项），因此没有视觉冲突——但**它占的是同一个槽**，本插件头部入口的 order 需要按上一节的排序规则选取。
+- **`@linxin666/dsh-client-ui-task-board`**：本文档早期版本描述的对象，两个 profile 均已不再安装，仓库内除本节外无任何引用。当时为它写的 `data-dsh-taskboard-active` / `dsh-panel-activate` DOM 注入与 `!important` 特异性互斥规则，已随 client 半改走官方 slot 契约一并移除——排查"两个任务看板入口打架"时不要再按那套机制找原因。
+
+需要停用某个同座位插件时，走 profile 覆盖即可：
 
 ```yaml
 # ~/.dsh/profiles/web/cordis.patch.yml（用户层，追加）：
-- id: ui-task-board
+- id: dsh-task-board
   disabled: true
 ```
 

@@ -56,6 +56,31 @@ export function buildClaimPrompt(project) {
   ].join('\n')
 }
 
+/**
+ * Build the dispatch prompt for ONE issue a human just commented on. Unlike
+ * the sweep prompt ("find the earliest todo"), this names the issue and hands
+ * the agent the comment verbatim: the comment IS the instruction, so the round
+ * starts from it instead of re-deriving intent from the board.
+ * @param project - board project record (name, id, workspacePath).
+ * @param task - the issue the comment landed on (identifier, title, status).
+ * @param comment - the human comment that triggered the dispatch.
+ */
+export function buildDispatchPrompt(project, task, comment) {
+  const body = String(comment?.body ?? '').trim().slice(0, 4000)
+  const gate = task.status === 'blocked' ? '卡住等你' : '等你验收'
+  return [
+    `你是 dsh-taskboard 的自动承接例程，处理「${project.name}」项目（项目 ID：${project.id}，项目目录：${project.workspacePath}）。`,
+    `本轮只处理一个议题：${task.identifier}「${task.title}」（议题 ID：${task.id}）。它现在停在「${gate}」关口（status=${task.status}），人类刚在它下面留了这条评论：`,
+    '---',
+    body,
+    '---',
+    '这条评论就是本轮的任务书：把它当作明确的推进/修改要求，先用 manage-taskboard 技能读取该议题的最新内容与全部评论（含附件），再直接继续——要改方案就改方案，要修实现就修实现，是提问就回答后继续。',
+    '结束后回写**一条**总结评论（关键改动 / 验证结果 / 剩余风险），并把该议题移回 in_review（若确实被卡住无法推进则移到 blocked 并写清原因）。',
+    '不要处理其它议题，不要新建议题，不要重排顺序。',
+    '所有细节（API 基址、乐观并发、状态流转规则）以技能文档为准；全程仅使用命令行与 HTTP API（curl / 构建脚本 / 服务器资产检查）完成操作与自验；禁止调用任何浏览器工具（browser_*），不要打开 GUI 或网页验证。',
+  ].join('\n')
+}
+
 /** Serialize one routine YAML via the shared writer (stable, human-diffable). */
 export function buildRoutineYaml(project, automation, apiBase, paused = false) {
   return serializeRoutine({

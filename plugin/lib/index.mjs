@@ -20,7 +20,7 @@
  * projects the current home created (see the provenance file below) and its
  * teardown always releases the loopback port before a replacement mounts.
  */
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { request as httpRequest } from 'node:http'
 import { appendFile, cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
@@ -28,9 +28,10 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import z from 'schemastery'
 import { createTaskboardServer } from '../vendor/server/app.mjs'
-import { buildClaimPrompt, cleanupStaleClaimRoutines, reconcileClaimRoutine } from './claim-routines.mjs'
+import { buildClaimPrompt, buildDispatchPrompt, cleanupStaleClaimRoutines, reconcileClaimRoutine } from './claim-routines.mjs'
 import { activeClaimSessions, executeClaimInProcess, finalizeInterruptedRuns, stopClaimSession, writeRunRecord } from './claim-executor.mjs'
 import { defaultCheckCommand, runCheck } from './check-gate.mjs'
+import { createDshChatEngine } from './dsh-chat-engine.mjs'
 
 /** Plugin root: the directory holding lib/ (package.json sits one level up). */
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -345,6 +346,7 @@ export async function releaseHostResources(resources, log = () => {}) {
     await releaseStep('claim scheduler', resources.stopClaims, log),
     await releaseStep('sync timer', resources.clearSyncTimer, log),
     await releaseStep('route', resources.unregisterRoute, log),
+    await releaseStep('chat engine', resources.disposeChatEngine, log),
     await releaseStep('server', resources.closeServer, log),
   ]
 }
@@ -476,13 +478,235 @@ async function runInProcessClaim(ctx, project, baseUrl, log) {
     }
   }
 
-  return executeClaimInProcess({
+  // Conversation binding applies to scheduled rounds too: a project bound to
+  // one conversation keeps appending to it (and rotates after N rounds).
+  const binding = await resolveClaimSession(baseUrl, project, automation, log)
+  const finished = await executeClaimInProcess({
     ctx,
     project,
     model: automation.model ?? null,
     prompt: buildClaimPrompt(project),
+    sessionId: binding.resumeSessionId === null ? binding.sessionId : null,
+    resumeSessionId: binding.resumeSessionId,
     log,
   })
+  if (finished) await countFixedRound(baseUrl, project, binding)
+  return finished
+}
+
+/** In-flight dispatch runs, keyed by task id (one live run per issue). */
+const dispatchInFlight = new Set()
+
+/**
+ * Rounds delivered into one fixed conversation before the automation starts a
+ * fresh one. Keeps a long-lived binding from growing without bound (cost and
+ * context), while still giving continuity across many rounds.
+ */
+const FIXED_SESSION_MAX_TURNS = 20
+
+/** Read a project's claim-automation record, tolerating a missing server. */
+async function readProjectAutomation(baseUrl, projectId) {
+  try {
+    const res = await fetch(`${baseUrl}/api/projects/${encodeURIComponent(projectId)}/automation`)
+    if (res.ok) return (await res.json()).automation
+  } catch {
+    // fall through to the defaults
+  }
+  return { enabled: false, intervalMinutes: 10, model: null, sessionMode: 'new', sessionId: null, sessionTurns: 0 }
+}
+
+/** Persist one automation change without disturbing the switch or the model. */
+async function patchProjectAutomation(baseUrl, projectId, changes) {
+  const current = await readProjectAutomation(baseUrl, projectId)
+  const body = {
+    enabled: current.enabled === true,
+    intervalMinutes: current.intervalMinutes ?? 10,
+    ...(typeof current.model === 'string' && current.model !== '' ? { automationModel: current.model } : {}),
+    ...changes,
+  }
+  try {
+    await fetch(`${baseUrl}/api/projects/${encodeURIComponent(projectId)}/automation`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+  } catch {
+    // best effort: bookkeeping must never break a round
+  }
+}
+
+/**
+ * The most recent claim conversation that wrote on this issue, or null. Read
+ * from the issue's comments (each carries the conversation it came from), so a
+ * task-mode round continues where the issue was last actually worked on.
+ */
+async function newestClaimThreadForTask(baseUrl, taskId, prefix) {
+  if (typeof taskId !== 'string' || taskId === '') return null
+  try {
+    const res = await fetch(`${baseUrl}/api/tasks/${encodeURIComponent(taskId)}/comments`)
+    if (!res.ok) return null
+    const comments = (await res.json()).comments ?? []
+    const withThread = comments
+      .filter((comment) => typeof comment.threadId === 'string' && comment.threadId.startsWith(prefix))
+      .sort((a, b) => String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? '')))
+    return withThread[0]?.threadId ?? null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Resolve which conversation this round runs in.
+ *   • sessionMode 'new'   → a fresh claim session (the historical behaviour);
+ *   • sessionMode 'fixed' → the chosen conversation, resumed/attached so its
+ *     context survives across rounds. After FIXED_SESSION_MAX_TURNS rounds it
+ *     rotates to a fresh conversation and remembers that instead.
+ * @returns {{ resumeSessionId: string|null, sessionId: string }}
+ */
+async function resolveClaimSession(baseUrl, project, automation, log, task = null) {
+  const prefix = `claim-${project.id.slice(0, 8)}-`
+  const fresh = () => `claim-${project.id.slice(0, 8)}-${randomUUID().slice(0, 8)}`
+  // 'task': continue in the conversation that last handled THIS issue, so the
+  // round picks up its own history instead of a project-wide thread. Falls back
+  // to a fresh conversation when the issue has no (claim) conversation yet —
+  // and to the same for scheduled sweeps, which have no single issue.
+  if (automation?.sessionMode === 'task') {
+    // Prefer the NEWEST claim conversation that touched this issue (the ack and
+    // every summary comment carry their session as threadId). `task.threadId`
+    // only remembers the first link, so it can point at a stale conversation.
+    const newest = await newestClaimThreadForTask(baseUrl, task?.id, prefix)
+    if (newest !== null) return { resumeSessionId: newest, sessionId: newest }
+    const threadId = typeof task?.threadId === 'string' ? task.threadId : ''
+    if (threadId.startsWith(prefix)) return { resumeSessionId: threadId, sessionId: threadId }
+    const sessionId = fresh()
+    return { resumeSessionId: null, sessionId }
+  }
+  const fixed = automation?.sessionMode === 'fixed' && typeof automation?.sessionId === 'string' && automation.sessionId !== ''
+  if (!fixed) {
+    return { resumeSessionId: null, sessionId: fresh() }
+  }
+  const turns = Number(automation.sessionTurns ?? 0)
+  if (turns >= FIXED_SESSION_MAX_TURNS) {
+    const sessionId = fresh()
+    log(`[claim] ${project.id}: fixed conversation rotated after ${turns} rounds → ${sessionId}`)
+    await patchProjectAutomation(baseUrl, project.id, { sessionMode: 'fixed', sessionId, sessionTurns: 0 })
+    return { resumeSessionId: null, sessionId }
+  }
+  return { resumeSessionId: automation.sessionId, sessionId: automation.sessionId }
+}
+
+/** Count one delivered round against the bound conversation (rotation fuel). */
+async function countFixedRound(baseUrl, project, binding) {
+  if (binding.resumeSessionId === null) return
+  if (binding.sessionId !== binding.resumeSessionId) return
+  const current = await readProjectAutomation(baseUrl, project.id)
+  if (current.sessionMode !== 'fixed' || current.sessionId !== binding.sessionId) return
+  await patchProjectAutomation(baseUrl, project.id, {
+    sessionMode: 'fixed',
+    sessionId: binding.sessionId,
+    sessionTurns: Number(current.sessionTurns ?? 0) + 1,
+  })
+}
+
+/**
+ * Read the comments a human wrote *after* the run started, as followup text.
+ * The watermark advances per delivery, so a turn that ends with no new input
+ * delivers nothing (and a delivered comment is never sent twice).
+ */
+function queuedCommentReader(baseUrl, taskId, sinceIso) {
+  let watermark = sinceIso
+  return async () => {
+    const res = await fetch(`${baseUrl}/api/tasks/${encodeURIComponent(taskId)}/comments`)
+    if (!res.ok) return []
+    const list = (await res.json()).comments ?? []
+    const pending = list
+      .filter((comment) => comment.authorType === 'user'
+        && typeof comment.createdAt === 'string'
+        && comment.createdAt > watermark)
+      .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))
+    if (pending.length > 0) watermark = pending[pending.length - 1].createdAt
+    return pending.map((comment) => `【运行中追加的评论】\n${String(comment.body ?? '').slice(0, 2000)}`)
+  }
+}
+
+/**
+ * 评论即执行 — run exactly one round for the issue a human just commented on.
+ * The board server lives in this process, so the comment arrives as an event
+ * within milliseconds: no sweep latency, no polling. Deliberately independent
+ * of the automation switch (a human asking is not a schedule) and of the
+ * sweep's todo gate. Guards:
+ *   • one live run per issue — a comment landing mid-run is picked up by that
+ *     run's queue reader at its next turn;
+ *   • the issue is moved to in_progress first, so every open board shows the
+ *     handoff immediately (the server pushes task.moved over SSE).
+ * @returns {Promise<boolean>} true when a round actually ran.
+ */
+async function runTaskDispatch(ctx, app, baseUrl, task, comment, log) {
+  let project
+  try {
+    project = app.database.getProject(task.projectId)
+  } catch {
+    project = undefined
+  }
+  if (!project?.workspacePath) {
+    log(`[dispatch] ${task.identifier}: project has no workspace, nothing to run`)
+    return false
+  }
+  if (dispatchInFlight.has(task.id)) {
+    log(`[dispatch] ${task.identifier}: a run is already live — the comment is queued for its next turn`)
+    return false
+  }
+  dispatchInFlight.add(task.id)
+  try {
+    const automation = await readProjectAutomation(baseUrl, project.id)
+    const binding = await resolveClaimSession(baseUrl, project, automation, log, task)
+    let current = task
+    try {
+      const res = await fetch(`${baseUrl}/api/tasks/${encodeURIComponent(task.id)}/move`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ version: task.version, status: 'in_progress' }),
+      })
+      if (res.ok) current = (await res.json()).task ?? task
+    } catch {
+      // best effort: the round moves the issue itself as part of its workflow
+    }
+    // The half-second "it heard you": one agent-authored line with the live
+    // session linked, so the issue itself shows that work started and can be
+    // opened. Agent authorship keeps it out of the dispatch gate (no loop).
+    await fetch(`${baseUrl}/api/tasks/${encodeURIComponent(task.id)}/comments`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'X-Taskboard-Client': 'taskctl',
+        'X-Taskboard-Agent-Id': 'dsh-agent',
+        'X-Taskboard-Agent-Name': 'DSH Agent',
+      },
+      body: JSON.stringify({
+        body: `已按你的评论开始一轮：会话 ${binding.sessionId}。跑完会在这里回一条总结。`,
+        threadId: binding.sessionId,
+      }),
+    }).catch(() => {})
+    log(`[dispatch] ${current.identifier}: round started by a human comment`)
+    const finished = await executeClaimInProcess({
+      ctx,
+      project,
+      model: automation.model ?? null,
+      prompt: buildDispatchPrompt(project, current, comment),
+      fetchQueuedComments: queuedCommentReader(
+        baseUrl,
+        task.id,
+        typeof comment.createdAt === 'string' ? comment.createdAt : new Date().toISOString(),
+      ),
+      sessionId: binding.resumeSessionId === null ? binding.sessionId : null,
+      resumeSessionId: binding.resumeSessionId,
+      log,
+    })
+    if (finished) await countFixedRound(baseUrl, project, binding)
+    return finished
+  } finally {
+    dispatchInFlight.delete(task.id)
+  }
 }
 
 /**
@@ -677,13 +901,28 @@ export function apply(ctx, config) {
   let app = undefined
   let syncTimer = undefined
   let claimTimer = undefined
+  let dispatchDisposer = undefined
   let baseUrl = undefined
   let stopped = false
+  /** AI chat turn engine: panel threads run on in-process DSH sessions. */
+  const chatEngine = typeof ctx.agents?.create === 'function'
+    ? createDshChatEngine({
+        ctx,
+        log: (message) => {
+          void pluginLog(message)
+          ctx.logger.info(message)
+        },
+        agentsSkillRoot: agentsSkillRoot(),
+      })
+    : undefined
 
   const start = async () => {
     try {
       const dataDirectory = path.resolve(config.dataDirectory)
       await mkdir(dataDirectory, { recursive: true })
+      void pluginLog(chatEngine === undefined
+        ? 'ai chat engine: codex (no live agent service in this host)'
+        : 'ai chat engine: dsh (panel turns run on in-process DSH sessions)')
       await syncAgentSkill((message) => {
         void pluginLog(message)
         ctx.logger.info(message)
@@ -692,6 +931,7 @@ export function apply(ctx, config) {
         dataDirectory,
         staticDirectory: path.join(PLUGIN_ROOT, 'vendor', 'web'),
         skillPath: path.join(PLUGIN_ROOT, 'vendor', 'skills', 'manage-taskboard', 'SKILL.md'),
+        agentEngine: chatEngine,
         routinesDirectory: path.join(process.env.DSH_HOME ?? path.join(os.homedir(), '.dsh'), 'routines'),
         routinesRunHandler: async (name) => {
           // Claim routines execute in-process (visible/interactive GUI session);
@@ -819,6 +1059,11 @@ export function apply(ctx, config) {
     if (stopping) return
     stopping = true
     stopped = true
+    if (dispatchDisposer !== undefined) {
+      const dispose = dispatchDisposer
+      dispatchDisposer = undefined
+      dispose()
+    }
     await releaseHostResources({
       stopClaims: claimTimer === undefined ? undefined : () => {
         const disposer = claimTimer
@@ -840,10 +1085,32 @@ export function apply(ctx, config) {
         app = undefined
         await instance.close()
       },
+      disposeChatEngine: chatEngine === undefined ? undefined : async () => {
+        await chatEngine.disposeAll()
+      },
     }, reportTeardown)
   }
 
   void start().then(() => {
+    if (!stopped && app !== undefined && baseUrl !== undefined) {
+      // 评论即执行: the board server runs in this process, so a human comment
+      // on an issue that is waiting for the human reaches us as an event and
+      // starts a round right away — the sweep below stays as the fallback.
+      const instance = app
+      const log = (message) => {
+        void pluginLog(message)
+        ctx.logger.info(`dsh-taskboard: ${message}`)
+      }
+      dispatchDisposer = instance.events.subscribe((event) => {
+        if (event?.type !== 'task.dispatch-requested' || !event.task || !event.comment) return
+        void runTaskDispatch(ctx, instance, baseUrl, event.task, event.comment, log).catch((error) => {
+          const message = `[dispatch] ${event.task?.identifier ?? event.task?.id}: ${error instanceof Error ? error.message : String(error)}`
+          void pluginLog(message)
+          ctx.logger.warn(`dsh-taskboard: ${message}`)
+        })
+      })
+      pluginLog('comment dispatch bridge ready (event-driven, no polling)')
+    }
     if (!stopped && app !== undefined && baseUrl !== undefined && config.claimPollMs > 0) {
       claimTimer = startClaimScheduler(
         ctx,

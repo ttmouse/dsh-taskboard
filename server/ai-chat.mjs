@@ -3,13 +3,9 @@ import os from "node:os";
 import path from "node:path";
 
 import { ApiError } from "./database.mjs";
-import { discoverAiCatalog, resolveAiWorkspace } from "./ai-chat-catalog.mjs";
-import {
-  buildCodexArgs,
-  buildCodexPrompt,
-  normalizeCodexEvent,
-  spawnCodexTurn,
-} from "./ai-chat-process.mjs";
+import { resolveAiWorkspace } from "./ai-chat-catalog.mjs";
+import { createCodexEngine } from "./ai-chat-engine-codex.mjs";
+import { normalizeCodexEvent } from "./ai-chat-process.mjs";
 
 const SANDBOXES = new Set(["read-only", "workspace-write", "danger-full-access"]);
 const ERROR_CONTENT_LIMIT = 65_536;
@@ -23,18 +19,6 @@ const CODEX_IMAGE_TYPES = new Set([
 function cappedError(value) {
   const message = value instanceof Error ? value.message : String(value ?? "");
   return message.slice(0, ERROR_CONTENT_LIMIT);
-}
-
-function signalProcessGroup(child, signal) {
-  if (Number.isInteger(child?.pid)) {
-    try {
-      process.kill(-child.pid, signal);
-      return;
-    } catch {}
-  }
-  try {
-    child?.kill(signal);
-  } catch {}
 }
 
 function wait(milliseconds) {
@@ -52,6 +36,15 @@ export class AiChatService {
     this.manageTaskboardSkillPath = options.manageTaskboardSkillPath;
     this.processEnv = options.processEnv ?? process.env;
     this.killGraceMs = options.killGraceMs ?? 1_000;
+    // The engine drives one turn: codex CLI by default, or a host-injected
+    // engine (the DSH plugin runs each turn on an in-process DSH session).
+    this.engine = options.agentEngine ?? createCodexEngine({
+      codexExecutable: this.codexExecutable,
+      codexStatePath: this.codexStatePath,
+      manageTaskboardSkillPath: this.manageTaskboardSkillPath,
+      processEnv: this.processEnv,
+      killGraceMs: this.killGraceMs,
+    });
     this.resolveContext = options.resolveContext ?? (async (projectId, issueId) => {
       const resolved = await resolveAiWorkspace(projectId, this.codexStatePath, this.database);
       let issue;
@@ -118,19 +111,17 @@ export class AiChatService {
     };
   }
 
-  async #catalogForProject(projectId) {
-    return discoverAiCatalog({
-      codexExecutable: this.codexExecutable,
-      codexStatePath: this.codexStatePath,
+  async #catalogForProject(resolved) {
+    return this.engine.catalog({
+      projectId: resolved.project.id,
+      workspacePath: resolved.workspacePath,
       database: this.database,
-      projectId,
-      processEnv: this.processEnv,
     });
   }
 
   async getCatalog(projectId, resolvedContext) {
     const resolved = resolvedContext ?? await this.resolveContext(projectId);
-    return this.#catalogForProject(resolved.project.id);
+    return this.#catalogForProject(resolved);
   }
 
   async createThread(input) {
@@ -139,8 +130,11 @@ export class AiChatService {
     const model = this.#resolveModel(catalog, input.model);
     const reasoningEffort = input.reasoningEffort ?? model.defaultReasoningEffort;
     this.#validateReasoningEffort(model, reasoningEffort);
-    const sandbox = input.sandbox ?? "workspace-write";
-    this.#validateSandbox(sandbox);
+    // An engine may pin one sandbox (the DSH engine keeps the host's permission
+    // preset, because a preset with approval `ask` would block on a prompt this
+    // panel cannot render).
+    const sandbox = input.sandbox ?? catalog.defaultSandbox ?? "workspace-write";
+    this.#validateSandbox(sandbox, catalog);
 
     const issue = resolved.issue;
 
@@ -165,13 +159,15 @@ export class AiChatService {
     );
     const wasActive = changesSettings && this.#threadIsActive(thread);
 
-    if (Object.hasOwn(changes, "sandbox")) this.#validateSandbox(changes.sandbox);
-    if (Object.hasOwn(changes, "model") || Object.hasOwn(changes, "reasoningEffort")) {
+    if (Object.hasOwn(changes, "model") || Object.hasOwn(changes, "reasoningEffort") || Object.hasOwn(changes, "sandbox")) {
       const catalog = await this.getCatalog(thread.origin.projectId);
       thread = this.getThread(threadId);
-      const model = this.#resolveModel(catalog, changes.model ?? thread.model);
-      const reasoningEffort = changes.reasoningEffort ?? thread.reasoningEffort;
-      this.#validateReasoningEffort(model, reasoningEffort);
+      if (Object.hasOwn(changes, "sandbox")) this.#validateSandbox(changes.sandbox, catalog);
+      if (Object.hasOwn(changes, "model") || Object.hasOwn(changes, "reasoningEffort")) {
+        const model = this.#resolveModel(catalog, changes.model ?? thread.model);
+        const reasoningEffort = changes.reasoningEffort ?? thread.reasoningEffort;
+        this.#validateReasoningEffort(model, reasoningEffort);
+      }
     }
     if (wasActive || (changesSettings && this.#threadIsActive(thread))) {
       throw new ApiError(
@@ -236,7 +232,23 @@ export class AiChatService {
       );
     }
     const model = this.#resolveModel(catalog, thread.model);
-    this.#validateReasoningEffort(model, thread.reasoningEffort);
+    if (
+      thread.model !== model.slug
+      || !model.supportedReasoningEfforts.includes(thread.reasoningEffort)
+    ) {
+      // The stored choice is not routable here (another engine wrote it, or the
+      // model changed under it). Persist what this engine will actually run, so
+      // the panel's selector shows the truth and the next turn starts clean: a
+      // still-supported effort is kept, otherwise the model's default wins.
+      const reasoningEffort = model.supportedReasoningEfforts.includes(thread.reasoningEffort)
+        ? thread.reasoningEffort
+        : model.defaultReasoningEffort;
+      thread = this.database.updateAiChatThread(threadId, {
+        model: model.slug,
+        reasoningEffort,
+      });
+      this.#emit(threadId, { type: "ai.thread", thread });
+    }
     if (resolved.workspacePath !== thread.origin.workspacePath) {
       throw new ApiError(
         409,
@@ -265,16 +277,6 @@ export class AiChatService {
       imagePaths,
     } = await this.#writeTurnAttachments(attachments);
     try {
-      const args = buildCodexArgs(thread, resolved.addDirectories, imagePaths);
-      const prompt = buildCodexPrompt(
-        thread,
-        {
-          message: input.message,
-          skills: selectedSkills,
-          attachmentPaths,
-        },
-        this.manageTaskboardSkillPath,
-      );
       const run = this.database.createAiChatRun({ threadId });
       this.#emit(threadId, { type: "ai.run", run });
       const userEventData = {};
@@ -300,17 +302,24 @@ export class AiChatService {
       let startedThreadId = null;
       let terminalOutcome = null;
       let terminalError = "";
-      const { child, completion } = spawnCodexTurn({
-        executable: this.codexExecutable,
-        args,
-        prompt,
-        env: this.processEnv,
+      const turn = this.engine.startTurn({
+        thread,
+        message: input.message,
+        skills: selectedSkills,
+        attachmentPaths,
+        imagePaths,
+        workspacePath: resolved.workspacePath,
+        addDirectories: resolved.addDirectories,
         onRawEvent: (raw) => {
           const normalized = normalizeCodexEvent(raw);
           if (!normalized) return;
           if (normalized.kind === "thread.started") {
+            // A host engine may migrate a thread whose stored id belongs to
+            // another engine's namespace (a codex-era id) onto its own session
+            // id; the codex engine must still report the id it was asked for.
+            const mayMigrateThreadId = this.engine.id !== "codex";
             if (
-              (resumingThreadId && normalized.threadId !== resumingThreadId)
+              (resumingThreadId && !mayMigrateThreadId && normalized.threadId !== resumingThreadId)
               || (startedThreadId && normalized.threadId !== startedThreadId)
             ) {
               throw new Error("AI engine returned an unexpected thread id");
@@ -336,8 +345,9 @@ export class AiChatService {
           this.#emit(threadId, { type: "ai.event", event });
         },
       });
+      const completion = Promise.resolve(turn.completion);
 
-      const active = { child, threadId, interrupted: false, temporaryDirectory };
+      const active = { turn, threadId, interrupted: false, temporaryDirectory };
       this.active.set(run.id, active);
       const finalization = completion.then(
         (result) => this.#finishRun({
@@ -386,9 +396,9 @@ export class AiChatService {
     }
 
     active.interrupted = true;
-    signalProcessGroup(active.child, "SIGTERM");
+    active.turn.interrupt();
     const timer = setTimeout(() => {
-      if (this.active.has(runId)) signalProcessGroup(active.child, "SIGKILL");
+      if (this.active.has(runId)) active.turn.kill?.();
     }, this.killGraceMs);
     timer.unref();
 
@@ -403,7 +413,7 @@ export class AiChatService {
     const entries = [...this.active.entries()];
     for (const [, active] of entries) {
       active.interrupted = true;
-      signalProcessGroup(active.child, "SIGTERM");
+      active.turn.interrupt();
     }
 
     const completions = entries
@@ -413,7 +423,7 @@ export class AiChatService {
       const settled = Promise.allSettled(completions);
       await Promise.race([settled, wait(this.killGraceMs)]);
       for (const [runId, active] of entries) {
-        if (this.active.has(runId)) signalProcessGroup(active.child, "SIGKILL");
+        if (this.active.has(runId)) active.turn.kill?.();
       }
       await settled;
     }
@@ -424,34 +434,47 @@ export class AiChatService {
     const model = requestedModel === undefined
       ? catalog.models[0]
       : catalog.models.find((candidate) => candidate.slug === requestedModel);
-    if (!model) {
-      throw new ApiError(
-        400,
-        "INVALID_MODEL",
-        requestedModel === undefined
-          ? "AI 引擎未提供可用模型"
-          : `Unknown model '${requestedModel}'`,
-      );
-    }
-    return model;
+    if (model) return model;
+    // An engine owns its own model namespace, and the board keeps its threads
+    // across engine changes — and two hosts with different engines share one
+    // database. A stored id this engine cannot route therefore falls back to the
+    // engine's own default instead of failing the turn.
+    if (catalog.models[0]) return catalog.models[0];
+    throw new ApiError(
+      400,
+      "INVALID_MODEL",
+      requestedModel === undefined
+        ? "AI 引擎未提供可用模型"
+        : `Unknown model '${requestedModel}'`,
+    );
   }
 
   #validateReasoningEffort(model, reasoningEffort) {
-    if (!model.supportedReasoningEfforts.includes(reasoningEffort)) {
-      throw new ApiError(
-        400,
-        "INVALID_REASONING_EFFORT",
-        `Reasoning effort '${reasoningEffort}' is not supported by model '${model.slug}'`,
-      );
-    }
+    if (model.supportedReasoningEfforts.includes(reasoningEffort)) return;
+    if (this.engine.id !== "codex") return;
+    throw new ApiError(
+      400,
+      "INVALID_REASONING_EFFORT",
+      `Reasoning effort '${reasoningEffort}' is not supported by model '${model.slug}'`,
+    );
   }
 
-  #validateSandbox(sandbox) {
-    if (!SANDBOXES.has(sandbox)) {
+  /**
+   * The accepted permission values: the built-in codex sandboxes plus whatever
+   * presets the active engine's catalog offers (the DSH engine mirrors the
+   * host's own permission picker, which can include `auto` or host-configured
+   * names).
+   */
+  #validateSandbox(sandbox, catalog) {
+    const known = new Set(SANDBOXES);
+    for (const value of catalog?.sandboxes ?? []) {
+      if (typeof value === "string" && value !== "") known.add(value);
+    }
+    if (!known.has(sandbox)) {
       throw new ApiError(
         400,
         "INVALID_SANDBOX",
-        "'sandbox' must be read-only, workspace-write, or danger-full-access",
+        `'sandbox' must be one of ${[...known].join(", ")}`,
       );
     }
   }

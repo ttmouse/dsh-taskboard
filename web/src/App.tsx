@@ -184,6 +184,12 @@ interface ProjectAutomationRecord {
   /** 认领模型：'' = 跟随 agent-default-model，否则为模型 id。 */
   model: string;
   reasoningEffort: AutomationReasoningEffort;
+  /**
+   * 承接会话绑定：'new' 每轮新建；'fixed' 固定挂在 sessionId 那个对话下；
+   * 'task' 续在该议题上次的对话里。
+   */
+  sessionMode?: "new" | "fixed" | "task";
+  sessionId?: string | null;
 }
 
 type ProjectAutomations = Record<string, ProjectAutomationRecord>;
@@ -241,6 +247,8 @@ const DEFAULT_AUTOMATION_OPTIONS = {
   model: "gpt-5.5",
   reasoningEffort: "high",
   host: "dsh",
+  sessionMode: "new" as const,
+  sessionId: null,
 } as const;
 
 /** 认领任务 id：与 server 心跳任务 id 保持一致。 */
@@ -882,6 +890,15 @@ export function App() {
     selectedProjectId,
   ]);
 
+  /**
+   * Whether this host's server half understands the claim-conversation fields.
+   * The board SPA ships ahead of a host that has not been reloaded yet, and an
+   * older server rejects the unknown keys outright, so the panel only offers the
+   * selector and only sends the fields when the host advertises them.
+   */
+  const sessionBindingSupportedRef = useRef<boolean | null>(null);
+  const [sessionBindingSupported, setSessionBindingSupported] = useState<boolean | null>(null);
+
   const reconcileProjectAutomation = useCallback(async () => {
     if (automationProjectContext.unavailableReason) {
       setAutomationError(null);
@@ -896,6 +913,9 @@ export function App() {
       try {
         const previous = projectAutomationsRef.current[selectedProjectId];
         const result = await getProjectAutomation(selectedProjectId);
+        const supportsSessionBinding = Object.hasOwn(result, "sessionMode");
+        sessionBindingSupportedRef.current = supportsSessionBinding;
+        setSessionBindingSupported(supportsSessionBinding);
         writeProjectAutomation(selectedProjectId, {
           automationId: heartbeatTaskIdFor(selectedProjectId),
           codexProjectId: selectedProjectId,
@@ -907,6 +927,10 @@ export function App() {
             : previous?.intervalMinutes ?? DEFAULT_AUTOMATION_OPTIONS.intervalMinutes,
           model: result.model ?? previous?.model ?? "",
           reasoningEffort: previous?.reasoningEffort ?? DEFAULT_AUTOMATION_OPTIONS.reasoningEffort,
+          sessionMode: result.sessionMode === "fixed"
+            ? "fixed"
+            : result.sessionMode === "task" ? "task" : (previous?.sessionMode ?? "new"),
+          sessionId: result.sessionId ?? previous?.sessionId ?? null,
         });
       } catch (error) {
         setAutomationError(error instanceof Error ? error.message : "无法读取自动认领状态");
@@ -996,6 +1020,8 @@ export function App() {
     intervalMinutes: AutomationIntervalMinutes;
     model: string;
     reasoningEffort: AutomationReasoningEffort;
+    sessionMode: "new" | "fixed" | "task";
+    sessionId: string | null;
   }) => {
     const stored = projectAutomations[selectedProjectId];
     if (
@@ -1016,6 +1042,12 @@ export function App() {
           enabled: options.enabledByUser,
           intervalMinutes: options.intervalMinutes,
           automationModel: options.model || null,
+          ...(sessionBindingSupportedRef.current === true
+            ? {
+                sessionMode: options.sessionMode,
+                sessionId: options.sessionMode === "fixed" ? options.sessionId : null,
+              }
+            : {}),
         });
         writeProjectAutomation(selectedProjectId, {
           automationId: heartbeatTaskIdFor(selectedProjectId),
@@ -1028,6 +1060,8 @@ export function App() {
             : options.intervalMinutes,
           model: options.model,
           reasoningEffort: options.reasoningEffort,
+          sessionMode: result.sessionMode === "fixed" ? "fixed" : result.sessionMode === "task" ? "task" : "new",
+          sessionId: result.sessionId ?? null,
         });
       } catch (error) {
         writeProjectAutomation(selectedProjectId, previousRecord);
@@ -1043,7 +1077,12 @@ export function App() {
     setAutomationPending(true);
     setAutomationError(null);
     try {
-      const response = await sendAutomationRequest("apply-policy", options, stored?.automationId);
+      // The embedded (Codex-host) automation API knows nothing about the
+      // conversation binding: send it the legacy shape only.
+      const { sessionMode: _sessionMode, sessionId: _sessionId, ...legacyOptions } = options;
+      void _sessionMode;
+      void _sessionId;
+      const response = await sendAutomationRequest("apply-policy", legacyOptions, stored?.automationId);
       const item = isAutomationHostItem(response.item) ? response.item : undefined;
       writeProjectAutomation(selectedProjectId, {
         automationId: item?.id,
@@ -1055,6 +1094,8 @@ export function App() {
         intervalMinutes: options.intervalMinutes,
         model: options.model,
         reasoningEffort: options.reasoningEffort,
+        sessionMode: options.sessionMode,
+        sessionId: options.sessionId,
       });
     } catch (error) {
       writeProjectAutomation(selectedProjectId, previousRecord);
@@ -2378,10 +2419,12 @@ export function App() {
             {selectedProjectId && (
               <ProjectAutomationMenu
                 automation={selectedProjectAutomation}
+                projectId={selectedProjectId}
                 models={claimModelChoices}
                 modelLabels={claimModelLabels}
                 pending={automationPending}
                 error={automationError}
+                sessionBindingSupported={sessionBindingSupported === true}
                 unavailableReason={automationProjectContext.unavailableReason}
                 onOpen={() => {
                   void reconcileProjectAutomation();
