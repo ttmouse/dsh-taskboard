@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ImgHTMLAttributes, type KeyboardEvent, type MouseEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -7,9 +7,13 @@ import { isDshThreadId } from "../threads";
 import {
   ApiError,
   attachmentDownloadUrl,
+  attachmentUrlId,
   createComment,
   deleteAttachment,
   deleteComment,
+  dispatchIssue,
+  fetchDispatchState,
+  isAttachmentUrl,
   listAttachments,
   listComments,
   listTaskActivities,
@@ -334,6 +338,95 @@ function ActivityChangeIcon({ field, before, after }: {
   return <LinearIcon name="write" />;
 }
 
+const IMAGE_RETRY_DELAYS_MS = [600, 1800, 4000, 8000] as const;
+
+// Rendered markdown images retry transient failures (rebuilt bundles swap
+// asset URLs, brief server restarts) with escalating backoff before giving
+// up with an explicit placeholder — a broken <img> never recovers on its
+// own. Each retry re-mounts the <img> with the SAME clean URL (remounting
+// re-issues the request; the response is `no-store`, so no cache busting is
+// needed and the content route ignores query parameters anyway). When the
+// retries run out, a fetch probe reports the server's actual status in the
+// placeholder so a stuck image reports its real reason instead of a bare
+// "failed".
+function MarkdownImage({ alt, src, ...props }: ImgHTMLAttributes<HTMLImageElement>) {
+  const { text } = useTaskboardI18n();
+  const [attempt, setAttempt] = useState(0);
+  const [failed, setFailed] = useState(!src);
+  const [reason, setReason] = useState("");
+  const retryTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    setAttempt(0);
+    setFailed(!src);
+    setReason("");
+    return () => {
+      if (retryTimerRef.current !== null) {
+        window.clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
+      }
+    };
+  }, [src]);
+
+  // Prose examples like ![…](api/attachments/…) name an id no upload could
+  // have produced. They can never load, so show the literal markup they are
+  // instead of a doomed request with a retry button that never succeeds.
+  if (src && isAttachmentUrl(src) && attachmentUrlId(src) === null) {
+    return <code className="markdown-image-invalid">![{alt ?? ""}]({src})</code>;
+  }
+
+  // The <img> error event carries no status, so once the retries run out a
+  // one-shot fetch probe recovers the real failure reason for the placeholder.
+  async function diagnose() {
+    if (!src) return;
+    try {
+      const probe = await fetch(src, { cache: "no-store" });
+      setReason(`(HTTP ${probe.status})`);
+    } catch {
+      setReason(text("（网络未连通）", "(network unreachable)"));
+    }
+  }
+
+  function handleError() {
+    if (attempt >= IMAGE_RETRY_DELAYS_MS.length) {
+      setFailed(true);
+      void diagnose();
+      return;
+    }
+    const delay = IMAGE_RETRY_DELAYS_MS[attempt];
+    retryTimerRef.current = window.setTimeout(() => {
+      retryTimerRef.current = null;
+      setAttempt((current) => current + 1);
+    }, delay);
+  }
+
+  function retryNow() {
+    if (retryTimerRef.current !== null) {
+      window.clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
+    setAttempt(0);
+    setFailed(false);
+    setReason("");
+  }
+
+  if (failed || !src) {
+    return (
+      <span className="markdown-image-broken">
+        <LinearIcon name="alert" />
+        <span>{text("图片加载失败", "Image failed to load")}{reason}</span>
+        <button type="button" onClick={retryNow}>
+          {text("重试", "Retry")}
+        </button>
+      </span>
+    );
+  }
+
+  // Remounting the element re-issues the request for the same clean URL;
+  // mutating state alone would keep the identical src and never reload.
+  return <img {...props} key={attempt} src={src} alt={alt ?? ""} onError={handleError} />;
+}
+
 function DescriptionDocument({ value }: { value: string }) {
   return (
     <div className="issue-description-document">
@@ -342,6 +435,7 @@ function DescriptionDocument({ value }: { value: string }) {
         urlTransform={(url) => defaultUrlTransform(resolvePersistedAttachmentUrl(url))}
         components={{
           a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer" />,
+          img: ({ node: _node, ...props }) => <MarkdownImage {...props} />,
         }}
       >
         {value}
@@ -400,6 +494,8 @@ export function TaskDetail({
   // width. The main panel stays wide and keeps the aside open.
   const narrowContainer = useMemo(() => window.innerWidth <= 720, []);
   const [propertiesCollapsed, setPropertiesCollapsed] = useState(narrowContainer);
+  // 原标题滚出视口后，顶部吸附条展示当前议题的标识与标题（滚动中也不丢失上下文）。
+  const [titleScrolledOut, setTitleScrolledOut] = useState(false);
   const [currentTask, setCurrentTask] = useState(task);
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description);
@@ -426,6 +522,8 @@ export function TaskDetail({
   );
   const [pendingCommentFiles, setPendingCommentFiles] = useState<File[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const [dispatchBusy, setDispatchBusy] = useState(false);
+  const [dispatchStarting, setDispatchStarting] = useState(false);
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingSegments, setEditingSegments] = useState<InlineMediaSegment[]>(
@@ -502,6 +600,19 @@ export function TaskDetail({
     return () => controller.abort();
   }, [commentsRevision, task.activityKey, task.id]);
 
+  // 轮次租约的界面投影：一轮的开始（ack）与结束（总结）都会推进
+  // commentsRevision，租约状态随之刷新，「干一轮」按钮据此显示进行中（ADR-0001）。
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchDispatchState(task.id, controller.signal).then(
+      (busy) => {
+        if (!controller.signal.aborted) setDispatchBusy(busy);
+      },
+      () => {},
+    );
+    return () => controller.abort();
+  }, [task.id, commentsRevision]);
+
   /**
    * Landing scroll: the timeline is append-only, so on open the newest work
    * sits at the bottom. If the latest entry is the agent's, the human hasn't
@@ -520,6 +631,20 @@ export function TaskDetail({
       if (scroller) scroller.scrollTop = scroller.scrollHeight;
     });
   }, [commentsLoading, comments, task.id]);
+
+  // 顶部吸附条的显隐跟随真实标题是否滚出视口。
+  useEffect(() => {
+    const scroller = detailScrollRef.current;
+    if (!scroller) return;
+    const update = () => {
+      const titleEl = titleRef.current;
+      if (!titleEl) return;
+      setTitleScrolledOut(titleEl.getBoundingClientRect().top < scroller.getBoundingClientRect().top);
+    };
+    update();
+    scroller.addEventListener("scroll", update, { passive: true });
+    return () => scroller.removeEventListener("scroll", update);
+  }, [task.id]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -739,6 +864,29 @@ export function TaskDetail({
       setCommentsError(messageFor(error));
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  /**
+   * 干一轮：零输入、全状态的显式派发（ADR-0001）。同一事件管线承接待人工
+   * 状态下的评论派发，按钮只是它的不打字版；忙碌（409）视为已在进行中。
+   */
+  async function runARound() {
+    if (dispatchBusy || dispatchStarting || submitting) return;
+    setDispatchStarting(true);
+    setCommentsError(null);
+    try {
+      await dispatchIssue(task.id);
+      setDispatchBusy(true);
+      onAnnounce(text("已派发一轮，Agent 开始推进这个议题。", "Dispatched. The agent is on this issue."));
+    } catch (error) {
+      if (error instanceof ApiError && error.code === "DISPATCH_BUSY") {
+        setDispatchBusy(true);
+      } else {
+        setCommentsError(messageFor(error));
+      }
+    } finally {
+      setDispatchStarting(false);
     }
   }
 
@@ -990,6 +1138,15 @@ export function TaskDetail({
       aria-label={text(`${task.identifier} 议题详情`, `${task.identifier} issue details`)}
     >
       <div className="issue-detail-scroll" ref={detailScrollRef}>
+        <div
+          className={`issue-sticky-title${titleScrolledOut ? " visible" : ""}`}
+          aria-hidden={!titleScrolledOut}
+        >
+          <div className="issue-sticky-title-inner">
+            <span className="issue-sticky-title-id">{task.identifier}</span>
+            <span className="issue-sticky-title-text">{title || task.title}</span>
+          </div>
+        </div>
         <div className={`issue-detail-layout${propertiesCollapsed ? " properties-collapsed" : ""}`}>
           {narrowContainer && (
             <div className="issue-properties-toggle-row">
@@ -1559,6 +1716,22 @@ export function TaskDetail({
                     />
                   </div>
                   <div>
+                    <button
+                      className="button"
+                      type="button"
+                      disabled={dispatchBusy || dispatchStarting || submitting}
+                      title={text(
+                        "不打字，直接让 Agent 推进这个议题（全状态可用）",
+                        "Dispatch the agent on this issue without typing",
+                      )}
+                      onClick={() => void runARound()}
+                    >
+                      {dispatchBusy
+                        ? text("Agent 进行中…", "Agent working…")
+                        : dispatchStarting
+                          ? text("派发中…", "Dispatching…")
+                          : text("干一轮", "Run a round")}
+                    </button>
                     <kbd>⌘ Enter</kbd>
                     <button
                       className="button primary"

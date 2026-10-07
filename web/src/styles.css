@@ -2876,6 +2876,54 @@ kbd {
   scrollbar-width: thin;
 }
 
+/* 滚动时吸附在顶部的议题标识+标题条 */
+.issue-sticky-title {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-4px);
+  transition: opacity 120ms ease, transform 120ms ease;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid transparent;
+}
+
+.issue-sticky-title.visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+  border-bottom-color: var(--border-hairline);
+}
+
+.issue-sticky-title-inner {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: min(1237px, 100%);
+  margin: 0 auto;
+  padding: 10px 40px;
+}
+
+.issue-sticky-title-id {
+  flex: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.issue-sticky-title-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+}
+
 .issue-detail-layout {
   display: grid;
   grid-template-columns: minmax(0, 781px) 320px;
@@ -6911,6 +6959,70 @@ kbd {
   opacity: 0.55;
 }
 
+.inline-media-broken {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: 36px;
+  padding: 6px 12px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.inline-media-broken svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+  flex-shrink: 0;
+}
+
+.inline-media-broken span {
+  flex-shrink: 0;
+}
+
+.inline-media-broken code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.markdown-image-broken {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  vertical-align: middle;
+}
+
+.markdown-image-broken svg {
+  width: 13px;
+  height: 13px;
+  fill: currentColor;
+  flex-shrink: 0;
+}
+
+.markdown-image-broken button {
+  padding: 1px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.markdown-image-broken button:hover {
+  background: var(--surface-hover);
+}
+
 .codex-link-row {
   min-width: 0;
   height: 34px;
@@ -9297,6 +9409,10 @@ kbd {
 }
 
 @media (max-width: 620px) {
+  .issue-sticky-title-inner {
+    padding: 8px 14px;
+  }
+
   .workflow-board {
     display: block;
   }
@@ -12668,6 +12784,38 @@ kbd {
 .app-shell.compact .board-toolbar { display: none; }
 .app-shell.compact .header-actions .toolbar-tools { gap: 6px; }
 .app-shell.compact .header-actions .search-field input { width: 120px; }
+
+/* Compact chrome: the kanban board must fit the sidebar — visible columns
+   share the panel width instead of keeping the wide board's 300px column
+   floor / 948px board min-width, and horizontal scrolling is disabled. */
+.app-shell.compact .board-scroll {
+  overflow-x: hidden;
+  max-width: none;
+  padding-right: 12px;
+  scroll-snap-type: none;
+}
+.app-shell.compact .board {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+}
+.app-shell.compact .board-column {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: none;
+}
+.app-shell.compact .loading-board {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  width: 100%;
+  min-width: 0;
+  overflow-x: hidden;
+  scroll-snap-type: none;
+}
+.app-shell.compact .loading-column {
+  flex: none;
+  scroll-snap-align: none;
+}
 
 /* Narrow detail (right-sidebar): properties aside collapses to a toggle. */
 .issue-detail-layout.properties-collapsed {
