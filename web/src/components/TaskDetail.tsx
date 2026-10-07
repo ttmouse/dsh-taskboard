@@ -1143,7 +1143,6 @@ export function TaskDetail({
           aria-hidden={!titleScrolledOut}
         >
           <div className="issue-sticky-title-inner">
-            <span className="issue-sticky-title-id">{task.identifier}</span>
             <span className="issue-sticky-title-text">{title || task.title}</span>
           </div>
         </div>

@@ -2894,7 +2894,7 @@ kbd {
   opacity: 1;
   pointer-events: auto;
   transform: translateY(0);
-  border-bottom-color: var(--border-hairline);
+  border-bottom-color: var(--border);
 }
 
 .issue-sticky-title-inner {
@@ -2904,14 +2904,6 @@ kbd {
   width: min(1237px, 100%);
   margin: 0 auto;
   padding: 10px 40px;
-}
-
-.issue-sticky-title-id {
-  flex: none;
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
 }
 
 .issue-sticky-title-text {
