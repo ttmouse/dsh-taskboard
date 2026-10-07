@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ImgHTMLAttributes, type KeyboardEvent, type MouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ImgHTMLAttributes, type KeyboardEvent, type MouseEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -496,6 +496,8 @@ export function TaskDetail({
   const [propertiesCollapsed, setPropertiesCollapsed] = useState(narrowContainer);
   // 原标题滚出视口后，顶部吸附条展示当前议题的标识与标题（滚动中也不丢失上下文）。
   const [titleScrolledOut, setTitleScrolledOut] = useState(false);
+  // 离开底部较远时显示「回到底部」悬浮按钮（聊天应用习惯）。
+  const [farFromBottom, setFarFromBottom] = useState(false);
   const [currentTask, setCurrentTask] = useState(task);
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description);
@@ -632,19 +634,24 @@ export function TaskDetail({
     });
   }, [commentsLoading, comments, task.id]);
 
-  // 顶部吸附条的显隐跟随真实标题是否滚出视口。
+  // 顶部吸附条的显隐跟随真实标题是否滚出视口；回到底部按钮跟随是否离开底部。
+  const updateScrollAffordances = useCallback(() => {
+    const scroller = detailScrollRef.current;
+    if (!scroller) return;
+    const titleEl = titleRef.current;
+    if (titleEl) {
+      setTitleScrolledOut(titleEl.getBoundingClientRect().top < scroller.getBoundingClientRect().top);
+    }
+    const distanceToBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
+    setFarFromBottom(distanceToBottom > 160);
+  }, []);
   useEffect(() => {
     const scroller = detailScrollRef.current;
     if (!scroller) return;
-    const update = () => {
-      const titleEl = titleRef.current;
-      if (!titleEl) return;
-      setTitleScrolledOut(titleEl.getBoundingClientRect().top < scroller.getBoundingClientRect().top);
-    };
-    update();
-    scroller.addEventListener("scroll", update, { passive: true });
-    return () => scroller.removeEventListener("scroll", update);
-  }, [task.id]);
+    updateScrollAffordances();
+    scroller.addEventListener("scroll", updateScrollAffordances, { passive: true });
+    return () => scroller.removeEventListener("scroll", updateScrollAffordances);
+  }, [task.id, updateScrollAffordances]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -2044,6 +2051,19 @@ export function TaskDetail({
             </div>
           </div>
         </div>
+      )}
+      {farFromBottom && (
+        <button
+          type="button"
+          className="issue-scroll-bottom"
+          aria-label={text("滚动到底部", "Scroll to bottom")}
+          onClick={() => {
+            const scroller = detailScrollRef.current;
+            if (scroller) scroller.scrollTo({ top: scroller.scrollHeight, behavior: "smooth" });
+          }}
+        >
+          <LinearIcon name="chevronDown" />
+        </button>
       )}
     </section>
   );
