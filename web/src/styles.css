@@ -2899,8 +2899,7 @@ kbd {
 
 .issue-sticky-title-inner {
   display: flex;
-  align-items: baseline;
-  gap: 10px;
+  align-items: flex-start;
   width: min(1237px, 100%);
   margin: 0 auto;
   padding: 10px 40px;
@@ -2908,12 +2907,14 @@ kbd {
 
 .issue-sticky-title-text {
   min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   color: var(--text-primary);
   font-size: 14px;
   font-weight: 600;
+  line-height: 1.4;
 }
 
 .issue-detail-layout {
