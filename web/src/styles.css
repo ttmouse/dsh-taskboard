@@ -9347,7 +9347,7 @@ kbd {
     display: flex;
     flex-direction: column;
     gap: 26px;
-    padding: 30px 20px 64px;
+    padding: 30px 20px 104px;
   }
 
   .issue-detail-main,
