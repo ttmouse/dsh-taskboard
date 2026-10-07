@@ -2877,6 +2877,10 @@ kbd {
 }
 
 /* 滚动时吸附在顶部的议题标识+标题条 */
+.issue-sticky-title.visible {
+  cursor: pointer;
+}
+
 .issue-sticky-title {
   position: sticky;
   top: 0;

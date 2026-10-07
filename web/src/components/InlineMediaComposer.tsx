@@ -8,7 +8,7 @@ import {
   type KeyboardEventHandler,
 } from "react";
 import type { Attachment } from "../types";
-import { attachmentContentUrl } from "../api";
+import { attachmentContentUrl, attachmentUrlId, isAttachmentUrl, resolvePersistedAttachmentUrl } from "../api";
 import { useTaskboardI18n } from "../i18n";
 import { clipboardImages, fileKey, MAX_ATTACHMENT_SIZE } from "./PendingAttachments";
 import { LinearIcon } from "./LinearIcon";
@@ -26,7 +26,15 @@ interface InlineImageSegment {
   file: File;
 }
 
-export type InlineMediaSegment = InlineTextSegment | InlineImageSegment;
+interface InlineExistingImageSegment {
+  id: string;
+  type: "existing-image";
+  raw: string;
+  alt: string;
+  src: string;
+}
+
+export type InlineMediaSegment = InlineTextSegment | InlineImageSegment | InlineExistingImageSegment;
 export type PendingInlineImage = InlineImageSegment;
 type InlineMediaError = string | readonly [string, string];
 
@@ -67,8 +75,42 @@ function imageSegment(file: File): InlineImageSegment {
   };
 }
 
+const INLINE_IMAGE_PATTERN = /!\[([^\]]*)\]\((?:<([^>]*)>|([^)\s]+))(?:\s+"[^"]*")?\)/g;
+
+function parseInlineImage(raw: string): { alt: string; src: string } | null {
+  const match = raw.match(/^!\[([^\]]*)\]\((?:<([^>]*)>|([^)\s]+))(?:\s+"[^"]*")?\)$/);
+  if (!match) return null;
+  return { alt: match[1], src: match[2] ?? match[3] ?? "" };
+}
+
+function existingImageSegment(raw: string): InlineExistingImageSegment {
+  const parsed = parseInlineImage(raw);
+  return {
+    id: segmentId("media"),
+    type: "existing-image",
+    raw,
+    alt: parsed?.alt ?? "",
+    src: parsed?.src ?? "",
+  };
+}
+
+function splitInlineMediaSegments(value: string): InlineMediaSegment[] {
+  const segments: InlineMediaSegment[] = [];
+  let cursor = 0;
+  for (const match of value.matchAll(INLINE_IMAGE_PATTERN)) {
+    const start = match.index;
+    if (start === undefined || start < cursor) continue;
+    if (start > cursor) segments.push(textSegment(value.slice(cursor, start)));
+    segments.push(existingImageSegment(match[0]));
+    cursor = start + match[0].length;
+  }
+  const rest = value.slice(cursor);
+  if (rest.length > 0 || segments.length === 0) segments.push(textSegment(rest));
+  return segments;
+}
+
 export function createInlineMediaSegments(text = ""): InlineMediaSegment[] {
-  return [textSegment(text)];
+  return normalizeSegments(splitInlineMediaSegments(text));
 }
 
 export function inlineMediaImages(segments: InlineMediaSegment[]): PendingInlineImage[] {
@@ -80,9 +122,14 @@ export function inlineMediaText(segments: InlineMediaSegment[]): string {
 }
 
 export function serializeInlineMedia(segments: InlineMediaSegment[]): string {
-  return segments.map((segment) => (
-    segment.type === "text" ? segment.text : `\n\n${segment.token}\n\n`
-  )).join("");
+  return segments.map((segment) => {
+    if (segment.type === "text") return segment.text;
+    // Persisted markdown images round-trip verbatim so re-saving an edited
+    // description or comment keeps them byte-identical (no re-upload, no
+    // spurious whitespace-only updates).
+    if (segment.type === "existing-image") return segment.raw;
+    return `\n\n${segment.token}\n\n`;
+  }).join("");
 }
 
 export function resolveInlineMediaMarkdown(
@@ -151,6 +198,48 @@ function PendingImageBlock({
         type="button"
         disabled={disabled}
         aria-label={text(`移除 ${segment.file.name}`, `Remove ${segment.file.name}`)}
+        onClick={onRemove}
+      >
+        <LinearIcon name="close" />
+      </button>
+    </figure>
+  );
+}
+
+function ExistingImageBlock({
+  segment,
+  disabled,
+  onRemove,
+}: {
+  segment: InlineExistingImageSegment;
+  disabled: boolean;
+  onRemove: () => void;
+}) {
+  const [failed, setFailed] = useState(false);
+  const { text } = useTaskboardI18n();
+  // Prose placeholders (attachment-shaped but no real upload id) never load;
+  // go straight to the unavailable state without requesting them.
+  const impossible = segment.src !== "" && isAttachmentUrl(segment.src) && attachmentUrlId(segment.src) === null;
+  const src = segment.src && !impossible ? resolvePersistedAttachmentUrl(segment.src) : "";
+
+  return (
+    <figure className="inline-media-image">
+      {src && !failed
+        ? <img src={src} alt={segment.alt} onError={() => setFailed(true)} />
+        : (
+          <div className="inline-media-broken">
+            <LinearIcon name="alert" />
+            <span>{text("图片无法预览", "Image preview unavailable")}</span>
+            <code>{segment.alt || segment.src}</code>
+          </div>
+        )}
+      <button
+        type="button"
+        disabled={disabled}
+        aria-label={text(
+          `移除 ${segment.alt || segment.src}`,
+          `Remove ${segment.alt || segment.src}`,
+        )}
         onClick={onRemove}
       >
         <LinearIcon name="close" />
@@ -291,6 +380,13 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
               }}
               onPaste={(event) => pasteImages(event, segment)}
               onKeyDown={onKeyDown}
+            />
+          ) : segment.type === "existing-image" ? (
+            <ExistingImageBlock
+              key={segment.id}
+              segment={segment}
+              disabled={disabled}
+              onRemove={() => removeImage(segment.id)}
             />
           ) : (
             <PendingImageBlock

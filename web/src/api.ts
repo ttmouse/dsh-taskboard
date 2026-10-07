@@ -407,8 +407,9 @@ export async function updateRoutine(
   });
 }
 
-/** 测试执行：立即手动触发一次该例程（不等待完成，运行记录稍后出现在列表中）。 */
-export async function runRoutine(name: string): Promise<{ started: string }> {
+/** 测试执行：立即手动触发一次该例程（不等待完成，运行记录稍后出现在列表中）。
+ * started 为 null 表示本轮被门控拦下（如认领例程无待认领议题），没有真正起跑。 */
+export async function runRoutine(name: string): Promise<{ started: string | null; mode?: string }> {
   return request(`/api/routines/${encodeURIComponent(name)}/run`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -722,6 +723,25 @@ export async function updateComment(comment: Comment, body: string, threadId?: s
   return data.comment;
 }
 
+/**
+ * 干一轮：零输入、全状态的显式派发（ADR-0001）。忙碌时服务端抛
+ * `DISPATCH_BUSY` 的 ApiError（409），调用方据它把按钮切到「Agent 进行中」。
+ */
+export async function dispatchIssue(taskId: string): Promise<void> {
+  await request<{ task: Task; dispatch: { started: boolean } }>(
+    `/api/tasks/${encodeURIComponent(taskId)}/dispatch`,
+    { method: "POST" },
+  );
+}
+
+export async function fetchDispatchState(taskId: string, signal?: AbortSignal): Promise<boolean> {
+  const data = await request<{ dispatch: { busy: boolean } }>(
+    `/api/tasks/${encodeURIComponent(taskId)}/dispatch`,
+    { signal },
+  );
+  return data.dispatch.busy;
+}
+
 export async function deleteComment(comment: Comment, threadId?: string): Promise<void> {
   await request(`/api/comments/${encodeURIComponent(comment.id)}`, {
     method: "DELETE",
@@ -799,4 +819,35 @@ export function resolvePersistedAttachmentUrl(value: string): string {
 
 export function markdownIncludesAttachment(markdown: string, attachment: Attachment): boolean {
   return markdown.includes(`api/attachments/${encodeURIComponent(attachment.id)}/content`);
+}
+
+const ATTACHMENT_PATH_PATTERN = /\/api\/attachments\/([^/?#]+)(?:\/content)?$/;
+const ATTACHMENT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** True when the value points into the attachment content namespace. */
+export function isAttachmentUrl(value: string): boolean {
+  try {
+    return ATTACHMENT_PATH_PATTERN.test(new URL(value, document.baseURI).pathname);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The attachment id a persisted attachment URL names, or null when the id is
+ * one no upload could have produced — prose placeholders like `…` or `<id>`
+ * written as markdown examples. Such URLs can never load, so callers render
+ * them as the literal markup they are instead of requesting them.
+ */
+export function attachmentUrlId(value: string): string | null {
+  let pathname: string;
+  try {
+    pathname = new URL(value, document.baseURI).pathname;
+  } catch {
+    return null;
+  }
+  const match = pathname.match(ATTACHMENT_PATH_PATTERN);
+  if (!match) return null;
+  const id = decodeURIComponent(match[1]);
+  return ATTACHMENT_ID_PATTERN.test(id) ? id : null;
 }

@@ -447,6 +447,17 @@ const DICTIONARIES = {
     'sidepanel.guide.description': '查看当前项目的任务列表',
     'sidepanel.empty': '当前会话不属于任何看板项目。',
     'sidepanel.resolving': '正在解析当前项目…',
+    'turncard.open': '打开',
+    'turncard.openAria': '打开看板任务 {title}',
+    'turncard.loading': '正在读取任务…',
+    'turncard.missing': '任务不存在或已删除',
+    'status.backlog': '待办',
+    'status.todo': '待认领',
+    'status.in_progress': '推进中',
+    'status.in_review': '等你验收',
+    'status.blocked': '卡住等你',
+    'status.done': '已完成',
+    'status.canceled': '已取消',
   },
   en: {
     'entry.label': 'Taskboard',
@@ -463,6 +474,17 @@ const DICTIONARIES = {
     'sidepanel.guide.description': 'Browse the current project\'s task list',
     'sidepanel.empty': 'This session does not belong to any board project.',
     'sidepanel.resolving': 'Resolving the current project…',
+    'turncard.open': 'Open',
+    'turncard.openAria': 'Open board task {title}',
+    'turncard.loading': 'Loading task…',
+    'turncard.missing': 'Task missing or deleted',
+    'status.backlog': 'Backlog',
+    'status.todo': 'To claim',
+    'status.in_progress': 'In progress',
+    'status.in_review': 'Awaiting review',
+    'status.blocked': 'Blocked',
+    'status.done': 'Done',
+    'status.canceled': 'Canceled',
   },
 } as const
 
@@ -656,6 +678,20 @@ function mountOpenThreadBridge(
   return () => window.removeEventListener('message', onMessage)
 }
 
+/**
+ * Minimal structural face of the injected conversation event registry (the
+ * fields this plugin uses of the official `uiConversation` service, the same
+ * registry the official schedule package uses for its `schedule_create`
+ * transcript card). Definitions accumulate per-turn state from session-log
+ * events; `buildLocationData` publishes that state onto the turn's data map,
+ * where turn-tail list entries read it.
+ */
+interface UiConversationService {
+  events: {
+    register(definition: unknown): () => void
+  }
+}
+
 /** Minimal structural face of the shell's UI navigation service ("uiWorkspace"). */
 interface UiWorkspaceService {
   /**
@@ -743,6 +779,16 @@ function TasksGuideIcon({ size }: { size?: number }): ReactElement {
   )
 }
 
+/** Structural face of the pane-tab seat's injected tab information hook. */
+interface TabInfo {
+  tab?: {
+    navigation?: {
+      params?: Record<string, unknown>
+      revision?: number
+    }
+  }
+}
+
 /**
  * Right-sidebar tab body: the current session's project task list, rendered
  * by the board SPA's own List view (`view=list` + `chrome=min`). The compact
@@ -751,16 +797,32 @@ function TasksGuideIcon({ size }: { size?: number }): ReactElement {
  * `project` pins the view to the resolved session's project so the sidebar
  * can never drift away from it. A session outside every project shows a
  * hint instead of an empty board.
- * @param props - the session id the tab body was minted for.
+ *
+ * Deep link: when the tab was navigated with a `taskId` param (a turn-tail
+ * card click), the iframe mounts with the app's `issue=` param so the task's
+ * detail opens over the list; the iframe is keyed by that target, so a later
+ * navigation to another task remounts it with the new `issue=` value instead
+ * of needing an app-side message protocol.
+ * @param props - the session id the tab body was minted for, the seat's tab
+ *   information hook, and the shared mount plumbing.
  */
-function SideTasksBody({ sessionId, sessions, onFrame, t, locale }: {
+function SideTasksBody({ sessionId, sessions, onFrame, t, locale, useTabInfo }: {
   sessionId: string
   sessions: SessionsService
   onFrame: (frame: FrameRef) => () => void
   t: (key: string) => string
   locale: LocaleService
+  useTabInfo?: () => TabInfo
 }): JSX.Element {
   const [project, setProject] = useState<BoardProject | null | 'loading'>('loading')
+
+  // The seat injects this hook (same contract the official schedule tab uses);
+  // optional so a host without it degrades to the plain project list.
+  const navigation = useTabInfo?.().tab?.navigation
+  const navTaskId = typeof navigation?.params?.taskId === 'string' && navigation.params.taskId !== ''
+    ? navigation.params.taskId
+    : null
+  const deepTask = useTaskCached(navTaskId)
 
   // Register this iframe with the parent bridges (theme sync lives in
   // PanelFrame; the open-thread bridge discovers side frames here).
@@ -782,18 +844,22 @@ function SideTasksBody({ sessionId, sessions, onFrame, t, locale }: {
     }
   }, [sessionId, sessions])
 
-  if (project === 'loading') {
+  if (project === 'loading' || (navTaskId !== null && deepTask === undefined)) {
     return <p style={SIDE_HINT_STYLE}>{t('sidepanel.resolving')}</p>
   }
   if (project === null) {
     return <p style={SIDE_HINT_STYLE}>{t('sidepanel.empty')}</p>
   }
+  // A resolved deep-link task adds the app's issue param (uppercase identifier,
+  // as the app's route reader expects); a failed lookup falls back to the list.
+  const issueParam = deepTask ? deepTask.identifier : null
   return (
     <div style={SIDE_FRAME_STYLE}>
       <PanelFrame
+        key={`${issueParam ?? ''}`}
         frameRef={frame}
         locale={locale}
-        url={`/dsh-taskboard/?project=${encodeURIComponent(project.id)}&view=list&chrome=min`}
+        url={`/dsh-taskboard/?project=${encodeURIComponent(project.id)}&view=list&chrome=min${issueParam === null ? '' : `&issue=${encodeURIComponent(issueParam)}`}`}
         title={project.name}
       />
     </div>
@@ -805,7 +871,296 @@ function SideTasksBody({ sessionId, sessions, onFrame, t, locale }: {
  * execution/open-thread bridges, locale dictionaries, and the settings card.
  * @param ctx - client root context with sessions/workspaces/locale/slots/layout.
  */
-export const inject = ['sessions', 'workspaces', 'locale', 'slots', 'layout', 'sidebarRightTabs', 'sidebarRight', 'uiWorkspace']
+/**
+ * Conversation turn cards — the taskboard's copy of the official automation
+ * transcript card (`schedule_create` renders a card beneath the closing text
+ * of the turn that called it; ours renders one per board task the turn's
+ * command-running tools addressed through the board HTTP API). The same two
+ * official seats carry it:
+ *
+ *   - `uiConversation.events` accumulates per-turn state: every `tool/call`
+ *     whose command text references `/api/tasks/<uuid>` (the only integration
+ *     path — agents drive the board through curl against the local API)
+ *     contributes that task id. No session-log format change: the state is
+ *     derived from durable events and published onto the turn's data map.
+ *   - `conversation.chat.turnTail` renders the cards after the turn's closing
+ *     text, staying visible when the tool-call group is collapsed. Card copy
+ *     (identifier/title/status) is fetched live from the board API, so the
+ *     card always shows the task's current state.
+ *
+ * Clicking opens the right sidebar's task tab navigated to that task
+ * (`sidebarRight.openTab` params), mirroring the official card's Open button.
+ */
+
+/** Session-log event face shared by the definition and its helpers. */
+interface TurnEvent {
+  type: string
+  data?: Record<string, unknown>
+}
+
+/** Turn-scope data this definition publishes for one turn. */
+interface TaskboardTurnState {
+  /** The turn number the state accumulated under (stability for location reuse). */
+  turn: unknown
+  /** Board task uuids first addressed by this turn's commands, in seen order. */
+  refs: string[]
+}
+
+/** Turn-data key this definition publishes under (read by the turn-tail card). */
+const TASKBOARD_TURN_KEY = 'taskboard-issues'
+
+/** Cards per turn cap — a turn that touched many tasks stays readable. */
+const MAX_TURN_TASK_REFS = 6
+
+/** Board task reference inside command text: any `/api/tasks/<uuid>` URL form. */
+const BOARD_TASK_URL_RE = /\/api\/tasks\/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/g
+
+/** Command-running tool names worth scanning for board references. */
+function isCommandTool(name: string): boolean {
+  return name === 'bash' || name === 'pwsh' || name === 'exec_command' || name === 'run_code' || name.startsWith('terminal_')
+}
+
+/** Flatten one tool call's arguments to scannable text (arguments is JSON text). */
+function toolCallText(data: Record<string, unknown> | undefined): string {
+  const raw = data?.arguments
+  if (typeof raw === 'string') {
+    try {
+      return flattenToolArgs(JSON.parse(raw) as unknown)
+    } catch {
+      return raw
+    }
+  }
+  return flattenToolArgs(raw)
+}
+
+function flattenToolArgs(value: unknown): string {
+  if (value === null || value === undefined) return ''
+  if (typeof value === 'string') return value
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return String(value)
+  }
+}
+
+/** Merge newly seen task uuids into the turn's ref list (dedupe, cap, stable order). */
+function appendTaskRefs(existing: string[], text: string): string[] {
+  if (text === '' || existing.length >= MAX_TURN_TASK_REFS) return existing
+  const found: string[] = []
+  BOARD_TASK_URL_RE.lastIndex = 0
+  for (let match = BOARD_TASK_URL_RE.exec(text); match !== null; match = BOARD_TASK_URL_RE.exec(text)) {
+    const id = match[1].toLowerCase()
+    if (!existing.includes(id) && !found.includes(id)) found.push(id)
+    if (existing.length + found.length >= MAX_TURN_TASK_REFS) break
+  }
+  return found.length === 0 ? existing : [...existing, ...found]
+}
+
+/**
+ * The turn accumulator — same contract shape as the official schedule one:
+ * `turn/start` opens the state, `tool/call` updates it, and the state lands on
+ * the turn's data map through `buildLocationData` for the turn tail to read.
+ */
+const taskboardTurnDefinition = {
+  kind: TASKBOARD_TURN_KEY,
+  match(event: TurnEvent): { id: string; role: 'start' | 'update' } | null {
+    if (event.type === 'turn/start' && event.data?.turn !== undefined) return { id: String(event.data.turn), role: 'start' }
+    if (event.type === 'tool/call' && event.data?.turn !== undefined) return { id: String(event.data.turn), role: 'update' }
+    return null
+  },
+  start(_context: unknown, match: { event: TurnEvent }): TaskboardTurnState {
+    return { turn: match.event.data?.turn, refs: [] }
+  },
+  update(context: { state: TaskboardTurnState }, match: { event: TurnEvent }): TaskboardTurnState {
+    if (match.event.type !== 'tool/call') return context.state
+    const name = typeof match.event.data?.name === 'string' ? match.event.data.name : ''
+    if (!isCommandTool(name)) return context.state
+    const refs = appendTaskRefs(context.state.refs, toolCallText(match.event.data))
+    return refs === context.state.refs ? context.state : { ...context.state, refs }
+  },
+  buildLocationData(context: { state?: TaskboardTurnState }, scope: string, previous: unknown): unknown {
+    if (scope !== 'turn' || context.state === undefined) return null
+    const previousLocation = previous as { kind?: string; turn?: unknown; key?: string; value?: { refs?: string[] } } | null
+    if (
+      previousLocation?.kind === 'turn'
+      && previousLocation.turn === context.state.turn
+      && previousLocation.key === TASKBOARD_TURN_KEY
+      && previousLocation.value?.refs === context.state.refs
+    ) return previous
+    return { kind: 'turn', turn: context.state.turn, key: TASKBOARD_TURN_KEY, value: { refs: context.state.refs } }
+  },
+}
+
+/** Structural read of the refs one turn published (absent/degraded → empty). */
+function readTurnTaskRefs(turn: unknown): string[] {
+  const data = (turn as { data?: Map<string, unknown> } | undefined)?.data
+  const value = data instanceof Map ? data.get(TASKBOARD_TURN_KEY) as { refs?: unknown } | undefined : undefined
+  const refs = value?.refs
+  return Array.isArray(refs) ? refs.filter((id): id is string => typeof id === 'string') : []
+}
+
+/** Board task face the card and the deep link need (from GET /api/tasks/<id>). */
+interface BoardTask {
+  id: string
+  identifier: string
+  title: string
+  status: string
+  projectId: string
+}
+
+/** Card/deep-link fetch cache: one entry per task uuid, short TTL. */
+const TASK_CACHE_TTL_MS = 30_000
+const taskCache = new Map<string, { at: number; task: BoardTask | null }>()
+
+function peekTaskCache(taskId: string): BoardTask | null | undefined {
+  const entry = taskCache.get(taskId)
+  if (entry === undefined) return undefined
+  if (Date.now() - entry.at > TASK_CACHE_TTL_MS) {
+    taskCache.delete(taskId)
+    return undefined
+  }
+  return entry.task
+}
+
+/** Fetch one task for card/deep-link use; null = missing or unreachable board. */
+async function fetchTaskCached(taskId: string): Promise<BoardTask | null> {
+  const cached = peekTaskCache(taskId)
+  if (cached !== undefined) return cached
+  try {
+    const response = await fetch(`${BOARD_API_PREFIX}/api/tasks/${encodeURIComponent(taskId)}`)
+    if (!response.ok) {
+      taskCache.set(taskId, { at: Date.now(), task: null })
+      return null
+    }
+    const body = await response.json() as { task?: Partial<BoardTask> }
+    const task = body.task
+    if (!task || typeof task.id !== 'string' || typeof task.identifier !== 'string' || typeof task.title !== 'string') {
+      taskCache.set(taskId, { at: Date.now(), task: null })
+      return null
+    }
+    const resolved: BoardTask = {
+      id: task.id,
+      identifier: task.identifier,
+      title: task.title,
+      status: typeof task.status === 'string' ? task.status : 'todo',
+      projectId: typeof task.projectId === 'string' ? task.projectId : '',
+    }
+    taskCache.set(taskId, { at: Date.now(), task: resolved })
+    return resolved
+  } catch {
+    // Unreachable board: no negative caching — the next mount retries.
+    return null
+  }
+}
+
+/** React hook: resolve a task uuid through the cache (undefined = loading). */
+function useTaskCached(taskId: string | null): BoardTask | null | undefined {
+  const [task, setTask] = useState<BoardTask | null | undefined>(() => (taskId === null ? undefined : peekTaskCache(taskId)))
+  useEffect(() => {
+    if (taskId === null) {
+      setTask(undefined)
+      return
+    }
+    let cancelled = false
+    const cached = peekTaskCache(taskId)
+    setTask(cached)
+    if (cached !== undefined) return
+    void fetchTaskCached(taskId).then((resolved) => {
+      if (!cancelled) setTask(resolved)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [taskId])
+  return task
+}
+
+/**
+ * Turn-tail card stylesheet, inlined and injected once — the same pattern the
+ * official packages use (`style[data-plugin-css]`), with the official
+ * schedule card's token values so both cards read identically.
+ */
+const TURN_CARD_CSS_TAG = '@ttmouse/dsh-taskboard/TurnTaskCard.module.css'
+const TURN_CARD_CSS = `
+.tbturn-list{flex-direction:column;gap:10px;margin:4px 0;display:flex}
+.tbturn-card{--card-fill:var(--dsw-static-neutral-50);--card-hover:var(--dsw-static-neutral-100);box-sizing:border-box;border:.5px solid var(--dsw-alias-border-l1);background:var(--card-fill);width:100%;color:var(--dsw-alias-label-primary);border-radius:18px;flex-direction:column;gap:6px;padding:8px 10px;transition:background-color .12s;display:flex;position:relative;overflow:hidden}
+body[data-ds-dark-theme] .tbturn-card{--card-fill:var(--dsw-static-neutral-850);--card-hover:var(--dsw-static-neutral-800)}
+.tbturn-card:has(.tbturn-cardOpen):hover{background:var(--card-hover)}
+.tbturn-cardOpen{z-index:1;border-radius:inherit;cursor:pointer;background:0 0;border:0;width:100%;padding:0;position:absolute;inset:0}
+.tbturn-cardOpen:focus-visible{box-shadow:inset 0 0 0 2px var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline:none}
+.tbturn-row{z-index:2;pointer-events:none;align-items:center;gap:10px;min-width:0;min-height:44px;display:flex;position:relative}
+.tbturn-leading{box-sizing:border-box;border:.5px solid var(--dsw-alias-border-l2);background:var(--card-fill);width:40px;height:40px;color:var(--dsw-alias-label-secondary);border-radius:10px;flex:none;place-items:center;display:grid}
+.tbturn-leading svg{flex:none}
+.tbturn-body{flex-direction:column;flex:auto;gap:2px;min-width:0;display:flex}
+.tbturn-title{text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:500;line-height:20px;overflow:hidden}
+.tbturn-sub{color:var(--dsw-alias-label-tertiary);text-overflow:ellipsis;white-space:nowrap;font-size:10px;line-height:16px;overflow:hidden}
+.tbturn-openButton{pointer-events:auto;flex:none;border-radius:14px;border:.5px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-base,var(--card-fill));color:var(--dsw-alias-label-primary);font-size:12px;line-height:20px;padding:3px 12px;cursor:pointer}
+.tbturn-openButton:hover{background:var(--dsw-alias-interactive-bg-hover)}
+`
+if (typeof document !== 'undefined' && document.querySelector(`style[data-plugin-css="${TURN_CARD_CSS_TAG}"]`) === null) {
+  const tag = document.createElement('style')
+  tag.dataset.plugin = '@ttmouse/dsh-taskboard'
+  tag.dataset.pluginCss = TURN_CARD_CSS_TAG
+  tag.textContent = TURN_CARD_CSS
+  document.head.appendChild(tag)
+}
+
+/** One conversation card: live task facts plus the Open affordance. */
+function TaskboardIssueCard({ taskId, openIssue, t }: {
+  taskId: string
+  openIssue: (taskId: string) => void
+  t: (key: string, params?: Record<string, unknown>) => string
+}): JSX.Element {
+  const task = useTaskCached(taskId)
+  const title = task?.title ?? ''
+  const sub = task === undefined
+    ? t('turncard.loading')
+    : task === null
+      ? t('turncard.missing')
+      : `${task.identifier} · ${t(`status.${task.status}`)}`
+  const open = (): void => openIssue(taskId)
+  return (
+    <div className="tbturn-card" data-source="dsh-taskboard">
+      <button type="button" className="tbturn-cardOpen" aria-label={t('turncard.openAria', { title })} onClick={open} />
+      <div className="tbturn-row">
+        <span className="tbturn-leading"><TasksIcon size={18} /></span>
+        <span className="tbturn-body">
+          <span className="tbturn-title">{task === null ? t('turncard.missing') : title === '' ? '…' : title}</span>
+          <span className="tbturn-sub">{sub}</span>
+        </span>
+        {task !== undefined && task !== null ? (
+          <button type="button" className="tbturn-openButton" onClick={open}>{t('turncard.open')}</button>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+/** Props the turn-tail seat hands this entry (structural, degrade to null). */
+interface TurnTailProps {
+  turn?: unknown
+  openIssue?: (taskId: string) => void
+  t: (key: string, params?: Record<string, unknown>) => string
+}
+
+/**
+ * Render the turn's board-task cards beneath its closing text, or nothing when
+ * the turn addressed no board task — every list entry renders for every turn,
+ * so this one narrows its own turn here (official pattern).
+ */
+function TaskboardTurnCard(props: TurnTailProps): ReactElement | null {
+  const refs = readTurnTaskRefs(props.turn)
+  if (refs.length === 0 || props.openIssue === undefined) return null
+  return (
+    <div className="tbturn-list">
+      {refs.map((taskId) => (
+        <TaskboardIssueCard key={taskId} taskId={taskId} openIssue={props.openIssue!} t={props.t} />
+      ))}
+    </div>
+  )
+}
+
+export const inject = ['sessions', 'workspaces', 'locale', 'slots', 'layout', 'sidebarRightTabs', 'sidebarRight', 'uiWorkspace', 'uiConversation']
 
 export function apply(ctx: {
   effect(fn: () => () => void, label: string): void
@@ -817,6 +1172,7 @@ export function apply(ctx: {
   sidebarRightTabs: SidebarRightTabsService
   sidebarRight: SidebarRightService
   uiWorkspace: UiWorkspaceService
+  uiConversation: UiConversationService
 }): void {
   const frames = new Map<string, FrameRef>(PANELS.map((panel) => [panel.name, { current: undefined }]))
 
@@ -900,8 +1256,15 @@ export function apply(ctx: {
     key: SIDE_TAB_ID,
     locale: NS,
     inject: (...args: unknown[]) => ({ sessionId: args[0] as string }),
-  }, (props: { sessionId: string }) => (
-    <SideTasksBody sessionId={props.sessionId} sessions={ctx.sessions} onFrame={registerSideFrame} t={(key) => t(key)} locale={ctx.locale} />
+  }, (props: { sessionId: string; useTabInfo?: () => TabInfo }) => (
+    <SideTasksBody
+      sessionId={props.sessionId}
+      sessions={ctx.sessions}
+      onFrame={registerSideFrame}
+      t={(key) => t(key)}
+      locale={ctx.locale}
+      useTabInfo={props.useTabInfo}
+    />
   ))), 'dsh-taskboard: right-sidebar tab body')
 
   ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab.title', () => ctx.slots.register({
@@ -914,14 +1277,15 @@ export function apply(ctx: {
    * Reveal this session's taskboard tab in the right sidebar (never throwing
    * into the shell). Right after `openSession` the conversation surface is not
    * mounted yet and the shell's controller refuses with "no session surface is
-   * mounted", so retry briefly until it appears.
+   * mounted", so retry briefly until it appears. An optional task id navigates
+   * the tab to that task's detail (turn-tail card clicks).
    */
-  const openSideTasks = (sessionId: string, attempt = 0): void => {
+  const openSideTasks = (sessionId: string, taskId?: string, attempt = 0): void => {
     try {
-      ctx.sidebarRight.openTab(SIDE_TAB_KIND, { params: { sessionId } })
+      ctx.sidebarRight.openTab(SIDE_TAB_KIND, taskId === undefined ? { params: { sessionId } } : { params: { sessionId, taskId } })
     } catch (error: unknown) {
       if (attempt < 15) {
-        window.setTimeout(() => openSideTasks(sessionId, attempt + 1), 300)
+        window.setTimeout(() => openSideTasks(sessionId, taskId, attempt + 1), 300)
         return
       }
       console.warn('taskboard: cannot open the right-sidebar taskboard tab', error)
@@ -944,6 +1308,30 @@ export function apply(ctx: {
   }, (props: { sessionId: string; t: (key: string) => string }) => (
     <TaskboardHeaderAction sessionId={props.sessionId} onOpen={openSideTasks} t={props.t} />
   ))), 'dsh-taskboard: conversation header entry')
+
+  // The conversation turn cards: the accumulator derives each turn's board
+  // task references from its own durable tool-call events (no session-log
+  // format change), and the turn-tail list entry renders one card per task
+  // after the turn's closing text — the same two-part path the official
+  // schedule_create transcript card uses. Clicking a card opens the
+  // right-sidebar task tab navigated to that task.
+  ctx.effect(() => ctx.uiConversation.events.register(taskboardTurnDefinition), 'dsh-taskboard: turn task accumulator')
+
+  ctx.effect(() => ctx.slots.inject('conversation.chat.turnTail', () => ctx.slots.register({
+    name: 'conversation.chat.turnTail',
+    id: 'taskboard-issues',
+    order: 20,
+    locale: NS,
+    inject: (sessionId: unknown) => ({
+      openIssue: (taskId: string) => openSideTasks(sessionId as string, taskId),
+    }),
+  }, (props: TurnTailProps) => (
+    <TaskboardTurnCard
+      turn={props.turn}
+      openIssue={props.openIssue}
+      t={(key, params) => t(key, params)}
+    />
+  ))), 'dsh-taskboard: turn-tail task cards')
 
   // The settings card asks to open the board.
   ctx.effect(() => {

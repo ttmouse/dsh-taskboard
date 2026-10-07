@@ -17,6 +17,9 @@ function now() {
   return new Date().toISOString();
 }
 
+/** 轮次租约过期线：与认领执行器的单轮 60 分钟上限一致。 */
+const DISPATCH_LEASE_TTL_MS = 60 * 60 * 1000;
+
 function commentConversationTitle(body) {
   const firstLine = String(body ?? "")
     .split(/\r?\n/)
@@ -415,6 +418,12 @@ export class TaskboardDatabase {
 
       CREATE INDEX IF NOT EXISTS task_activities_task_created
         ON task_activities(task_id, created_at, id);
+
+      CREATE TABLE IF NOT EXISTS task_dispatch_leases (
+        task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+        session_id TEXT NOT NULL,
+        started_at TEXT NOT NULL
+      );
 
       CREATE TABLE IF NOT EXISTS attachments (
         id TEXT PRIMARY KEY,
@@ -1270,6 +1279,46 @@ export class TaskboardDatabase {
   getAiChatRun(id) {
     const row = this.database.prepare("SELECT * FROM ai_chat_runs WHERE id = ?").get(id);
     return row ? aiChatRunFromRow(row) : null;
+  }
+
+  /** 轮次租约：该议题当前有一轮正在进行（跨进程/跨驱动的互斥与「进行中」显示依据）。 */
+  getDispatchLease(taskId) {
+    const row = this.database.prepare("SELECT * FROM task_dispatch_leases WHERE task_id = ?").get(taskId);
+    return row ? { taskId: row.task_id, sessionId: row.session_id, startedAt: row.started_at } : null;
+  }
+
+  /** 过线即视为无主：宿主崩溃残留的租约不能永久挡住干一轮（与接管逻辑同一过期线）。 */
+  hasActiveDispatch(taskId) {
+    const staleCutoff = new Date(Date.now() - DISPATCH_LEASE_TTL_MS).toISOString();
+    const row = this.database.prepare(
+      "SELECT 1 FROM task_dispatch_leases WHERE task_id = ? AND started_at >= ?"
+    ).get(taskId, staleCutoff);
+    return row !== undefined;
+  }
+
+  /**
+   * 尝试取得议题的轮次租约。已有未过期租约时返回 null（互斥失败）；
+   * 超过 60 分钟的租约视为宿主崩溃残留，直接接管。
+   */
+  acquireDispatchLease(taskId, sessionId) {
+    const staleCutoff = new Date(Date.now() - DISPATCH_LEASE_TTL_MS).toISOString();
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      this.database.prepare("DELETE FROM task_dispatch_leases WHERE task_id = ? AND started_at < ?")
+        .run(taskId, staleCutoff);
+      const inserted = this.database.prepare(
+        "INSERT OR IGNORE INTO task_dispatch_leases (task_id, session_id, started_at) VALUES (?, ?, ?)"
+      ).run(taskId, sessionId, now());
+      this.database.exec("COMMIT");
+      return Number(inserted.changes) === 1 ? this.getDispatchLease(taskId) : null;
+    } catch (error) {
+      this.database.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  releaseDispatchLease(taskId) {
+    this.database.prepare("DELETE FROM task_dispatch_leases WHERE task_id = ?").run(taskId);
   }
 
   createAiChatRun(input) {

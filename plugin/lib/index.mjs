@@ -28,7 +28,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import z from 'schemastery'
 import { createTaskboardServer } from '../vendor/server/app.mjs'
-import { buildClaimPrompt, buildDispatchPrompt, cleanupStaleClaimRoutines, reconcileClaimRoutine } from './claim-routines.mjs'
+import { buildDispatchPrompt, cleanupStaleClaimRoutines, reconcileClaimRoutine, selectNextTask } from './claim-routines.mjs'
 import { activeClaimSessions, executeClaimInProcess, finalizeInterruptedRuns, stopClaimSession, writeRunRecord } from './claim-executor.mjs'
 import { defaultCheckCommand, runCheck } from './check-gate.mjs'
 import { createDshChatEngine } from './dsh-chat-engine.mjs'
@@ -90,7 +90,7 @@ const SECTION_ORDER = 205
 export const inject = ['webServer', 'systemPrompt', 'workspaceRegistry', 'sessionPersistence', 'agents', 'sessions', 'agentDefaultModel', 'llm']
 
 /** Model-facing announcement: plugin presence, capabilities, and limits. */
-export const TASKBOARD_GUIDANCE = '本机已安装 dsh-taskboard 插件（DSH Web GUI 的完整任务看板）：侧边栏「任务看板」与「自动化」入口、右栏「任务」侧栏；完整能力来自本地 SQLite 服务——多视图（看板/列表/Gantt/工作流/仪表盘）、任务详情（关系/附件/标签/过滤器）、AI 对话、项目自动认领（官方 host schedule 服务定时投递到每项目常驻认领会话执行，认领开关即自动化面板的项目开关）。数据存 ~/.dsh/storages/dsh-taskboard/taskboard.sqlite（本机回环端口 47825）。任务可通过看板内「在对话中打开」直接驱动 DSH 会话执行并回写评论。用户提到「任务看板 / 看板 / 任务管理 / 建任务 / 建议题」时即指本插件；对看板的任何读写（建任务、改状态、加评论、加关系）请先加载 manage-taskboard 技能并遵循其 API 纪律（version 并发、署名 headers、threadId 回链），不要绕过技能裸写 HTTP API。'
+export const TASKBOARD_GUIDANCE = '本机已安装 dsh-taskboard 插件（DSH Web GUI 的完整任务看板）：侧边栏「任务看板」与「自动化」入口、右栏「任务」侧栏；完整能力来自本地 SQLite 服务——多视图（看板/列表/Gantt/工作流/仪表盘）、任务详情（关系/附件/标签/过滤器）、AI 对话、项目自动化（打开项目开关后，看板到点自动按优先级挑一个无阻塞的待办议题直接派一轮，agent 只承接被指派的议题、不自己找活；评论即执行、「干一轮」按钮随时插队，开关即自动化面板的项目开关）。数据存 ~/.dsh/storages/dsh-taskboard/taskboard.sqlite（本机回环端口 47825）。任务可通过看板内「在对话中打开」直接驱动 DSH 会话执行并回写评论。用户提到「任务看板 / 看板 / 任务管理 / 建任务 / 建议题」时即指本插件；对看板的任何读写（建任务、改状态、加评论、加关系）请先加载 manage-taskboard 技能并遵循其 API 纪律（version 并发、署名 headers、threadId 回链），不要绕过技能裸写 HTTP API。'
 
 /** Plugin config, validated by the schemastery schema. */
 export const Config = z.object({
@@ -399,7 +399,14 @@ async function resolveClaimProject(name, baseUrl) {
  *     path): exit 0 proceeds, exit 2 skips, anything else blocks and
  *     records a failed run. No script on disk → no gate.
  */
-async function runInProcessClaim(ctx, project, baseUrl, log) {
+/**
+ * Run the claim gates only (fast, no session): ① the selector picks the next
+ * eligible todo, ② check script. Skips/blocks write their run record here.
+ * Returns `{ automation, task }` to run with, or null when the round must not
+ * start — "which task" is decided here, in the host, never by the agent
+ * (ADR-0002).
+ */
+async function runProjectClaimGates(project, baseUrl, log) {
   let automation = { enabled: false, intervalMinutes: 10, model: null }
   try {
     const res = await fetch(`${baseUrl}/api/projects/${encodeURIComponent(project.id)}/automation`)
@@ -408,16 +415,16 @@ async function runInProcessClaim(ctx, project, baseUrl, log) {
     // keep defaults
   }
 
-  // ① Built-in uniform check: only claim when the board has a todo task for
-  // this project. No todo → skip the round (no session, no tokens). A failed
-  // todo lookup is treated as a block (the claim flow itself depends on the
-  // same API, so proceeding would only burn a session on a broken board).
-  let todoCount = 0
+  // ① The selector: highest-priority unblocked todo, oldest first as the
+  // tiebreaker. No eligible issue → skip the round (no session, no tokens). A
+  // failed lookup is treated as a block (the dispatch flow itself depends on
+  // the same API, so proceeding would only burn a session on a broken board).
+  let picked = null
   let todoCheckFailed = false
   try {
     const res = await fetch(`${baseUrl}/api/tasks?projectId=${encodeURIComponent(project.id)}&status=todo`)
     if (res.ok) {
-      todoCount = ((await res.json()).tasks ?? []).length
+      picked = selectNextTask((await res.json()).tasks ?? [])
     } else {
       todoCheckFailed = true
     }
@@ -425,20 +432,20 @@ async function runInProcessClaim(ctx, project, baseUrl, log) {
     todoCheckFailed = true
     log(`[claim] ${project.id}: todo check request failed: ${error instanceof Error ? error.message : String(error)}`)
   }
-  if (todoCheckFailed || todoCount === 0) {
-    log(`[claim] ${project.id}: ${todoCheckFailed ? 'todo check failed' : 'no todo tasks'}, skipping round`)
+  if (todoCheckFailed || picked === null) {
+    log(`[claim] ${project.id}: ${todoCheckFailed ? 'todo check failed' : 'no eligible todo tasks'}, skipping round`)
     await writeRunRecord(project, {
       status: todoCheckFailed ? 'failed' : 'skipped',
       startedAt: Date.now(),
       finishedAt: Date.now(),
       durationMs: 0,
       exitCode: 2,
-      check: { command: 'builtin:has-todo-tasks', todoCount },
+      check: { command: 'builtin:pick-next-task', todo: picked === null ? 0 : 1 },
       error: todoCheckFailed
         ? 'blocked by check gate: todo check request failed'
-        : 'skipped: no todo tasks to claim',
+        : 'skipped: no eligible todo tasks (unblocked, priority order)',
     }).catch(() => {})
-    return false
+    return null
   }
 
   // ② Uniform convention-path check script (no per-project override).
@@ -474,24 +481,18 @@ async function runInProcessClaim(ctx, project, baseUrl, log) {
           ? 'skipped by check gate (exit 2)'
           : `blocked by check gate${check.error ? `: ${check.error}` : ` (exit ${check.exitCode ?? '-'})`}`,
       }).catch(() => {})
-      return false
+      return null
     }
   }
+  return { automation, task: picked }
+}
 
-  // Conversation binding applies to scheduled rounds too: a project bound to
-  // one conversation keeps appending to it (and rotates after N rounds).
-  const binding = await resolveClaimSession(baseUrl, project, automation, log)
-  const finished = await executeClaimInProcess({
-    ctx,
-    project,
-    model: automation.model ?? null,
-    prompt: buildClaimPrompt(project),
-    sessionId: binding.resumeSessionId === null ? binding.sessionId : null,
-    resumeSessionId: binding.resumeSessionId,
-    log,
-  })
-  if (finished) await countFixedRound(baseUrl, project, binding)
-  return finished
+/** Run one full claim round: selector gates, then the dispatch pipeline —
+ *  a scheduled claim IS a zero-input dispatch of the picked issue (ADR-0002). */
+async function runInProcessClaim(ctx, app, project, baseUrl, log) {
+  const picked = await runProjectClaimGates(project, baseUrl, log)
+  if (picked === null) return false
+  return runTaskDispatch(ctx, app, baseUrl, picked.task, null, log)
 }
 
 /** In-flight dispatch runs, keyed by task id (one live run per issue). */
@@ -660,6 +661,11 @@ async function runTaskDispatch(ctx, app, baseUrl, task, comment, log) {
   try {
     const automation = await readProjectAutomation(baseUrl, project.id)
     const binding = await resolveClaimSession(baseUrl, project, automation, log, task)
+    // 轮次租约：跨进程/跨驱动（按钮、评论、另一宿主）的唯一互斥依据（ADR-0001）。
+    if (app.database.acquireDispatchLease(task.id, binding.sessionId) === null) {
+      log(`[dispatch] ${task.identifier}: a live round holds the lease — skipped`)
+      return false
+    }
     let current = task
     try {
       const res = await fetch(`${baseUrl}/api/tasks/${encodeURIComponent(task.id)}/move`, {
@@ -683,20 +689,22 @@ async function runTaskDispatch(ctx, app, baseUrl, task, comment, log) {
         'X-Taskboard-Agent-Name': 'DSH Agent',
       },
       body: JSON.stringify({
-        body: `已按你的评论开始一轮：会话 ${binding.sessionId}。跑完会在这里回一条总结。`,
+        body: comment
+          ? `已按你的评论开始一轮：会话 ${binding.sessionId}。跑完会在这里回一条总结。`
+          : `已自动开始一轮：会话 ${binding.sessionId}。跑完会在这里回一条总结。`,
         threadId: binding.sessionId,
       }),
     }).catch(() => {})
-    log(`[dispatch] ${current.identifier}: round started by a human comment`)
+    log(`[dispatch] ${current.identifier}: ${comment ? 'round started by a human comment' : 'round started automatically'}`)
     const finished = await executeClaimInProcess({
       ctx,
       project,
       model: automation.model ?? null,
-      prompt: buildDispatchPrompt(project, current, comment),
+      prompt: buildDispatchPrompt(project, current, comment, binding.resumeSessionId !== null),
       fetchQueuedComments: queuedCommentReader(
         baseUrl,
         task.id,
-        typeof comment.createdAt === 'string' ? comment.createdAt : new Date().toISOString(),
+        typeof comment?.createdAt === 'string' ? comment.createdAt : new Date().toISOString(),
       ),
       sessionId: binding.resumeSessionId === null ? binding.sessionId : null,
       resumeSessionId: binding.resumeSessionId,
@@ -706,15 +714,17 @@ async function runTaskDispatch(ctx, app, baseUrl, task, comment, log) {
     return finished
   } finally {
     dispatchInFlight.delete(task.id)
+    app.database.releaseDispatchLease(task.id)
   }
 }
 
 /**
  * Start the in-process claim scheduler: every claimPollMs, sweep projects
  * whose automation switch is enabled and due, and run them in-process so the
- * GUI streams the conversation live.
+ * GUI streams the conversation live. Each due project gets at most one round:
+ * the selector picks the issue, the dispatch pipeline runs it.
  */
-function startClaimScheduler(ctx, baseUrl, pollMs, log) {
+function startClaimScheduler(ctx, app, baseUrl, pollMs, log) {
   const inFlight = new Set()
   const sweep = async () => {
     let projects = []
@@ -750,7 +760,7 @@ function startClaimScheduler(ctx, baseUrl, pollMs, log) {
         await fetch(`${baseUrl}/api/projects/${encodeURIComponent(project.id)}/claim-run`, { method: 'POST' })
           .catch(() => {})
         log(`[claim] scheduled: ${project.name}`)
-        await runInProcessClaim(ctx, project, baseUrl, log)
+        await runInProcessClaim(ctx, app, project, baseUrl, log)
       } finally {
         inFlight.delete(project.id)
       }
@@ -852,10 +862,11 @@ async function reindexWorkspaceSessions(ctx, log) {
 }
 
 /**
- * Reconcile claim routines for every board project. Claim routines are
- * virtual: the YAML always exists for workspace-mapped projects (card stays
- * on the automation page), and the automation switch in the board DB — shown
- * on the routines page as the card's on/off state — is the only control.
+ * Reconcile claim routines for every board project. Only switch-on projects
+ * keep a routine YAML — the file IS the automation-page card, so switch-off
+ * and workspaceless projects get theirs removed and the page stays clean.
+ * The automation switch in the board DB — shown on the routines page as the
+ * card's on/off state — is the only control.
  * @param baseUrl - internal taskboard loopback base URL.
  * @param log - logger callback.
  * @returns summary string.
@@ -940,9 +951,18 @@ export function apply(ctx, config) {
             ? (await resolveClaimProject(name, baseUrl))
             : null
           if (project) {
-            return runInProcessClaim(ctx, project, baseUrl, (message) =>
+            // 立即运行按钮：门控（含选择器）同步跑（毫秒级，跳过时写记录返回
+            // false），轮次放后台执行——HTTP 202 立即返回，绝不挂满整轮。
+            const picked = await runProjectClaimGates(project, baseUrl, (message) =>
               ctx.logger.info(`dsh-taskboard: ${message}`),
             )
+            if (picked === null) return false
+            void runTaskDispatch(ctx, app, baseUrl, picked.task, null, (message) =>
+              ctx.logger.info(`dsh-taskboard: ${message}`),
+            ).catch((error) => {
+              ctx.logger.info(`dsh-taskboard: background claim round failed: ${error instanceof Error ? error.message : String(error)}`)
+            })
+            return true
           }
           return false
         },
@@ -1102,7 +1122,8 @@ export function apply(ctx, config) {
         ctx.logger.info(`dsh-taskboard: ${message}`)
       }
       dispatchDisposer = instance.events.subscribe((event) => {
-        if (event?.type !== 'task.dispatch-requested' || !event.task || !event.comment) return
+        // comment is null for a zero-input dispatch (the 干一轮 button).
+        if (event?.type !== 'task.dispatch-requested' || !event.task) return
         void runTaskDispatch(ctx, instance, baseUrl, event.task, event.comment, log).catch((error) => {
           const message = `[dispatch] ${event.task?.identifier ?? event.task?.id}: ${error instanceof Error ? error.message : String(error)}`
           void pluginLog(message)
@@ -1112,8 +1133,10 @@ export function apply(ctx, config) {
       pluginLog('comment dispatch bridge ready (event-driven, no polling)')
     }
     if (!stopped && app !== undefined && baseUrl !== undefined && config.claimPollMs > 0) {
+      const instance = app
       claimTimer = startClaimScheduler(
         ctx,
+        instance,
         baseUrl,
         Math.max(5000, config.claimPollMs),
         (message) => {

@@ -146,48 +146,6 @@
   color: var(--text-primary);
 }
 
-/* ---- 项目筛选标签：对齐 view-tab ---- */
-
-.routines-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  width: 100%;
-  max-width: 1380px;
-  margin: 0 auto;
-}
-
-.routines-tab {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  height: 28px;
-  max-width: 220px;
-  padding: 0 16px;
-  border: var(--border-hairline) solid var(--border);
-  border-radius: 16px;
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 11px;
-  font-weight: 500;
-  cursor: pointer;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  transition: background-color 100ms ease, border-color 100ms ease, color 100ms ease;
-}
-
-.routines-tab:hover {
-  background: var(--surface-hover);
-  color: var(--text-primary);
-}
-
-.routines-tab.is-active {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: #fff;
-}
-
 /* ---- 错误/加载/空状态：对齐 page-empty ---- */
 
 .routines-error {
@@ -1330,12 +1288,6 @@
   border-radius: 12px;
 }
 
-/* 项目芯片：弱化为次级筛选 */
-.routines-main .routines-tab {
-  border-radius: 999px;
-  font-size: 12.5px;
-}
-
 /* 列表：无框扁平行，交互态 = 圆角高亮块 */
 .routines-list {
   gap: 2px;
@@ -1475,7 +1427,6 @@
 /* 列表主列：官方 960px 居中单列 */
 .routines-main .routines-header,
 .routines-main .routines-filters,
-.routines-main .routines-tabs,
 .routines-main .routines-list,
 .routines-main .routines-error,
 .routines-main .routines-loading,
@@ -1672,7 +1623,7 @@
 }
 
 .routines-main .routines-header {
-  margin: 0 0 24px;
+  margin: 0 auto 24px;
   padding-top: 28px;
 }
 
@@ -2036,4 +1987,440 @@
 
 .routine-action.is-danger.is-icon {
   color: var(--danger, #e5636a);
+}
+
+/* ---- 运行时间选择器（对齐官方自动化 RuleCard 的行结构） ---- */
+
+.sched-picker {
+  display: flex;
+  flex-direction: column;
+}
+
+.sched-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: 36px;
+  padding: 7px 0;
+}
+
+.sched-row + .sched-row {
+  border-top: var(--border-hairline) solid var(--border);
+}
+
+.sched-row-label {
+  font-size: 13px;
+  color: var(--text-primary);
+  flex: none;
+}
+
+.sched-face {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  max-width: 72%;
+  border: var(--border-hairline) solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-primary);
+  font-size: 12.5px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.sched-face:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+}
+
+.sched-face svg {
+  color: var(--text-tertiary);
+  flex: none;
+}
+
+.sched-face-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sched-menu {
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-raised, var(--surface));
+  border: var(--border-hairline) solid var(--border-strong);
+  border-radius: 10px;
+  box-shadow: var(--card-shadow);
+  padding: 4px;
+  max-height: 330px;
+}
+
+.sched-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: 7px;
+  color: var(--text-primary);
+  font-size: 12.5px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.sched-menu-item:hover {
+  background: var(--surface-hover);
+}
+
+.sched-menu-item.is-selected {
+  color: var(--accent);
+}
+
+.sched-check {
+  color: var(--accent);
+  flex: none;
+}
+
+.sched-weekdays {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.sched-pill {
+  border: var(--border-hairline) solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+.sched-pill:hover {
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.sched-pill.is-active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.sched-interval {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.sched-interval input {
+  width: 64px;
+  text-align: right;
+  border: var(--border-hairline) solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-muted);
+  color: var(--text-primary);
+  font-size: 12.5px;
+  padding: 6px 8px;
+}
+
+.sched-interval-unit {
+  color: var(--text-tertiary);
+  font-size: 12.5px;
+}
+
+.sched-input {
+  border: var(--border-hairline) solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-muted);
+  color: var(--text-primary);
+  font-size: 12.5px;
+  padding: 6px 9px;
+  text-align: right;
+  max-width: 72%;
+}
+
+.sched-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.sched-input-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  text-align: left;
+}
+
+.sched-input-time {
+  width: 120px;
+}
+
+.sched-zone-search {
+  margin: 4px 4px 6px;
+  padding: 7px 9px;
+  border: var(--border-hairline) solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-muted);
+  color: var(--text-primary);
+  font-size: 12.5px;
+}
+
+.sched-zone-search:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.sched-zone-list {
+  overflow-y: auto;
+  max-height: 268px;
+  padding-bottom: 4px;
+}
+
+.sched-zone-system {
+  color: var(--text-tertiary);
+}
+
+.sched-zone-empty {
+  padding: 14px 10px;
+  text-align: center;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+/* 详情页：选择器卡 + 暂存操作行 */
+
+.routine-picker-card {
+  padding: 2px 14px 6px;
+}
+
+.routine-schedule-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.routine-schedule-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.routine-schedule-cron {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.routine-schedule-actions .is-primary {
+  flex: none;
+  padding: 5px 14px;
+  font-size: 12px;
+}
+
+.routine-schedule-actions .is-primary:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* 新建对话框里的选择器包装 */
+
+.routines-modal-schedule {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.routines-modal-schedule-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.routines-modal-box .sched-picker {
+  border: var(--border-hairline) solid var(--border);
+  border-radius: 10px;
+  padding: 2px 12px;
+}
+
+/* ---- v11：项目筛选从胶囊行改为状态筛选右侧的下拉菜单 ---- */
+
+.routines-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* ---- v12：项目下拉改为可检索组合框（触发器 + 搜索框 + 过滤列表） ---- */
+
+/* 容器：触发器与展开面板的定位锚，也是「点击外部收起」的判定范围 */
+.routines-project-select {
+  position: relative;
+}
+
+.routines-project-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 160px;
+  max-width: 260px;
+  height: 28px;
+  padding: 0 10px;
+  border: 0.5px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-primary);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: border-color 100ms ease, box-shadow 100ms ease;
+}
+
+.routines-project-trigger:hover {
+  border-color: var(--border);
+}
+
+.routines-project-trigger[aria-expanded="true"] {
+  border-color: var(--accent, #3b82f6);
+  box-shadow: 0 0 0 2px var(--accent-soft, rgba(59, 130, 246, 0.18));
+}
+
+.routines-project-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.routines-project-caret {
+  flex: none;
+  color: var(--text-tertiary);
+  transition: transform 120ms ease;
+}
+
+.routines-project-caret.is-open {
+  transform: rotate(180deg);
+}
+
+.routines-project-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 70;
+  width: 240px;
+  border: 0.5px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 9px 48px rgba(0, 0, 0, 0.08), 0 6px 24px rgba(0, 0, 0, 0.1), 0 1px 1px rgba(0, 0, 0, 0.04);
+  overflow: hidden;
+}
+
+.routines-project-search {
+  padding: 6px;
+  border-bottom: var(--border-hairline) solid var(--border);
+}
+
+.routines-project-search input {
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border: 0.5px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-primary);
+  font-size: 12.5px;
+  outline: none;
+}
+
+.routines-project-search input:focus {
+  border-color: var(--accent, #3b82f6);
+}
+
+.routines-project-options {
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.routines-project-option {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.routines-project-option:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.routines-project-option.is-active {
+  background: var(--accent-soft, rgba(59, 130, 246, 0.18));
+  color: var(--text-primary);
+}
+
+.routines-project-empty {
+  padding: 10px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  text-align: center;
+}
+
+/* ---- v11：行覆盖层与操作反馈修复（09582F74F86A-46）----
+   .routine-row-open 是 inset:0 的透明点击层；行右侧控件（开关/▶/■）没有
+   position/z-index，被覆盖层压住——hover 与 click 全部打不到按钮上。
+   对齐 .routine-card 的纪律：可交互控件必须抬到覆盖层之上。 */
+.routine-row-side {
+  position: relative;
+  z-index: 3;
+}
+
+/* ▶/■ 图标按钮：明显的悬停底色与按压反馈 */
+.routine-action.is-icon:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+}
+
+.routine-action.is-icon:active:not(:disabled) {
+  transform: scale(0.92);
+}
+
+.routine-action.is-icon.is-triggered:not(:disabled) {
+  color: #34a853;
+  border-color: #34a853;
+}
+
+/* 触发结果提示条（成功/门控跳过都在这里说清，6 秒自动消失） */
+.routines-notice {
+  margin: 0 0 10px;
+  padding: 8px 12px;
+  border: var(--border-hairline) solid rgba(52, 168, 83, 0.45);
+  border-radius: 8px;
+  background: rgba(52, 168, 83, 0.08);
+  color: var(--text-primary);
+  font-size: 12.5px;
 }

@@ -2,15 +2,18 @@
  * dsh-taskboard — claim routines manager (host half).
  *
  * $DSH_HOME/routines is the PLUGIN's own automation storage (confirmed by
- * the user 2026-10-07 — it is NOT official-host territory), so each
- * workspace-mapped project always keeps a claim routine YAML there and the
- * automation panel lists it as a card. The board's automation switch —
- * stored in the taskboard DB, toggled from the project automation menu or
- * from the routines page itself — is the only on/off control; /api/routines
- * reports paused == "switch off". The YAML file itself is always written
- * with `paused: true` so any external runner skips it: execution happens
- * in-process, gated on the switch by the board's claim scheduler, so the
- * GUI streams the session. No heartbeat files, no taskctl, no daemon loop.
+ * the user 2026-10-07 — it is NOT official-host territory). Only projects
+ * with the automation switch ON keep a claim routine YAML there — the YAML
+ * IS the automation-page card, so switch-off projects get theirs removed to
+ * keep the page clean. The board DB keeps every project's automation config,
+ * so flipping the switch back on re-materializes the card on the next
+ * reconcile tick. The switch — stored in the taskboard DB, toggled from the
+ * project automation menu or from the routines page itself — is the only
+ * on/off control; /api/routines reports paused == "switch off". The YAML file
+ * itself is always written with `paused: true` so any external runner skips
+ * it: execution happens in-process, gated on the switch by the board's claim
+ * scheduler, so the GUI streams the session. No heartbeat files, no taskctl,
+ * no daemon loop.
  */
 import { mkdir, readdir, readFile, unlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
@@ -40,44 +43,81 @@ function cronFor(intervalMinutes) {
 }
 
 /**
- * Build the claim prompt for one project. Kept short on purpose: the
- * manage-taskboard skill (registered in the harness skill catalog, synced
- * from this plugin's skills/) carries the API base URL, endpoint reference,
- * and the full claim workflow; the routine only binds the skill to this
- * project's concrete context. This mirrors the original dashi-taskboard
- * approach — the skill holds the process, the prompt names the skill.
+ * The selector — the board's "what's next" as a pure function (ADR-0002).
+ * Eligible: status `todo`, not archived, and no incoming `blocks` edge from an
+ * issue that has not finished. Order: priority first (urgent → none), then
+ * creation time (oldest first) — "最早" survives only as the tiebreaker, the
+ * meaning the old claim prompt left the model to guess at.
+ * @param tasks - task records as served by GET /api/tasks (listTasks attaches
+ *   each task's `relations.blockedBy` summaries).
+ * @returns the next task record, or null when nothing is eligible.
  */
-export function buildClaimPrompt(project) {
+const PRIORITY_RANK = { urgent: 0, high: 1, medium: 2, low: 3, none: 4 }
+
+export function selectNextTask(tasks) {
+  const open = (status) => status !== 'done' && status !== 'canceled'
+  const eligible = (tasks ?? []).filter((task) =>
+    task.status === 'todo'
+    && !task.archivedAt
+    && !(task.relations?.blockedBy ?? []).some((blocker) => open(blocker.status)),
+  )
+  eligible.sort((left, right) =>
+    (PRIORITY_RANK[left.priority] ?? PRIORITY_RANK.none) - (PRIORITY_RANK[right.priority] ?? PRIORITY_RANK.none)
+    || String(left.createdAt ?? '').localeCompare(String(right.createdAt ?? ''))
+    || String(left.id ?? '').localeCompare(String(right.id ?? '')),
+  )
+  return eligible[0] ?? null
+}
+
+/**
+ * The routine card's prompt text. Never sent to an agent: claim rounds run
+ * through the dispatch pipeline (the selector picks the issue in the host,
+ * `buildDispatchPrompt` binds the round), and the YAML is always written
+ * paused so external runners skip it. The text only describes the mechanism
+ * on the automation page.
+ */
+export function claimRoutinePromptText(project) {
   return [
-    `你是 dsh-taskboard 的自动认领例程，处理「${project.name}」项目（项目 ID：${project.id}，项目目录：${project.workspacePath}）。`,
-    '使用 manage-taskboard 技能执行一次自动认领：找到该项目最早的 todo 议题，读取最新内容与全部评论后认领（移动到 in_progress），实现并自验后回写总结评论、移到 in_review。',
-    '所有细节（API 基址、乐观并发、状态流转规则）以技能文档为准。',
-    '全程仅使用命令行与 HTTP API（curl / 构建脚本 / 服务器资产检查）完成操作与自验；禁止调用任何浏览器工具（browser_*），不要打开 GUI 或网页验证。',
+    `「${project.name}」项目的自动执行由看板驱动：到点后看板按优先级（同优先级按创建先后）挑出下一个无阻塞的 todo 议题，直接走派发管线开一轮；agent 收到的就是那一个议题，不再自己找活。`,
+    '人类随时可以插话：评论即执行；任意议题上的「干一轮」按钮插队一轮。关掉项目开关即停。',
   ].join('\n')
 }
 
 /**
- * Build the dispatch prompt for ONE issue a human just commented on. Unlike
- * the sweep prompt ("find the earliest todo"), this names the issue and hands
- * the agent the comment verbatim: the comment IS the instruction, so the round
- * starts from it instead of re-deriving intent from the board.
+ * Build the dispatch prompt for ONE issue a human just dispatched. Two shapes:
+ *
+ *  - Resumed round (an existing conversation continues): the session history
+ *    already holds the workflow precedent (claim → work → summary →
+ *    in_review) and the manage-taskboard skill is in its catalog, so the
+ *    prompt shrinks to an issue anchor line plus the human's raw text. The
+ *    anchor stays even here because `fixed` sessionMode shares ONE
+ *    conversation across every issue of the project — a bare「再测一下」
+ *    would not say which issue it belongs to.
+ *  - Fresh round (no conversation to resume): the session knows nothing, so
+ *    the prompt carries the full thin binding — project, issue, comment, and
+ *    the one skill line that names the exit contract.
  * @param project - board project record (name, id, workspacePath).
- * @param task - the issue the comment landed on (identifier, title, status).
- * @param comment - the human comment that triggered the dispatch.
+ * @param task - the issue being dispatched (identifier, title, status).
+ * @param comment - the human comment that triggered the dispatch, or null for
+ *   a zero-input dispatch.
+ * @param resumed - true when the round continues an existing conversation.
  */
-export function buildDispatchPrompt(project, task, comment) {
+export function buildDispatchPrompt(project, task, comment, resumed = false) {
   const body = String(comment?.body ?? '').trim().slice(0, 4000)
-  const gate = task.status === 'blocked' ? '卡住等你' : '等你验收'
+  if (resumed) {
+    return body !== ''
+      ? `来自议题 ${task.identifier} 的评论：\n${body}`
+      : `（干一轮）继续推进议题 ${task.identifier}。`
+  }
+  const briefed = body !== ''
+  const head = `本轮议题：${task.identifier}「${task.title}」（议题 ID：${task.id}，status=${task.status}）。`
   return [
     `你是 dsh-taskboard 的自动承接例程，处理「${project.name}」项目（项目 ID：${project.id}，项目目录：${project.workspacePath}）。`,
-    `本轮只处理一个议题：${task.identifier}「${task.title}」（议题 ID：${task.id}）。它现在停在「${gate}」关口（status=${task.status}），人类刚在它下面留了这条评论：`,
-    '---',
-    body,
-    '---',
-    '这条评论就是本轮的任务书：把它当作明确的推进/修改要求，先用 manage-taskboard 技能读取该议题的最新内容与全部评论（含附件），再直接继续——要改方案就改方案，要修实现就修实现，是提问就回答后继续。',
-    '结束后回写**一条**总结评论（关键改动 / 验证结果 / 剩余风险），并把该议题移回 in_review（若确实被卡住无法推进则移到 blocked 并写清原因）。',
-    '不要处理其它议题，不要新建议题，不要重排顺序。',
-    '所有细节（API 基址、乐观并发、状态流转规则）以技能文档为准；全程仅使用命令行与 HTTP API（curl / 构建脚本 / 服务器资产检查）完成操作与自验；禁止调用任何浏览器工具（browser_*），不要打开 GUI 或网页验证。',
+    briefed ? `${head}人类刚在它下面评论：` : `${head}人类按了「干一轮」。`,
+    ...(briefed ? ['---', body, '---'] : []),
+    briefed
+      ? '按 manage-taskboard 技能的「评论即执行」流程继续：落实这条评论，回一条总结并把议题移回 in_review。'
+      : '按 manage-taskboard 技能读取该议题的最新内容与全部评论（含附件），从上次停下的地方继续，完成后回一条总结并把议题移回 in_review。',
   ].join('\n')
 }
 
@@ -87,7 +127,7 @@ export function buildRoutineYaml(project, automation, apiBase, paused = false) {
     name: routineNameFor(project.id),
     schedule: cronFor(automation.intervalMinutes ?? 10),
     timezone: 'Asia/Shanghai',
-    prompt: buildClaimPrompt(project),
+    prompt: claimRoutinePromptText(project),
     cwd: project.workspacePath,
     profile: 'headless',
     overlap: 'skip',
@@ -98,27 +138,29 @@ export function buildRoutineYaml(project, automation, apiBase, paused = false) {
 }
 
 /**
- * Reconcile one project's claim routine. Claim routines are virtual: the file
- * is always written for projects mapped to a workspace, regardless of the
- * automation switch — the switch lives in the board DB and the routines page
- * reports it via /api/routines (paused == "switch off"). The YAML is always
- * paused so the external ops runner skips it; the in-process scheduler gates
- * on automation.enabled. Only a project without a workspace path gets its
- * file removed (nothing to claim in-process).
- * @returns 'written' | 'removed' | 'unchanged'.
+ * Reconcile one project's claim routine. A routine YAML IS an automation-page
+ * card, so only switch-on projects with a workspace path keep one; switch-off
+ * or workspaceless projects get their file removed and the page stays clean.
+ * The on/off switch state lives in the automation record (board DB), never in
+ * this file. @returns 'written' | 'removed' | 'unchanged'.
  */
 export async function reconcileClaimRoutine(project, automation, apiBase, log) {
   const file = routineFileFor(project.id)
-  if (!project.workspacePath) {
+  const remove = async (reason) => {
     try {
       await unlink(file)
-      log(`routine ${routineNameFor(project.id)}: removed (no workspace path)`)
+      log(`routine ${routineNameFor(project.id)}: removed (${reason})`)
       return 'removed'
     } catch (error) {
       if (error.code !== 'ENOENT') log(`routine remove failed: ${String(error)}`)
       return 'unchanged'
     }
   }
+  if (!project.workspacePath) return remove('no workspace path')
+  // Keep the automation page free of inert cards: a switch-off project must
+  // not keep a routine file. Nothing is lost — the DB retains the project's
+  // automation config, and the next tick after switch-on rewrites the file.
+  if (!automation.enabled) return remove('automation switch off')
   const currentText = await readFile(file, 'utf8').catch(() => '')
   // Claim routines are always marked paused: the external ops runner must
   // skip them — execution happens in-process so the GUI streams the session.

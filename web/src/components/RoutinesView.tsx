@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import "./RoutinesView.css";
 import {
@@ -16,14 +16,77 @@ import {
 } from "../api";
 import type { Project } from "../types";
 import { useTaskboardI18n } from "../i18n";
+import { SchedulePicker, zoneLabel } from "./SchedulePicker";
 
-/** 人类可读的 cron 描述；识别 dsh-routines 常用的步进模式。 */
+const WEEKDAY_SHORT_ZH = ["一", "二", "三", "四", "五", "六", "日"];
+const WEEKDAY_SHORT_EN = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+/** cron 星期字段（0-7，0=周日）→ ISO 星期集合；不可读返回 null。 */
+function expandCronDow(field: string): number[] | null {
+  const days = new Set<number>();
+  for (const token of field.split(",")) {
+    const range = /^(\d+)-(\d+)$/.exec(token.trim());
+    const single = /^(\d+)$/.exec(token.trim());
+    let from: number, to: number;
+    if (range) {
+      from = Number(range[1]);
+      to = Number(range[2]);
+    } else if (single) {
+      from = to = Number(single[1]);
+    } else {
+      return null;
+    }
+    if (from < 0 || to > 7 || from > to) return null;
+    for (let value = from; value <= to; value++) days.add(value === 0 ? 7 : value);
+  }
+  return [...days].sort((left, right) => left - right);
+}
+
+/** ISO 星期集合 → 「一、四、日」式的短名列表。 */
+function weekdayShortList(days: number[], text: (zh: string, en: string) => string): string {
+  return days
+    .map((day) => text(WEEKDAY_SHORT_ZH[day - 1], WEEKDAY_SHORT_EN[day - 1]))
+    .join(text("、", ", "));
+}
+
+/** 人类可读的 schedule 描述；识别 dsh-routines 的 every 语法与常见 cron 形态。 */
 function describeSchedule(schedule: string | undefined, text: (zh: string, en: string) => string): string {
   if (!schedule) return "—";
-  const every = schedule.match(/^\*\/(\d+) \* \* \* \*$/);
-  if (every) return text(`每 ${every[1]} 分钟`, `Every ${every[1]} min`);
-  if (schedule === "0 * * * *") return text("每小时", "Hourly");
-  if (schedule === "0 0 * * *") return text("每天零点", "Daily");
+  const raw = schedule.trim().toLowerCase();
+  const every = /^every\s+(\d+)\s*(s|m|h)$/.exec(raw);
+  if (every) {
+    const n = Number(every[1]);
+    if (every[2] === "h") return n === 1 ? text("每小时", "Hourly") : text(`每 ${n} 小时`, `Every ${n} h`);
+    if (every[2] === "m") return n === 1 ? text("每分钟", "Every minute") : text(`每 ${n} 分钟`, `Every ${n} min`);
+    return text(`每 ${n} 秒`, `Every ${n} s`);
+  }
+  const fields = raw.split(/\s+/);
+  if (fields.length === 5) {
+    const [minute, hour, dayOfMonth, month, dayOfWeek] = fields;
+    if (/^\d+$/.test(minute) && /^\d+$/.test(hour) && dayOfMonth === "*" && month === "*") {
+      const time = `${hour.padStart(2, "0")}:${minute.padStart(2, "0")}`;
+      if (dayOfWeek === "*") return text(`每天 ${time}`, `Daily at ${time}`);
+      if (dayOfWeek === "1-5") return text(`周一至周五 ${time}`, `Weekdays at ${time}`);
+      const days = expandCronDow(dayOfWeek);
+      if (days && days.length > 0) return text(`每周${weekdayShortList(days, text)} ${time}`, `Weekly ${time}`);
+    }
+    // 日期受限的一次性形态（`M H D Mo *`）：与运行时间选择器的「仅一次」一致。
+    if (/^\d+$/.test(minute) && /^\d+$/.test(hour) && /^\d+$/.test(dayOfMonth) && /^\d+$/.test(month) && dayOfWeek === "*") {
+      const time = `${hour.padStart(2, "0")}:${minute.padStart(2, "0")}`;
+      const date = `${Number(month)}${text("月", "/")}${Number(dayOfMonth)}${text("日", "")}`;
+      return text(`${date} ${time} 执行一次`, `Once: ${date} at ${time}`);
+    }
+    if (minute === "*" && hour === "*" && dayOfMonth === "*" && month === "*" && dayOfWeek === "*") {
+      return text("每分钟", "Every minute");
+    }
+    const stepMinute = /^\*\/(\d+)$/.exec(minute);
+    if (stepMinute && hour === "*" && dayOfMonth === "*" && month === "*" && dayOfWeek === "*") {
+      return text(`每 ${Number(stepMinute[1])} 分钟`, `Every ${Number(stepMinute[1])} min`);
+    }
+    if (minute === "0" && hour === "*" && dayOfMonth === "*" && month === "*" && dayOfWeek === "*") {
+      return text("每小时", "Hourly");
+    }
+  }
   return schedule;
 }
 
@@ -88,7 +151,7 @@ function statusInfo(status: string | null, text: (zh: string, en: string) => str
 
 const EMPTY_FORM: RoutineCreateInput = {
   name: "",
-  schedule: "*/10 * * * *",
+  schedule: "0 9 * * *",
   timezone: "Asia/Shanghai",
   prompt: "",
   cwd: "",
@@ -122,24 +185,38 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [runningName, setRunningName] = useState<string | null>(null);
   const [ranName, setRanName] = useState<string | null>(null);
+  /** 触发结果提示（含例程名的完整句子）；null = 无。自动数秒后清除。 */
+  const [runNotice, setRunNotice] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   /** 详情对话框：存例程名，渲染时从最新列表取数据，轮询刷新后详情同步更新。 */
   const [detailName, setDetailName] = useState<string | null>(null);
   /** 详情侧栏 tab：规则 / 任务运行记录。 */
   const [sideTab, setSideTab] = useState<"rules" | "runs">("rules");
   const [runs, setRuns] = useState<RoutineRunRecord[] | null>(null);
+  /** 详情「运行时间」卡的暂存编辑（选择器回调写入）；null = 未改动。 */
+  const [stagedSchedule, setStagedSchedule] = useState<{ schedule: string; timezone: string } | null>(null);
+  const [savingSchedule, setSavingSchedule] = useState(false);
+  /** 项目下拉组合框：展开态 + 检索词（展开即聚焦搜索框）。 */
+  const [projectMenuOpen, setProjectMenuOpen] = useState(false);
+  const [projectQuery, setProjectQuery] = useState("");
+  const projectSearchRef = useRef<HTMLInputElement | null>(null);
 
+  /** 刷新代号：晚完成的旧响应（如 30s 轮询撞上保存/删除后的立即刷新）不得回写旧列表。 */
+  const loadGeneration = useRef(0);
   const load = useCallback(async () => {
+    const generation = ++loadGeneration.current;
     try {
       const [result, projectList] = await Promise.all([getRoutines(), listProjects()]);
+      if (generation !== loadGeneration.current) return;
       setRoutines(result.routines);
       setDirectory(result.routinesDirectory);
       setProjects(projectList);
       setError(null);
     } catch (loadError) {
+      if (generation !== loadGeneration.current) return;
       setError(loadError instanceof Error ? loadError.message : text("读取自动化失败", "Failed to load automations"));
     } finally {
-      setLoading(false);
+      if (generation === loadGeneration.current) setLoading(false);
     }
   }, [text]);
 
@@ -159,10 +236,37 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [detailName]);
 
-  // 切换详情目标时重置 tab 并拉取运行历史
+  // 项目下拉展开时清空检索并聚焦搜索框
+  useEffect(() => {
+    if (!projectMenuOpen) return;
+    setProjectQuery("");
+    projectSearchRef.current?.focus();
+  }, [projectMenuOpen]);
+
+  // 项目下拉：点击外部或 Esc 收起（面板与触发器同属 .routines-project-select 容器）
+  useEffect(() => {
+    if (!projectMenuOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (target instanceof Element && target.closest(".routines-project-select")) return;
+      setProjectMenuOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setProjectMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [projectMenuOpen]);
+
+  // 切换详情目标时重置 tab、暂存编辑并拉取运行历史
   useEffect(() => {
     setSideTab("rules");
     setRuns(null);
+    setStagedSchedule(null);
     if (!detailName) return;
     const controller = new AbortController();
     getRoutineRuns(detailName, controller.signal)
@@ -193,6 +297,24 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
     }
   };
 
+  /** 保存详情页「运行时间」卡的暂存调度（schedule + timezone 结构化更新）。 */
+  const submitSchedule = async () => {
+    if (!detailRoutine || !stagedSchedule) return;
+    setSavingSchedule(true);
+    try {
+      await updateRoutine(detailRoutine.name, {
+        schedule: stagedSchedule.schedule,
+        timezone: stagedSchedule.timezone,
+      });
+      setStagedSchedule(null);
+      await load();
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : text("保存失败", "Save failed"));
+    } finally {
+      setSavingSchedule(false);
+    }
+  };
+
   const submitDelete = async (name: string) => {
     try {
       await deleteRoutine(name);
@@ -213,13 +335,21 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
     }
   };
 
-  /** 测试执行：手动触发一次，不等待完成。 */
+  /** 测试执行：手动触发一次。started 为 null = 被门控拦下（没有真正起跑），提示原因而不是装作成功。 */
   const submitRun = async (name: string) => {
     setRunningName(name);
     setRanName(null);
     try {
-      await runRoutine(name);
-      setRanName(name);
+      const result = await runRoutine(name);
+      if (result.started) {
+        setRanName(name);
+        setRunNotice(`${routineDisplayName(routines?.find((r) => r.name === name) ?? ({ name } as RoutineInfo))} ${text("已触发 ✓ 运行记录稍后出现在该任务的运行记录里", "triggered ✓ — the run record will appear shortly")}`);
+        void load();
+      } else {
+        setRunNotice(isClaimRoutine(name)
+          ? text("本轮被门控跳过：看板当前没有可执行的待办议题（或检查未通过），详见该任务的运行记录", "Skipped by the gate: no eligible todo issues (see run history)")
+          : text("触发被门控跳过，详见运行记录", "Skipped by the gate — see run history"));
+      }
     } catch (runError) {
       setError(runError instanceof Error ? runError.message : text("触发失败", "Trigger failed"));
     } finally {
@@ -228,6 +358,22 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
   };
 
   const isClaimRoutine = (name: string) => name.startsWith("taskboard-claim-");
+
+  /** 触发提示 6 秒后自动消失；再点一次会重置计时。 */
+  useEffect(() => {
+    if (runNotice === null) return;
+    const timer = setTimeout(() => { setRunNotice(null); setRanName(null); }, 6000);
+    return () => clearTimeout(timer);
+  }, [runNotice]);
+
+  /** 认领例程的文件名只嵌项目 UUID 前 12 位，肉眼不可读——列表标题显示项目名。 */
+  const routineDisplayName = (routine: RoutineInfo): string => {
+    if (!isClaimRoutine(routine.name)) return routine.name;
+    const project = projects.find(
+      (candidate) => `taskboard-claim-${candidate.id.slice(0, 12)}` === routine.name,
+    );
+    return project ? project.name : routine.name;
+  };
 
   /** 停止运行中的认领例程（进程内会话 dispose）。 */
   const submitStop = async (name: string) => {
@@ -241,6 +387,17 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
   };
 
   const activeProject = projects.find((project) => project.id === activeProjectId) ?? null;
+  /** 下拉数据源：只列有工作目录的项目（与原胶囊筛选一致）。 */
+  const workspaceProjects = useMemo(
+    () => projects.filter((project) => project.workspacePath),
+    [projects],
+  );
+  /** 检索过滤：项目名大小写不敏感的包含匹配；空词返回全量。 */
+  const filteredProjects = useMemo(() => {
+    const query = projectQuery.trim().toLowerCase();
+    if (!query) return workspaceProjects;
+    return workspaceProjects.filter((project) => project.name.toLowerCase().includes(query));
+  }, [workspaceProjects, projectQuery]);
   const visibleRoutines: RoutineInfo[] = activeProject
     ? (routines ?? []).filter((routine) => routine.cwd === activeProject.workspacePath)
     : (routines ?? []);
@@ -250,6 +407,7 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
     if (statusFilter === "off" && !routine.paused) return false;
     if (!searchQuery) return true;
     return routine.name.toLowerCase().includes(searchQuery)
+      || routineDisplayName(routine).toLowerCase().includes(searchQuery)
       || (routine.cwd ?? "").toLowerCase().includes(searchQuery)
       || (routine.prompt ?? "").toLowerCase().includes(searchQuery);
   });
@@ -296,49 +454,86 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
             aria-label={text("搜索自动化任务", "Search automations")}
           />
         </div>
-        <div className="routines-status-tabs" role="tablist" aria-label={text("按状态筛选", "Filter by status")}>
-          {statusTabs.map((tab) => (
-            <button
-              key={tab.key}
-              type="button"
-              role="tab"
-              aria-selected={statusFilter === tab.key}
-              className={`routines-status-tab${statusFilter === tab.key ? " is-active" : ""}`}
-              onClick={() => setStatusFilter(tab.key)}
-            >
-              {tab.label}
-            </button>
-          ))}
+        {/* 状态筛选 + 项目下拉同一行：项目从胶囊行收敛为状态筛选右侧的下拉菜单 */}
+        <div className="routines-filter-row">
+          <div className="routines-status-tabs" role="tablist" aria-label={text("按状态筛选", "Filter by status")}>
+            {statusTabs.map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                role="tab"
+                aria-selected={statusFilter === tab.key}
+                className={`routines-status-tab${statusFilter === tab.key ? " is-active" : ""}`}
+                onClick={() => setStatusFilter(tab.key)}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+          {workspaceProjects.length > 0 && (
+            <div className="routines-project-select">
+              <button
+                type="button"
+                className="routines-project-trigger"
+                aria-haspopup="listbox"
+                aria-expanded={projectMenuOpen}
+                onClick={() => setProjectMenuOpen((open) => !open)}
+              >
+                <span className="routines-project-value">{activeProject ? activeProject.name : text("全部项目", "All projects")}</span>
+                <svg
+                  className={`routines-project-caret${projectMenuOpen ? " is-open" : ""}`}
+                  viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"
+                >
+                  <path d="M3.5 6l4.5 4.5L12.5 6" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+              {projectMenuOpen && (
+                <div className="routines-project-menu" role="listbox" aria-label={text("按项目筛选", "Filter by project")}>
+                  <div className="routines-project-search">
+                    <input
+                      ref={projectSearchRef}
+                      type="search"
+                      value={projectQuery}
+                      onChange={(event) => setProjectQuery(event.target.value)}
+                      placeholder={text("搜索项目…", "Search projects…")}
+                      aria-label={text("搜索项目", "Search projects")}
+                    />
+                  </div>
+                  <div className="routines-project-options">
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={activeProjectId === null}
+                      className={`routines-project-option${activeProjectId === null ? " is-active" : ""}`}
+                      onClick={() => { setActiveProjectId(null); setProjectMenuOpen(false); }}
+                    >
+                      {text("全部项目", "All projects")}
+                    </button>
+                    {filteredProjects.map((project) => (
+                      <button
+                        key={project.id}
+                        type="button"
+                        role="option"
+                        aria-selected={activeProjectId === project.id}
+                        className={`routines-project-option${activeProjectId === project.id ? " is-active" : ""}`}
+                        onClick={() => { setActiveProjectId(project.id); setProjectMenuOpen(false); }}
+                      >
+                        {project.name}
+                      </button>
+                    ))}
+                    {filteredProjects.length === 0 && (
+                      <p className="routines-project-empty">{text("无匹配项目", "No matching projects")}</p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
-      {routines && projects.length > 0 && (
-        <div className="routines-tabs" role="tablist" aria-label={text("按项目筛选", "Filter by project")}>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeProjectId === null}
-            className={`routines-tab${activeProjectId === null ? " is-active" : ""}`}
-            onClick={() => setActiveProjectId(null)}
-          >
-            {text("全部项目", "All projects")}
-          </button>
-          {projects.filter((project) => project.workspacePath).map((project) => (
-            <button
-              key={project.id}
-              type="button"
-              role="tab"
-              aria-selected={activeProjectId === project.id}
-              className={`routines-tab${activeProjectId === project.id ? " is-active" : ""}`}
-              onClick={() => setActiveProjectId(project.id)}
-            >
-              {project.name}
-            </button>
-          ))}
-        </div>
-      )}
-
       {error && <p className="routines-error" role="alert">{error}</p>}
+      {runNotice && <p className="routines-notice" role="status">{runNotice}</p>}
       {loading && routines === null ? (
         <p className="routines-loading">{text("正在读取自动化…", "Loading automations…")}</p>
       ) : !routines || routines.length === 0 ? (
@@ -367,7 +562,7 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
                       <circle cx="8" cy="8" r="6.4" fill="none" stroke="currentColor" strokeWidth="1.3" />
                       <path d="M8 4.6V8l2.4 1.6" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
                     </svg>
-                    <strong className="routine-name">{routine.name}</strong>
+                    <strong className="routine-name">{routineDisplayName(routine)}</strong>
                     {isClaimRoutine(routine.name) && <span className="routine-badge">认领</span>}
                   </div>
                   <div className="routine-row-meta">
@@ -392,7 +587,7 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
                   <div className="routine-row-actions">
                     <button
                       type="button"
-                      className="routine-action is-icon"
+                      className={`routine-action is-icon${ranName === routine.name ? " is-triggered" : ""}`}
                       aria-label={runningName === routine.name
                         ? text("触发中…", "Running…")
                         : text("运行", "Run")}
@@ -431,12 +626,15 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
             <label>{text("名称", "Name")}
               <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="my-routine" />
             </label>
-            <label>{text("调度 (cron)", "Schedule (cron)")}
-              <input value={draft.schedule} onChange={(e) => setDraft({ ...draft, schedule: e.target.value })} placeholder="*/10 * * * *" />
-            </label>
-            <label>{text("时区", "Timezone")}
-              <input value={draft.timezone ?? ""} onChange={(e) => setDraft({ ...draft, timezone: e.target.value })} />
-            </label>
+            <div className="routines-modal-schedule">
+              <span className="routines-modal-schedule-label">{text("运行时间", "Schedule")}</span>
+              <SchedulePicker
+                schedule={draft.schedule}
+                timezone={draft.timezone ?? "Asia/Shanghai"}
+                text={text}
+                onChange={(next) => setDraft({ ...draft, schedule: next.schedule, timezone: next.timezone })}
+              />
+            </div>
             <label>{text("工作目录", "Cwd")}
               <input value={draft.cwd ?? ""} onChange={(e) => setDraft({ ...draft, cwd: e.target.value })} />
             </label>
@@ -501,7 +699,7 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
         >
           <header className="routine-side-header">
             <div className="routine-detail-title">
-              <h3>{detailRoutine.name}</h3>
+              <h3>{routineDisplayName(detailRoutine)}</h3>
               {isClaimRoutine(detailRoutine.name) && <span className="routine-badge">认领</span>}
               <span className={`routine-status is-${statusInfo(detailRoutine.lastRun?.status ?? null, text).tone}`}>
                 {statusInfo(detailRoutine.lastRun?.status ?? null, text).label}
@@ -542,21 +740,52 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
                 </div>
               )}
               <div className="routine-side-section-label">{text("运行时间", "Schedule")}</div>
-              <dl className="routine-schedule-card">
-                <div className="routine-detail-row">
-                  <dt>{text("重复", "Repeat")}</dt>
-                  <dd>{describeSchedule(detailRoutine.schedule, text)}</dd>
-                </div>
-                <div className="routine-detail-row">
-                  <dt>{text("频率", "Cron")}</dt>
-                  <dd className="routine-detail-mono">{detailRoutine.schedule ?? "—"}</dd>
-                </div>
-                {detailRoutine.timezone && (
+              {isClaimRoutine(detailRoutine.name) ? (
+                <dl className="routine-schedule-card">
                   <div className="routine-detail-row">
-                    <dt>{text("时区", "Timezone")}</dt>
-                    <dd>{detailRoutine.timezone}</dd>
+                    <dt>{text("重复", "Repeat")}</dt>
+                    {/* 官方卡片不露原始表达式；确切 cron 收进悬停提示，要查证的人悬停即可见。 */}
+                    <dd title={text("写入 YAML 的调度表达式", "Schedule expression written to the YAML") + `: ${detailRoutine.schedule ?? "—"}`}>
+                      {describeSchedule(detailRoutine.schedule, text)}
+                    </dd>
                   </div>
-                )}
+                  {detailRoutine.timezone && (
+                    <div className="routine-detail-row">
+                      <dt>{text("时区", "Timezone")}</dt>
+                      <dd title={detailRoutine.timezone}>{zoneLabel(detailRoutine.timezone)}</dd>
+                    </div>
+                  )}
+                </dl>
+              ) : (
+                <div className="routine-schedule-editor">
+                  <div className="routine-schedule-card routine-picker-card">
+                    <SchedulePicker
+                      key={detailRoutine.name}
+                      schedule={detailRoutine.schedule ?? ""}
+                      timezone={detailRoutine.timezone || "Asia/Shanghai"}
+                      text={text}
+                      onChange={setStagedSchedule}
+                    />
+                  </div>
+                  <div className="routine-schedule-actions">
+                    <span className="routine-schedule-cron" title={text("写入 YAML 的调度表达式", "Schedule expression written to the YAML")}>
+                      {(stagedSchedule?.schedule ?? detailRoutine.schedule ?? "—")}
+                    </span>
+                    <button
+                      type="button"
+                      className="is-primary"
+                      disabled={!stagedSchedule
+                        || (stagedSchedule.schedule === (detailRoutine.schedule ?? "")
+                          && stagedSchedule.timezone === (detailRoutine.timezone ?? ""))
+                        || savingSchedule}
+                      onClick={() => void submitSchedule()}
+                    >
+                      {savingSchedule ? text("保存中…", "Saving…") : text("保存", "Save")}
+                    </button>
+                  </div>
+                </div>
+              )}
+              <dl className="routine-schedule-card">
                 {detailRoutine.cwd && (
                   <div className="routine-detail-row">
                     <dt>{text("目录", "cwd")}</dt>

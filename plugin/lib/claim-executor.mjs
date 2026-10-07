@@ -49,6 +49,38 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+/**
+ * Attach a claim conversation to the board project's workspace so it is filed
+ * under the project in the GUI sidebar instead of trailing in Ungrouped.
+ *
+ * The host only attaches a session to a workspace when `session.create`
+ * carries `workspaceId` (packages/api/session-controller — commands.ts); the
+ * `ctx.agents.create` path used here (agents registry, core/agent) writes the
+ * session header cwd but performs no workspace attach, so every claim
+ * conversation was born outside its project. Board projects mirror DSH
+ * workspaces keyed by the workspace id (syncWorkspacesFromRegistry), so the
+ * workspace id IS `project.id`; a path match covers non-mirrored projects.
+ * `attachSession` validates the session's header cwd against the workspace
+ * path and is idempotent, so a mismatch is refused, never misfiled. Failure
+ * is logged and must not fail the claim round — the conversation still works,
+ * it would merely land in Ungrouped again.
+ */
+export async function attachClaimSessionToWorkspace(ctx, project, sessionId, log) {
+  try {
+    const registry = ctx.workspaceRegistry
+    if (registry === undefined || typeof registry.list !== 'function') return
+    let workspace = typeof registry.get === 'function' ? registry.get(project.id) : undefined
+    if (workspace === undefined) {
+      workspace = registry.list().find((entry) => entry.path === project.workspacePath)
+    }
+    if (workspace === undefined || typeof workspace.attachSession !== 'function') return
+    await workspace.attachSession(sessionId)
+    log(`[claim] ${project.id}: session ${sessionId} attached to workspace ${workspace.path}`)
+  } catch (error) {
+    log(`[claim] ${project.id}: workspace attach failed for ${sessionId}: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
 /** Extract a digest from the session's last assistant text (for run records). */
 function digestFromEvents(events) {
   let text = ''
@@ -207,6 +239,7 @@ export async function executeClaimInProcess({
   fetchQueuedComments = null,
   sessionId: requestedSessionId = null,
   resumeSessionId = null,
+  deadlineMs = 60 * 60 * 1000,
 }) {
   const sessionId = requestedSessionId ?? resumeSessionId ?? `claim-${project.id.slice(0, 8)}-${randomUUID().slice(0, 8)}`
   /** A resumed/attached conversation belongs to the human: never dispose it. */
@@ -290,9 +323,13 @@ export async function executeClaimInProcess({
     }
     return false
   }
+  // File the conversation under the project right away — both for fresh
+  // sessions and for resumed/shared ones (attach is idempotent).
+  await attachClaimSessionToWorkspace(ctx, project, sessionId, log)
 
   const control = claimControl(handle, project.id, startedAt, shared)
   ACTIVE.set(sessionId, control)
+  let unsubscribeEvents = null
   try {
     // The prompt message MUST carry a stable id: dsh-session persists
     // user/message events with the message verbatim and validates on load
@@ -300,19 +337,27 @@ export async function executeClaimInProcess({
     // required). Omitting it writes a session that later fails history
     // replay with "session event at seq N lacks an identified message".
     log(`[claim] ${project.id}: kicked in-process session ${sessionId} (${project.name})`)
-    // Wait for the durable log to record a turn/end, then dispose. A queued
-    // human comment (written while this run works) starts one more turn.
-    const deadline = Date.now() + 60 * 60 * 1000
+    // Wait for the turn to end, then dispose. A queued human comment (written
+    // while this run works) starts one more turn. Turn endings reach plugins
+    // on the ctx event bus — the same `session/event` surface the chat engine
+    // streams from. `ctx.sessions.get(...).events` is the shell catalog's
+    // snapshot face: for agents-registry sessions it never reflects the live
+    // log, so polling it never saw a turn end — every round burned the whole
+    // 60min deadline, its run record stayed 'running', and the dispatch gate
+    // silently swallowed every human comment that landed in between.
+    const deadline = Date.now() + deadlineMs
     let events = []
-    const readEvents = () => {
-      try {
-        events = ctx.sessions.get(sessionId)?.events ?? events
-      } catch {
-        // keep the last readable snapshot
-      }
-      return events
+    let turnEndCount = 0
+    try {
+      unsubscribeEvents = ctx.on('session/event', (session, event) => {
+        if (session?.id !== sessionId || !event?.type) return
+        events.push(event)
+        if (event.type === 'turn/end') turnEndCount += 1
+      })
+    } catch (error) {
+      log(`[claim] ${project.id}: session/event subscribe failed (${error instanceof Error ? error.message : String(error)}); rounds will end at the deadline`)
     }
-    const countTurnEnds = () => readEvents().filter((event) => event.type === 'turn/end').length
+    const countTurnEnds = () => turnEndCount
     const waitForTurnEnd = async (baseline) => {
       while (Date.now() < deadline && ACTIVE.has(sessionId)) {
         if (countTurnEnds() > baseline) return true
@@ -322,11 +367,17 @@ export async function executeClaimInProcess({
     }
 
     let baseline = countTurnEnds()
+    // The dispatch prompt carries source kind "schedule": the web GUI renders
+    // non-user waking messages as the official compact trigger card (the
+    // 「自动化任务」 clock pill, expandable) instead of a wall of prompt text —
+    // the same conversation embedding official automation turns get. Queued
+    // human comments below keep kind "user": they are human words and must
+    // stay attributed to the user.
     handle.agent.followup({
       id: randomUUID(),
       role: 'user',
       content: [{ type: 'text', text: prompt }],
-      source: { kind: 'user' },
+      source: { kind: 'schedule' },
     })
     let finished = await waitForTurnEnd(baseline)
     for (let queuedRounds = 0; finished && fetchQueuedComments !== null && queuedRounds < 3; queuedRounds += 1) {
@@ -364,6 +415,13 @@ export async function executeClaimInProcess({
     return finished
   } finally {
     ACTIVE.delete(sessionId)
+    if (typeof unsubscribeEvents === 'function') {
+      try {
+        unsubscribeEvents()
+      } catch {
+        // event bus already torn down — nothing to clean
+      }
+    }
     if (!control.disposed && !control.shared) {
       control.disposed = true
       try {

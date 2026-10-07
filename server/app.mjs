@@ -630,7 +630,7 @@ function parseTaskCreate(body) {
     projectId,
     title: stringField(body.title, "title", { required: true, maxLength: 240 }),
     description: stringField(body.description ?? "", "description", { maxLength: 100_000 }),
-    status: parseStatus(body.status, "backlog"),
+    status: parseStatus(body.status, "todo"),
     priority: parsePriority(body.priority, "none"),
     labels: body.labels === undefined ? [] : parseLabels(body.labels),
     sortOrder: body.sortOrder === undefined ? undefined : parseSortOrder(body.sortOrder),
@@ -2766,9 +2766,11 @@ export function createTaskboardServer(options = {}) {
         if (id.length === 0 || id.length > 128) {
           throw new ApiError(400, "INVALID_PATH", "Attachment id is invalid");
         }
-        if ([...url.searchParams.keys()].length > 0) {
-          throw new ApiError(400, "UNKNOWN_QUERY_PARAMETER", "Attachment routes do not accept query parameters");
-        }
+        // Read-only content route: tolerate and ignore query parameters.
+        // The web client retries transient image failures by re-requesting
+        // this URL, and cache-busting params from any bundle generation
+        // must degrade to a normal 200, never a 400 (the response is
+        // `no-store`, so params change nothing about freshness).
         if (request.method !== "GET" && request.method !== "HEAD") {
           return methodNotAllowed(response, ["GET", "HEAD"]);
         }
@@ -2818,7 +2820,7 @@ export function createTaskboardServer(options = {}) {
         return sendEmpty(response, 204);
       }
 
-      const taskRoute = pathname.match(/^\/api\/tasks\/([^/]+)(?:\/(archive|restore|move))?$/);
+      const taskRoute = pathname.match(/^\/api\/tasks\/([^/]+)(?:\/(archive|restore|move|dispatch))?$/);
       if (taskRoute) {
         let id;
         try {
@@ -2864,6 +2866,26 @@ export function createTaskboardServer(options = {}) {
           const task = database.restoreTask(id, version, threadId, actorFromRequest(request));
           events.emit("task.restored", { task });
           return sendJson(response, 200, { task });
+        }
+        // 干一轮：零输入、全状态的显式派发（评论派发的等待人工门控不适用于它）。
+        // 执行发生在插件进程的事件订阅里（与看板服务同进程，毫秒级接管）；
+        // 轮次租约是互斥与「Agent 进行中」显示的唯一依据（见 ADR-0001）。
+        if (action === "dispatch" && request.method === "POST") {
+          const task = database.getTask(id);
+          if (!task) throw new ApiError(404, "TASK_NOT_FOUND", `Task '${id}' does not exist`);
+          if (task.archivedAt) {
+            throw new ApiError(409, "TASK_ARCHIVED", `Task '${task.identifier}' is archived — restore it before dispatching`);
+          }
+          if (database.hasActiveDispatch(id)) {
+            throw new ApiError(409, "DISPATCH_BUSY", `Task '${task.identifier}' already has a live round`);
+          }
+          events.emit("task.dispatch-requested", { task, comment: null });
+          return sendJson(response, 202, { task, dispatch: { started: true } });
+        }
+        if (action === "dispatch" && request.method === "GET") {
+          const task = database.getTask(id);
+          if (!task) throw new ApiError(404, "TASK_NOT_FOUND", `Task '${id}' does not exist`);
+          return sendJson(response, 200, { dispatch: { busy: database.hasActiveDispatch(id) } });
         }
         return methodNotAllowed(response, action ? ["POST"] : ["GET", "PATCH"]);
       }

@@ -1529,7 +1529,7 @@ export function App() {
         && boardView === "issues"
       ) {
         event.preventDefault();
-        setEditor({ task: null, status: "backlog" });
+        setEditor({ task: null, status: "todo" });
       }
       if (event.key === "/" && !detailTaskId && selectedProjectId && boardView === "issues") {
         event.preventDefault();
@@ -2459,11 +2459,25 @@ export function App() {
               />
             )}
             {compact && toolbarTools}
+            {/* Compact chrome view toggle: the sidebar embed opens on the list,
+                so the header icon row gets the one switch it hides — list ⟷
+                issue board (the same views the full app's tabs offer). */}
+            {compact && !detailTask && (boardView === "list" || boardView === "issues") && (
+              <button
+                className="icon-button"
+                type="button"
+                aria-label={boardView === "list" ? text("切换为看板视图", "Switch to board view") : text("切换为列表视图", "Switch to list view")}
+                title={boardView === "list" ? text("切换为看板视图", "Switch to board view") : text("切换为列表视图", "Switch to list view")}
+                onClick={() => selectBoardView(boardView === "list" ? "issues" : "list")}
+              >
+                <LinearIcon name={boardView === "list" ? "boardView" : "listView"} />
+              </button>
+            )}
             {selectedProjectId && boardView !== "workflow" && (
               <button
                 className="icon-button header-create-button"
                 type="button"
-                onClick={() => setEditor({ task: null, status: "backlog" })}
+                onClick={() => setEditor({ task: null, status: "todo" })}
                 aria-label={text("新建议题", "Create issue")}
                 title={text("新建议题 (C)", "Create issue (C)")}
               >

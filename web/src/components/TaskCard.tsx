@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { MouseEvent } from "react";
-import { attachmentContentUrl, resolvePersistedAttachmentUrl } from "../api";
+import { attachmentContentUrl, attachmentUrlId, isAttachmentUrl, resolvePersistedAttachmentUrl } from "../api";
 import {
   TASK_PRIORITIES,
   TASK_STATUSES,
@@ -99,7 +99,11 @@ function firstTaskImage(task: Task) {
   const source = markdownImage?.[1]
     ?? markdownImage?.[2]
     ?? (task.previewImage ? attachmentContentUrl(task.previewImage) : null);
-  return source ? resolvePersistedAttachmentUrl(source) : null;
+  if (!source) return null;
+  // Prose placeholders like ![…](api/attachments/…) name no real upload;
+  // they would render as a permanently broken image on the card.
+  if (isAttachmentUrl(source) && attachmentUrlId(source) === null) return null;
+  return resolvePersistedAttachmentUrl(source);
 }
 
 function TaskCardMedia({ src }: { src: string }) {

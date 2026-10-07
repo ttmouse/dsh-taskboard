@@ -1141,6 +1141,10 @@ export function TaskDetail({
         <div
           className={`issue-sticky-title${titleScrolledOut ? " visible" : ""}`}
           aria-hidden={!titleScrolledOut}
+          onClick={() => {
+            const scroller = detailScrollRef.current;
+            if (scroller) scroller.scrollTo({ top: 0, behavior: "smooth" });
+          }}
         >
           <div className="issue-sticky-title-inner">
             <span className="issue-sticky-title-text">{title || task.title}</span>
