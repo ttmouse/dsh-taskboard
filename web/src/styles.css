@@ -2878,10 +2878,12 @@ kbd {
 }
 
 /* 「回到底部」悬浮按钮（聊天应用习惯） */
+/* 悬浮在右下角 AI 对话启动球（fixed right:16 bottom:16, 40px 高）的正上方，
+   两者不能重叠：启动球 z-index 40 且常驻，压在同角会让本按钮永远收不到点击。 */
 .issue-scroll-bottom {
   position: absolute;
-  right: 20px;
-  bottom: 20px;
+  right: 16px;
+  bottom: 68px;
   z-index: 6;
   display: flex;
   align-items: center;
@@ -2915,8 +2917,7 @@ kbd {
   pointer-events: none;
   transform: translateY(-4px);
   transition: opacity 120ms ease, transform 120ms ease;
-  background: color-mix(in srgb, var(--bg) 88%, transparent);
-  backdrop-filter: blur(10px);
+  background: var(--bg);
   border-bottom: 1px solid transparent;
 }
 
