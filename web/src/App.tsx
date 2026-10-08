@@ -2702,6 +2702,7 @@ export function App() {
             openingThread={openingThreadTaskId === detailTask.id}
             onError={(message) => setActionError(message === null ? null : typeof message === "string" ? message : message.join(" "))}
             onAnnounce={setAnnouncement}
+            onClose={closeTaskDetail}
           />
         ) : boardView === "dashboard" ? (
           <DashboardView

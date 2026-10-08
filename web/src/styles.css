@@ -12841,24 +12841,22 @@ kbd {
 .app-shell.compact .header-actions .toolbar-tools { gap: 6px; }
 .app-shell.compact .header-actions .search-field input { width: 120px; }
 
-/* Compact chrome: the kanban board must fit the sidebar — visible columns
-   share the panel width instead of keeping the wide board's 300px column
-   floor / 948px board min-width, and horizontal scrolling is disabled. */
+/* Compact chrome: the kanban board must stay readable in the sidebar —
+   columns keep a 220px readable floor instead of being squeezed infinitely;
+   anything beyond the panel width scrolls horizontally. */
 .app-shell.compact .board-scroll {
-  overflow-x: hidden;
+  overflow-x: auto;
   max-width: none;
   padding-right: 12px;
   scroll-snap-type: none;
 }
 .app-shell.compact .board {
   display: flex;
-  width: 100%;
-  min-width: 0;
+  width: max-content;
+  min-width: 100%;
 }
 .app-shell.compact .board-column {
-  flex: 1 1 0;
-  min-width: 0;
-  max-width: none;
+  flex: 0 0 220px;
 }
 .app-shell.compact .loading-board {
   display: grid;

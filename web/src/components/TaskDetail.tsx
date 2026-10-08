@@ -115,6 +115,7 @@ interface TaskDetailProps {
   openingThread: boolean;
   onError: (message: TaskDetailError | null) => void;
   onAnnounce: (message: string) => void;
+  onClose: () => void;
 }
 
 function messageFor(error: unknown): TaskDetailError {
@@ -584,6 +585,7 @@ export function TaskDetail({
   openingThread,
   onError,
   onAnnounce,
+  onClose,
 }: TaskDetailProps) {
   const { language, locale, text } = useTaskboardI18n();
   // Narrow containers (the right-sidebar iframe) collapse the properties
@@ -971,11 +973,16 @@ export function TaskDetail({
         `评论已发布，但有 ${failed} 个附件上传失败。`,
         `The comment was posted, but ${failed} attachments failed to upload.`,
       ]);
-      else onAnnounce(
-        uploaded.length + inlineAttachments.length > 0
-          ? "评论和附件已发布。"
-          : "评论已发布。",
-      );
+      else {
+        onAnnounce(
+          uploaded.length + inlineAttachments.length > 0
+            ? "评论和附件已发布。"
+            : "评论已发布。",
+        );
+        // 评论发布成功后直接退回列表（议题 09582F74F86A-70）；有失败时留在详情展示错误。
+        onClose();
+        return;
+      }
       requestAnimationFrame(() => composerRef.current?.focus());
     } catch (error) {
       setCommentsError(messageFor(error));

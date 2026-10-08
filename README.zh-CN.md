@@ -20,6 +20,9 @@ dsh plugin --profile web add @ttmouse/dsh-taskboard
 - **自动认领**：每个映射工作区的项目自动认领最早的 `todo` 议题，经 dsh-routines 以无头会话执行并把进度回写为评论——无心跳文件、无长驻作业
 - **工作区即项目**：DSH 工作区自动同步为看板项目
 - **会话链接**：「在对话中打开」以真实 DSH 会话处理任务并回写会话 ID
+- **对话内任务卡**：看板派发的回合开场收进官方触发卡，回合尾挂议题卡直达右栏任务侧栏；用户自己发的消息保持普通样式
+
+![看板任务长在对话里](docs/screenshots/conversation-cards.zh.png)
 
 ## 从源码构建
 
