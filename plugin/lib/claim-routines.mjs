@@ -118,10 +118,11 @@ export function buildDispatchPrompt(project, task, comment, resumed = false) {
   // is already implied by the routine's cwd and the skill contract, so it
   // stays out of the card.
   const head = `议题 ${task.identifier}「${task.title}」（id ${task.id}）。`
-  // Exit contract (2026-10-09, user-directed rework of the 2026-10-08 rule):
-  // finish the work, post ONE summary (with inline image), then move the issue
-  // to in_review and STOP — done requires explicit human confirmation, the
-  // agent never moves an issue to done itself.
+  // Exit contract (2026-10-09, user-directed, supersedes the 2026-10-08
+  // auto-done rule): a normal round ends at in_review — work, commit, ONE
+  // summary with inline image, stop. Only an explicit human acceptance
+  // comment (验收通过/确认完成 and the like) authorizes moving the issue to
+  // done; the agent never closes an issue on its own.
   const exit = briefed
     ? '按 manage-taskboard 技能的「评论即执行」流程落实这条评论，回一条总结。'
     : '按 manage-taskboard 技能读该议题与全部评论，继续推进；完成后回一条总结。'
@@ -129,7 +130,7 @@ export function buildDispatchPrompt(project, task, comment, resumed = false) {
     briefed ? `${head}人类刚评论：` : `${head}人类按了「干一轮」。`,
     ...(briefed ? ['---', body, '---'] : []),
     exit,
-    '收尾契约：改动文件则以议题编号开头 commit（不 push、不提交无关文件）。总结评论必须附一张图（截图或对比图，markdown 内嵌 /api/attachments）让人一眼确认结果，纯文字不算完成。发完总结后把议题移到 in_review 即停，绝不能自己移到 done——done 只能由人类确认后操作。',
+    '收尾契约：每轮干完后，改动文件则以议题编号开头 commit（不 push、不提交无关文件），回一条总结（必须附一张图，截图或对比图，markdown 内嵌 /api/attachments，纯文字不算完成），然后把议题移到 in_review 即停。绝不能自己移到 done——只有当人类评论明确说验收通过（如「验收通过」「确认完成」）时，才按该评论把议题移到 done；人类没说验收通过，任何轮次都不得把议题移到 done。',
   ].join('\n')
 }
 
