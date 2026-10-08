@@ -689,24 +689,41 @@ function parseMove(body) {
 }
 
 /**
+ * True when the project workspace is a git repo with uncommitted changes —
+ * the precondition for the visible「处理中 → 提交 → done」handoff on human
+ * confirm.
+ */
+async function hasWorkspaceChanges(project) {
+  if (!project?.workspacePath) return false;
+  try {
+    const { stdout } = await execFileAsync("git", ["-C", project.workspacePath, "status", "--porcelain"]);
+    return stdout.trim() !== "";
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Auto-commit when a human confirms completion (move to done): commit the
  * project workspace changes with the issue identifier in the message so every
- * confirmed issue leaves a traceable commit. Best-effort — not a git repo,
- * nothing to commit, or a git failure only logs; the move itself always
- * succeeds. The commit is workspace-wide (add -A): the server cannot tell
- * which files belong to which issue.
+ * confirmed issue leaves a traceable commit. Returns true when a commit was
+ * actually created; false when there was nothing to commit, the workspace is
+ * not a git repo, or git failed (all logged, never thrown). The commit is
+ * workspace-wide (add -A): the server cannot tell which files belong to
+ * which issue.
  */
 async function autoCommitOnDone(project, task) {
-  if (!project?.workspacePath) return;
-  const gitArgs = ["-C", project.workspacePath];
+  if (!project?.workspacePath) return false;
   const message = `${task.identifier} ${task.title}`.slice(0, 200);
   try {
-    await execFileAsync("git", [...gitArgs, "add", "-A"]);
-    const { stdout } = await execFileAsync("git", [...gitArgs, "commit", "-m", message]);
+    await execFileAsync("git", ["-C", project.workspacePath, "add", "-A"]);
+    const { stdout } = await execFileAsync("git", ["-C", project.workspacePath, "commit", "-m", message]);
     console.log(`auto-commit ${task.identifier}: ${stdout.trim().split("\n")[0]}`);
+    return true;
   } catch (error) {
     const reason = String(error.stderr ?? error.message ?? "").trim().split("\n")[0] || "git failed";
     console.log(`auto-commit ${task.identifier}: skipped (${reason})`);
+    return false;
   }
 }
 
@@ -2877,13 +2894,22 @@ export function createTaskboardServer(options = {}) {
         }
         if (action === "move" && request.method === "POST") {
           const move = parseMove(await readJson(request));
+          // 人类在任务详情点「确认完成」（→ done）且工作区确有未提交改动
+          // 时，不瞬间落 done（todos.dev 式的可见承接）：先落「处理中」，
+          // 服务端把项目工作区修改提交到 Git，提交做完才移入 done。无工作
+          // 区或无改动走常规路径直接落 done。提交失败只记日志，完成不受阻。
+          const existing = move.status === "done" ? database.getTask(id) : null;
+          const project = existing && !existing.archivedAt ? database.getProject(existing.projectId) : null;
+          if (existing && (await hasWorkspaceChanges(project))) {
+            const processing = database.moveTask(id, move.version, "in_progress", undefined, move.threadId, actorFromRequest(request));
+            events.emit("task.moved", { task: processing });
+            await autoCommitOnDone(project, processing);
+            const final = database.moveTask(id, processing.version, "done", move.sortOrder, move.threadId, actorFromRequest(request));
+            events.emit("task.moved", { task: final });
+            return sendJson(response, 200, { task: final });
+          }
           const task = database.moveTask(id, move.version, move.status, move.sortOrder, move.threadId, actorFromRequest(request));
           events.emit("task.moved", { task });
-          // 人类在任务详情点「确认完成」（→ done）时，自动把项目工作区的
-          // 修改提交到 Git（尽力而为，见 autoCommitOnDone）。
-          if (move.status === "done" && !task.archivedAt) {
-            await autoCommitOnDone(database.getProject(task.projectId), task);
-          }
           return sendJson(response, 200, { task });
         }
         if (action === "archive" && request.method === "POST") {
