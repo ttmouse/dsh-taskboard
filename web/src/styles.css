@@ -3055,7 +3055,7 @@ kbd {
 }
 
 .issue-editor {
-  padding: 0 14px 22px;
+  padding: 0 14px 16px;
 }
 
 .issue-editor-content {
@@ -3129,26 +3129,26 @@ kbd {
 }
 
 .issue-title-input {
-  min-height: 50px;
+  min-height: 38px;
   margin: 0;
-  padding: 8px 0;
-  font-size: 23px;
+  padding: 4px 0;
+  font-size: 19px;
   font-weight: 600;
-  letter-spacing: -0.02em;
-  line-height: 34px;
+  letter-spacing: -0.015em;
+  line-height: 28px;
 }
 
 .issue-description-input,
 .issue-description-composer,
 .issue-description-read {
   width: calc(100% + 28px);
-  min-height: 68px;
-  margin: 8px -14px 0;
-  padding: 10px 14px 16px;
+  min-height: 48px;
+  margin: 6px -14px 0;
+  padding: 8px 14px 12px;
   color: var(--text-primary);
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 430;
-  line-height: 27px;
+  line-height: 22px;
 }
 
 .issue-description-composer {
@@ -3364,7 +3364,7 @@ kbd {
   display: grid;
   justify-items: start;
   gap: 8px;
-  margin-top: 18px;
+  margin-top: 12px;
 }
 
 .issue-conversation-link {
@@ -3428,11 +3428,13 @@ kbd {
 }
 
 .issue-attachments {
-  padding: 0 14px 22px;
+  padding: 14px 14px 20px;
+  border-top: var(--border-hairline) solid var(--border);
 }
 
 .issue-sub-issues {
-  padding: 0 14px 20px;
+  padding: 14px 14px 18px;
+  border-top: var(--border-hairline) solid var(--border);
 }
 
 .issue-sub-issues > header {
@@ -3957,6 +3959,7 @@ kbd {
 .activity-section {
   position: relative;
   padding: 14px 14px 60px;
+  border-top: var(--border-hairline) solid var(--border);
 }
 
 .activity-section::before {
@@ -9775,8 +9778,8 @@ kbd {
   }
 
   .issue-title-input {
-    font-size: 22px;
-    line-height: 32px;
+    font-size: 18px;
+    line-height: 26px;
   }
 
   .issue-conversation-list {
