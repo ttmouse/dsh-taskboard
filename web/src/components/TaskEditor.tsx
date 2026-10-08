@@ -429,110 +429,114 @@ export function TaskEditor({
 
         <div className="task-form-dock">
           <div className="property-row">
-            <TaskPropertyPicker
-              value={status}
-              options={TASK_STATUSES.map((value) => ({
-                value,
-                label: taskStatusLabel(language, value),
-                icon: <StatusIcon status={value} />,
-                className: `status-icon-${STATUS_DETAILS[value].tone}`,
-              }))}
-              open={menu === "status"}
-              triggerClassName="property-control property-status"
-              ariaLabel={text("状态", "Status")}
-              onOpenChange={(open) => setMenu(open ? "status" : null)}
-              onChange={setStatus}
-            />
-            <TaskPropertyPicker
-              value={priority}
-              options={TASK_PRIORITIES.map((value) => ({
-                value,
-                label: taskPriorityLabel(language, value),
-                icon: <LinearPriorityIcon priority={value} />,
-                className: `priority-${value}`,
-              }))}
-              open={menu === "priority"}
-              triggerClassName={`property-control property-priority priority-${priority}`}
-              ariaLabel={text("优先级", "Priority")}
-              onOpenChange={(open) => setMenu(open ? "priority" : null)}
-              onChange={setPriority}
-            />
-            <TaskPropertyPicker
-              value={actorKey(assignee)}
-              options={assigneeOptions.map((actor) => ({
-                value: actorKey(actor),
-                label: actor.id === currentUser.id
-                  ? `${actor.name}${text("（我）", " (me)")}`
-                  : actor.name,
-                icon: <ActorAvatar actor={actor} className="task-property-assignee-avatar" />,
-              }))}
-              open={menu === "assignee"}
-              triggerClassName="property-control property-assignee"
-              ariaLabel={text("负责人", "Assignee")}
-              onOpenChange={(open) => setMenu(open ? "assignee" : null)}
-              onChange={(value) => {
-                const selected = assigneeOptions.find((actor) => actorKey(actor) === value);
-                if (selected) setAssignee(selected);
-              }}
-            />
-            <LabelPicker
-              availableLabels={availableLabels}
-              selectedLabels={selectedLabels}
-              open={menu === "labels"}
-              triggerClassName="property-control"
-              showIcon
-              onOpenChange={(open) => setMenu(open ? "labels" : null)}
-              onChange={setSelectedLabels}
-            />
+            <div className="property-row-main">
+              <TaskPropertyPicker
+                value={status}
+                options={TASK_STATUSES.map((value) => ({
+                  value,
+                  label: taskStatusLabel(language, value),
+                  icon: <StatusIcon status={value} />,
+                  className: `status-icon-${STATUS_DETAILS[value].tone}`,
+                }))}
+                open={menu === "status"}
+                triggerClassName="property-control property-status"
+                ariaLabel={text("状态", "Status")}
+                onOpenChange={(open) => setMenu(open ? "status" : null)}
+                onChange={setStatus}
+              />
+              <TaskPropertyPicker
+                value={priority}
+                options={TASK_PRIORITIES.map((value) => ({
+                  value,
+                  label: taskPriorityLabel(language, value),
+                  icon: <LinearPriorityIcon priority={value} />,
+                  className: `priority-${value}`,
+                }))}
+                open={menu === "priority"}
+                triggerClassName={`property-control property-priority priority-${priority}`}
+                ariaLabel={text("优先级", "Priority")}
+                onOpenChange={(open) => setMenu(open ? "priority" : null)}
+                onChange={setPriority}
+              />
+              <TaskPropertyPicker
+                value={actorKey(assignee)}
+                options={assigneeOptions.map((actor) => ({
+                  value: actorKey(actor),
+                  label: actor.id === currentUser.id
+                    ? `${actor.name}${text("（我）", " (me)")}`
+                    : actor.name,
+                  icon: <ActorAvatar actor={actor} className="task-property-assignee-avatar" />,
+                }))}
+                open={menu === "assignee"}
+                triggerClassName="property-control property-assignee"
+                ariaLabel={text("负责人", "Assignee")}
+                onOpenChange={(open) => setMenu(open ? "assignee" : null)}
+                onChange={(value) => {
+                  const selected = assigneeOptions.find((actor) => actorKey(actor) === value);
+                  if (selected) setAssignee(selected);
+                }}
+              />
+              <LabelPicker
+                availableLabels={availableLabels}
+                selectedLabels={selectedLabels}
+                open={menu === "labels"}
+                triggerClassName="property-control"
+                showIcon
+                onOpenChange={(open) => setMenu(open ? "labels" : null)}
+                onChange={setSelectedLabels}
+              />
 
-            <label className="property-control property-workflow">
-              <LinearIcon name="dashboard" />
-              <span className="sr-only">{text("工作流", "Workflow")}</span>
-              <select value={workflowId} onChange={(event) => setWorkflowId(event.target.value)}>
-                <option value="">{text("工作流", "Workflow")}</option>
-                {!workflowAvailable && <option value={workflowId}>{text("当前设备未找到此流程", "Workflow not found on this device")}</option>}
-                {workflows.map((workflow) => (
-                  <option value={workflow.id} key={workflow.id}>{workflow.name}</option>
-                ))}
-              </select>
-            </label>
+              <label className="property-control property-workflow">
+                <LinearIcon name="dashboard" />
+                <span className="sr-only">{text("工作流", "Workflow")}</span>
+                <select value={workflowId} onChange={(event) => setWorkflowId(event.target.value)}>
+                  <option value="">{text("工作流", "Workflow")}</option>
+                  {!workflowAvailable && <option value={workflowId}>{text("当前设备未找到此流程", "Workflow not found on this device")}</option>}
+                  {workflows.map((workflow) => (
+                    <option value={workflow.id} key={workflow.id}>{workflow.name}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
 
-            <label className="property-control property-development" title={developmentScan.workspacePath ?? undefined}>
-              <LinearIcon name="branch" />
-              <span className="sr-only">{text("代码分支或 Worktree", "Code branch or worktree")}</span>
-              <select
-                value={contextValue(developmentContext)}
-                disabled={developmentScanLoading}
-                onChange={(event) => setDevelopmentContext(event.target.value ? JSON.parse(event.target.value) as DevelopmentContext : null)}
-              >
-                <option value="">{developmentScanLoading
-                  ? text("正在扫描 Git…", "Scanning Git…")
-                  : text("分支 / Worktree", "Branch / worktree")}</option>
-                <optgroup label={text("代码分支", "Code branches")}>
-                  {developmentOptions.filter((context) => context.type === "branch").map((context) => <option value={contextValue(context)} key={contextValue(context)}>{contextLabel(context, text)}</option>)}
-                </optgroup>
-                <optgroup label="Worktree">
-                  {developmentOptions.filter((context) => context.type === "worktree").map((context) => <option value={contextValue(context)} key={contextValue(context)}>{contextLabel(context, text)}</option>)}
-                </optgroup>
-              </select>
-            </label>
+            <div className="property-row-meta">
+              <label className="property-control property-development" title={developmentScan.workspacePath ?? undefined}>
+                <LinearIcon name="branch" />
+                <span className="sr-only">{text("代码分支或 Worktree", "Code branch or worktree")}</span>
+                <select
+                  value={contextValue(developmentContext)}
+                  disabled={developmentScanLoading}
+                  onChange={(event) => setDevelopmentContext(event.target.value ? JSON.parse(event.target.value) as DevelopmentContext : null)}
+                >
+                  <option value="">{developmentScanLoading
+                    ? text("正在扫描 Git…", "Scanning Git…")
+                    : text("分支 / Worktree", "Branch / worktree")}</option>
+                  <optgroup label={text("代码分支", "Code branches")}>
+                    {developmentOptions.filter((context) => context.type === "branch").map((context) => <option value={contextValue(context)} key={contextValue(context)}>{contextLabel(context, text)}</option>)}
+                  </optgroup>
+                  <optgroup label="Worktree">
+                    {developmentOptions.filter((context) => context.type === "worktree").map((context) => <option value={contextValue(context)} key={contextValue(context)}>{contextLabel(context, text)}</option>)}
+                  </optgroup>
+                </select>
+              </label>
 
-            {dueDate && (
-              <button className="property-control" type="button" onClick={() => setMenu("due")}>
-                <span>{text(
-                  `截止 ${displayDate(dueDate, locale)}`,
-                  `Due ${displayDate(dueDate, locale)}`,
-                )}</span>
-              </button>
-            )}
-            {recurrence && (
-              <button className="property-control" type="button" onClick={() => setMenu("recurrence")}>
-                <span>{text(
-                  `每 ${recurrence.interval} ${RECURRENCE_UNITS.zh[recurrence.unit]}`,
-                  `Every ${recurrence.interval} ${RECURRENCE_UNITS.en[recurrence.unit]}${recurrence.interval === 1 ? "" : "s"}`,
-                )}</span>
-              </button>
-            )}
+              {dueDate && (
+                <button className="property-control" type="button" onClick={() => setMenu("due")}>
+                  <span>{text(
+                    `截止 ${displayDate(dueDate, locale)}`,
+                    `Due ${displayDate(dueDate, locale)}`,
+                  )}</span>
+                </button>
+              )}
+              {recurrence && (
+                <button className="property-control" type="button" onClick={() => setMenu("recurrence")}>
+                  <span>{text(
+                    `每 ${recurrence.interval} ${RECURRENCE_UNITS.zh[recurrence.unit]}`,
+                    `Every ${recurrence.interval} ${RECURRENCE_UNITS.en[recurrence.unit]}${recurrence.interval === 1 ? "" : "s"}`,
+                  )}</span>
+                </button>
+              )}
+            </div>
 
             <div className="composer-menu-anchor">
               <button className="property-control property-more" type="button" aria-label={text("更多属性", "More properties")} onClick={() => setMenu(menu === "more" ? null : "more")}><LinearIcon name="more" /></button>

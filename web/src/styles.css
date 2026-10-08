@@ -6751,8 +6751,53 @@ kbd {
   background: var(--surface);
 }
 
+/* The dock is a two-line grid. Row 1 holds the issue's own attributes
+   (status / priority / assignee / labels / workflow) with the "…" overflow
+   button pinned to the right edge; row 2 holds the development target and the
+   scheduling chips. Rows are explicit tracks rather than a wrapping flex line,
+   so a chip can never end up orphaned beside the "…" button and the two lines
+   keep a consistent gap. */
 .task-form-dock > .property-row {
-  padding: 4px 20px 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 20px 0;
+}
+
+.property-row-main,
+.property-row-meta {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.property-row-main {
+  grid-column: 1;
+  grid-row: 1;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.property-row-meta {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* The branch/worktree selector is the widest chip; keep it from stretching the
+   second line to the full dock width while letting its label breathe. */
+.property-row-meta > .property-development {
+  flex: 0 1 auto;
+  max-width: 420px;
+}
+
+.property-row > .composer-menu-anchor {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: center;
+  margin: 0;
 }
 
 .task-form-dock > .form-error {
@@ -6763,6 +6808,45 @@ kbd {
 .task-form-dock .composer-popover {
   top: auto;
   bottom: 32px;
+}
+
+/* Uniform control rhythm inside the dock only: every chip in the property grid
+   shares one height and one radius, and the inline selects fill their chip
+   instead of floating at a different height than the button-shaped chips. The
+   global .property-control rule is shared with the detail pane, so all of this
+   stays scoped under .task-form-dock. */
+.task-form-dock .property-control {
+  height: 28px;
+  gap: 6px;
+  padding: 0 10px;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.task-form-dock .property-control svg {
+  width: 15px;
+  height: 15px;
+}
+
+.task-form-dock .property-control select,
+.task-form-dock .property-control input {
+  height: 100%;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.task-form-dock .property-control select {
+  max-width: 168px;
+}
+
+.task-form-dock .property-development select {
+  max-width: 240px;
+}
+
+.task-form-dock .property-more {
+  width: 28px;
+  height: 28px;
+  padding: 0;
 }
 
 .composer-title,
@@ -7211,12 +7295,15 @@ kbd {
 }
 
 .dialog-footer {
-  height: 54px;
+  height: 62px;
   padding: 0 20px;
+  margin-top: 12px;
+  border-top: var(--border-hairline) solid var(--border);
   background: transparent;
 }
 
 .dialog-actions {
+  align-items: center;
   gap: 8px;
 }
 
@@ -7415,6 +7502,14 @@ kbd {
   padding: 6px;
 }
 
+/* The "…" trigger sits in the dock's right-hand grid track, so its popover has
+   to open towards the left edge instead of the default `left: 0` (which would
+   push a 238px panel past the dialog's right border). */
+.task-form-dock > .property-row > .composer-menu-anchor > .composer-popover {
+  right: 0;
+  left: auto;
+}
+
 .more-popover button > span {
   width: 18px;
   color: var(--text-tertiary);
@@ -7508,6 +7603,12 @@ kbd {
   border-radius: 50%;
   background: var(--surface);
   color: var(--text-secondary);
+  transition: background-color 100ms ease, color 100ms ease;
+}
+
+.composer-attach-icon:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text-primary);
 }
 
 .composer-attach-icon svg {
@@ -7535,10 +7636,32 @@ kbd {
   font-size: 9px;
 }
 
-.dialog-footer .button.primary {
-  height: 28px;
-  padding: 0 14px;
+/* Footer buttons line up on one 30px baseline: the primary action, the
+   "create and run" secondary, and the round attach button all share the same
+   optical height, and both text buttons get the pill radius the primary
+   already had so the pair reads as one control group. */
+.dialog-footer .button {
+  height: 30px;
+  padding: 0 15px;
   border-radius: 9999px;
+  font-size: 12px;
+}
+
+.dialog-footer .button.primary {
+  height: 30px;
+  padding: 0 16px;
+  border-radius: 9999px;
+}
+
+.dialog-footer .button:not(.primary):not(.secondary) {
+  border: var(--border-hairline) solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text-secondary);
+}
+
+.dialog-footer .button:not(.primary):not(.secondary):hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text-primary);
 }
 
 .toast {
