@@ -1001,10 +1001,18 @@ const taskboardTurnDefinition = {
   },
 }
 
-/** Structural read of the refs one turn published (absent/degraded → empty). */
+/** Structural read of the refs one turn published (absent/degraded → empty).
+ * The host's turn data is a MutableLocationDataStore (a `.get(key)` object);
+ * older hosts used a Map — read through `.get` when present, else the Map. */
 function readTurnTaskRefs(turn: unknown): string[] {
-  const data = (turn as { data?: Map<string, unknown> } | undefined)?.data
-  const value = data instanceof Map ? data.get(TASKBOARD_TURN_KEY) as { refs?: unknown } | undefined : undefined
+  const data = (turn as { data?: unknown } | undefined)?.data
+  if (data === null || data === undefined) return []
+  let value: { refs?: unknown } | undefined
+  if (typeof (data as { get?: unknown }).get === 'function') {
+    value = (data as { get(key: string): unknown }).get(TASKBOARD_TURN_KEY) as { refs?: unknown } | undefined
+  } else if (data instanceof Map) {
+    value = (data as Map<string, { refs?: unknown }>).get(TASKBOARD_TURN_KEY)
+  }
   const refs = value?.refs
   return Array.isArray(refs) ? refs.filter((id): id is string => typeof id === 'string') : []
 }
