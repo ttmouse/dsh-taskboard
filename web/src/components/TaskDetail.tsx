@@ -6,6 +6,7 @@ import { taskboardStorage } from "../storage";
 import { isDshThreadId } from "../threads";
 import {
   ApiError,
+  attachmentContentUrl,
   attachmentDownloadUrl,
   attachmentUrlId,
   createComment,
@@ -489,8 +490,7 @@ function MarkdownImage({ alt, src, ...props }: ImgHTMLAttributes<HTMLImageElemen
   if (isAttachment) {
     if (attachment.blobUrl) {
       return <img {...props} src={attachment.blobUrl} alt={alt ?? ""} />;
-    }
-    if (attachment.failed) {
+    }    if (attachment.failed) {
       const reason = attachment.failureStatus !== null
         ? `(HTTP ${attachment.failureStatus})`
         : text("（网络未连通）", "(network unreachable)");
@@ -526,6 +526,57 @@ function MarkdownImage({ alt, src, ...props }: ImgHTMLAttributes<HTMLImageElemen
   // Remounting the element re-issues the request for the same clean URL;
   // mutating state alone would keep the identical src and never reload.
   return <img {...props} key={plainAttempt} src={src} alt={alt ?? ""} onError={handlePlainError} />;
+}
+
+// Click-to-view lightbox for image attachments. Reuses the same
+// fetch-then-blob loader as inline images so it behaves identically in the
+// desktop webview; Esc, the backdrop, or the close button dismiss it.
+function AttachmentImageViewer({ attachment, onClose }: { attachment: Attachment; onClose: () => void }) {
+  const { text } = useTaskboardI18n();
+  const image = useAttachmentImage(attachmentContentUrl(attachment), 0);
+
+  useEffect(() => {
+    const handleKey = (event: Event) => {
+      if ((event as globalThis.KeyboardEvent).key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [onClose]);
+
+  return (
+    <div className="attachment-viewer-backdrop" role="dialog" aria-modal="true" aria-label={attachment.filename} onClick={onClose}>
+      <figure className="attachment-viewer" onClick={(event) => event.stopPropagation()}>
+        <figcaption className="attachment-viewer-caption">
+          <strong>{attachment.filename}</strong>
+          <span>{fileSize(attachment.size)}</span>
+          <a
+            href={attachmentDownloadUrl(attachment)}
+            download={attachment.filename}
+            aria-label={text("下载附件", "Download attachment")}
+            title={text("下载附件", "Download attachment")}
+          >
+            <LinearIcon name="openExternal" />
+          </a>
+          <button type="button" aria-label={text("关闭", "Close")} title={text("关闭", "Close")} onClick={onClose}>
+            <LinearIcon name="close" />
+          </button>
+        </figcaption>
+        {image.blobUrl ? (
+          <img src={image.blobUrl} alt={attachment.filename} />
+        ) : image.failed ? (
+          <span className="markdown-image-broken">
+            <LinearIcon name="alert" />
+            <span>
+              {text("图片加载失败", "Image failed to load")}
+              {image.failureStatus !== null ? `(HTTP ${image.failureStatus})` : text("（网络未连通）", "(network unreachable)")}
+            </span>
+          </span>
+        ) : (
+          <span className="markdown-image-loading">{text("图片加载中…", "Loading image…")}</span>
+        )}
+      </figure>
+    </div>
+  );
 }
 
 function DescriptionDocument({ value }: { value: string }) {
@@ -628,6 +679,7 @@ export function TaskDetail({
   const [attachmentsError, setAttachmentsError] = useState<TaskDetailError | null>(null);
   const [uploadingAttachments, setUploadingAttachments] = useState(false);
   const [pendingAttachmentDelete, setPendingAttachmentDelete] = useState<Attachment | null>(null);
+  const [viewingImage, setViewingImage] = useState<Attachment | null>(null);
   const [deletingAttachment, setDeletingAttachment] = useState(false);
   const [comments, setComments] = useState<Comment[]>([]);
   const [taskActivities, setTaskActivities] = useState<TaskChangeActivity[]>([]);
@@ -1456,6 +1508,22 @@ export function TaskDetail({
                 <ul className="attachment-list">
                   {visibleTaskAttachments.map((attachment) => (
                     <li key={attachment.id}>
+                      {attachment.contentType.startsWith("image/") ? (
+                        <button
+                          type="button"
+                          className="attachment-link"
+                          title={text(`查看 ${attachment.filename}`, `View ${attachment.filename}`)}
+                          onClick={() => setViewingImage(attachment)}
+                        >
+                          <span className="attachment-file-icon" aria-hidden="true">
+                            <LinearIcon name="file" />
+                          </span>
+                          <span className="attachment-copy">
+                            <strong>{attachment.filename}</strong>
+                            <span>{fileSize(attachment.size)} · {relativeTime(attachment.createdAt, locale)}</span>
+                          </span>
+                        </button>
+                      ) : (
                       <a
                         className="attachment-link"
                         href={attachmentDownloadUrl(attachment)}
@@ -1471,6 +1539,7 @@ export function TaskDetail({
                           <span>{fileSize(attachment.size)} · {relativeTime(attachment.createdAt, locale)}</span>
                         </span>
                       </a>
+                      )}
                       <div className="attachment-actions">
                         <a
                           href={attachmentDownloadUrl(attachment)}
@@ -2215,6 +2284,9 @@ export function TaskDetail({
             </div>
           </div>
         </div>
+      )}
+      {viewingImage && (
+        <AttachmentImageViewer attachment={viewingImage} onClose={() => setViewingImage(null)} />
       )}
       {farFromBottom && (
         <button
