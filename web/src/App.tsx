@@ -1161,6 +1161,15 @@ export function App() {
     taskboardReplaceState(window.history.state, url);
   }
 
+  /** 详情里「确认完成」后：播放落卡动画并退出详情，回到列表看卡片落进完成列。 */
+  function acceptTaskFromDetail(taskId: string) {
+    setSettlingTaskId(taskId);
+    window.setTimeout(() => {
+      setSettlingTaskId((current) => current === taskId ? null : current);
+    }, 220);
+    closeTaskDetail();
+  }
+
   useEffect(() => {
     function syncRouteFromLocation() {
       const url = getTaskboardLocation();
@@ -2693,6 +2702,7 @@ export function App() {
             onError={(message) => setActionError(message === null ? null : typeof message === "string" ? message : message.join(" "))}
             onAnnounce={setAnnouncement}
             onClose={closeTaskDetail}
+            onAccepted={acceptTaskFromDetail}
           />
         ) : boardView === "dashboard" ? (
           <DashboardView

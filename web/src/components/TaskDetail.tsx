@@ -116,6 +116,8 @@ interface TaskDetailProps {
   onError: (message: TaskDetailError | null) => void;
   onAnnounce: (message: string) => void;
   onClose: () => void;
+  /** 验收成功后回调：宿主负责落卡动画并退出详情回列表。 */
+  onAccepted?: (taskId: string) => void;
 }
 
 function messageFor(error: unknown): TaskDetailError {
@@ -586,6 +588,7 @@ export function TaskDetail({
   onError,
   onAnnounce,
   onClose,
+  onAccepted,
 }: TaskDetailProps) {
   const { language, locale, text } = useTaskboardI18n();
   // Narrow containers (the right-sidebar iframe) collapse the properties
@@ -856,6 +859,8 @@ export function TaskDetail({
     } catch (error) {
       setCommentsError(messageFor(error));
     }
+    // 状态已落盘：交给宿主播放落卡动画并退出详情，回到列表看卡片落进完成列。
+    onAccepted?.(saved.id);
   }
 
   async function applyRelationMutation(
