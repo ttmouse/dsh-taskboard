@@ -1131,7 +1131,7 @@ async function serveStatic(request, response, pathname, staticDirectory) {
 
   const body = await readFile(filename);
   const headers = {
-    "cache-control": path.basename(filename) === "index.html" ? "no-cache" : "public, max-age=31536000, immutable",
+    "cache-control": path.basename(filename) === "index.html" ? "no-store" : "public, max-age=31536000, immutable",
     "content-length": body.length,
     "content-type": CONTENT_TYPES.get(path.extname(filename).toLowerCase()) ?? "application/octet-stream",
   };
