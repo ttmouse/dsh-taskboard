@@ -807,7 +807,11 @@ export function attachmentContentUrl(attachment: Attachment): string {
 }
 
 export function attachmentDownloadUrl(attachment: Attachment): string {
-  return `api/attachments/${encodeURIComponent(attachment.id)}/download`;
+  // The server only exposes /content — there is no /download route, so the
+  // previous URL here made every attachment download fail with
+  // 404 "API route not found". The filename is kept via the <a download>
+  // attribute in downloadAttachmentFile.
+  return attachmentContentUrl(attachment);
 }
 
 export function resolvePersistedAttachmentUrl(value: string): string {
