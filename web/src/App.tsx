@@ -1559,6 +1559,20 @@ export function App() {
         setEditor({ task: null, status: "todo" });
       }
       if (
+        event.key.toLowerCase() === "n"
+        && !event.metaKey
+        && !event.ctrlKey
+        && !event.altKey
+        && !event.shiftKey
+        && !detailTaskId
+        && selectedProjectId
+        && !isGlobalView
+        && boardView === "issues"
+      ) {
+        event.preventDefault();
+        setEditor({ task: null, status: "todo" });
+      }
+      if (
         event.key.toLowerCase() === "c"
         && !event.metaKey
         && !event.ctrlKey
