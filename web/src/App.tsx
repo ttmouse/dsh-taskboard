@@ -816,8 +816,8 @@ export function App() {
     () => projectChoices.filter((project) => project.issueCount === 0),
     [projectChoices],
   );
-  // 项目列表排序：开启自动化的在前，其次按最近议题动态（最近有任务执行的）靠前，
-  // 其余保持原有创建顺序。
+  // 项目列表排序：「全局」固定第一（聚合全量入口），开启自动化的在前，
+  // 其次按最近议题动态（最近有任务执行的）靠前，其余保持原有创建顺序。
   const sortedSidebarProjects = useMemo(() => {
     const activityTime = (project: Project) => {
       const value = project.lastActivityAt ?? project.updatedAt;
@@ -825,6 +825,8 @@ export function App() {
       return Number.isNaN(time) ? 0 : time;
     };
     return projects.map((project, index) => ({ project, index })).sort((left, right) => {
+      const byGlobal = Number(isGlobalProjectId(right.project.id)) - Number(isGlobalProjectId(left.project.id));
+      if (byGlobal !== 0) return byGlobal;
       const byAutomation = Number(right.project.automationEnabled) - Number(left.project.automationEnabled);
       if (byAutomation !== 0) return byAutomation;
       const byActivity = activityTime(right.project) - activityTime(left.project);
