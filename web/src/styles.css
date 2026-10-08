@@ -12841,25 +12841,41 @@ kbd {
 .app-shell.compact .header-actions .toolbar-tools { gap: 6px; }
 .app-shell.compact .header-actions .search-field input { width: 120px; }
 
-/* Compact chrome: the kanban board must fit the sidebar with no horizontal
-   scrolling — App.tsx caps how many columns render at once (each keeps a
-   220px readable floor), so the visible columns can share the width evenly;
-   overflow columns go to the hidden-columns panel. */
+/* Compact chrome: in the narrow sidebar the board stacks its columns
+   vertically — one full-width column section after another, the whole board
+   scrolls vertically like a page; no horizontal scrolling, no hidden columns. */
 .app-shell.compact .board-scroll {
   overflow-x: hidden;
+  overflow-y: auto;
   max-width: none;
+  width: auto;
   padding-right: 12px;
   scroll-snap-type: none;
+  overscroll-behavior-y: contain;
 }
 .app-shell.compact .board {
   display: flex;
+  flex-direction: column;
   width: 100%;
   min-width: 0;
+  height: auto;
+  min-height: 0;
+  gap: 14px;
 }
 .app-shell.compact .board-column {
-  flex: 1 1 0;
-  min-width: 0;
-  max-width: none;
+  flex: 0 0 auto;
+  height: auto;
+  min-height: 0;
+  max-height: none;
+  overflow: visible;
+  border-radius: 8px;
+}
+.app-shell.compact .board-column .column-list {
+  flex: 0 0 auto;
+  min-height: 0;
+}
+.app-shell.compact .board-column .column-header {
+  position: static;
 }
 .app-shell.compact .loading-board {
   display: grid;
