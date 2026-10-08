@@ -1549,7 +1549,6 @@ export function App() {
       if (
         event.key.toLowerCase() === "n"
         && (event.metaKey || event.ctrlKey)
-        && !event.shiftKey
         && !event.altKey
         && !detailTaskId
         && selectedProjectId
