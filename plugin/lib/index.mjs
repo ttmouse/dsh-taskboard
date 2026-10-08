@@ -804,7 +804,7 @@ async function runTaskDispatch(ctx, app, baseUrl, task, comment, log) {
     })
     if (finished) await countFixedRound(baseUrl, project, binding)
     else await reportRoundFailure(baseUrl, current, binding.sessionId, log)
-    return finished ? 'ran' : 'failed' 
+    return finished ? 'ran' : 'failed'
   } finally {
     dispatchInFlight.delete(task.id)
     // 没拿到租约的这次什么都不该动：既不能释放别人的租约，也不能接着起排队的那轮
