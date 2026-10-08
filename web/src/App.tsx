@@ -658,6 +658,9 @@ export function App() {
   const [openingProjectId, setOpeningProjectId] = useState<string | null>(null);
   const [openingThreadTaskId, setOpeningThreadTaskId] = useState<string | null>(null);
   const issueListRef = useRef<HTMLDivElement>(null);
+  const boardScrollRef = useRef<HTMLDivElement | null>(null);
+  // compact 模式下看板容器的实际宽度（ResizeObserver 实时测），用于列数自适应。
+  const [compactBoardWidth, setCompactBoardWidth] = useState(0);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [favoriteProjectIds, setFavoriteProjectIds] = useState(readFavoriteProjectIds);
   const [deviceWorkspacePaths, setDeviceWorkspacePaths] = useState(readDeviceWorkspacePaths);
@@ -1632,7 +1635,29 @@ export function App() {
 
   const columnVisibility = columnVisibilityByProject[selectedProjectId];
 
-  const visibleStatuses = useMemo(
+  useEffect(() => {
+    if (!compact) {
+      setCompactBoardWidth(0);
+      return;
+    }
+    const el = boardScrollRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width ?? 0;
+      setCompactBoardWidth((current) => (Math.abs(current - width) > 1 ? width : current));
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [compact, boardView, detailTask, tasksLoading, hasLoadedTasks]);
+
+  // 窄侧栏（compact）自适应：按看板实际宽度限制同时显示的列数，
+  // 每列保底 220px、预留「隐藏列」面板约 170px；放不下的列自动进隐藏列面板，
+  // 不产生横向滚动。宽面板不受影响。
+  const compactColumnCap = compact && compactBoardWidth > 0
+    ? Math.max(1, Math.floor((compactBoardWidth - 170) / 220))
+    : TASK_STATUSES.length;
+
+  const userVisibleStatuses = useMemo(
     () => TASK_STATUSES.filter((status) => (
       tasksByStatus[status].length === 0
         ? showEmptyColumns
@@ -1641,13 +1666,23 @@ export function App() {
     [columnVisibility, showEmptyColumns, tasksByStatus],
   );
 
-  const hiddenStatuses = useMemo(
+  const userHiddenStatuses = useMemo(
     () => TASK_STATUSES.filter((status) => (
       tasksByStatus[status].length === 0
         ? !showEmptyColumns
         : !(columnVisibility?.[status] ?? true)
     )),
     [columnVisibility, showEmptyColumns, tasksByStatus],
+  );
+
+  const visibleStatuses = useMemo(
+    () => userVisibleStatuses.slice(0, compactColumnCap),
+    [userVisibleStatuses, compactColumnCap],
+  );
+
+  const hiddenStatuses = useMemo(
+    () => [...userVisibleStatuses.slice(compactColumnCap), ...userHiddenStatuses],
+    [userVisibleStatuses, userHiddenStatuses, compactColumnCap],
   );
 
   function updateShowEmptyColumns(show: boolean) {
@@ -2767,7 +2802,7 @@ export function App() {
             ))}
           </div>
         ) : (
-          <div className="board-scroll" aria-label="Issue board">
+          <div className="board-scroll" aria-label="Issue board" ref={boardScrollRef}>
             <div className="board">
               {filteredTasks.length === 0 && tasks.length > 0 && !showEmptyColumns && (
                 <section className="page-empty filter-empty board-filter-empty">
