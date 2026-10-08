@@ -93,10 +93,13 @@ export function claimRoutinePromptText(project) {
  *    anchor stays even here because `fixed` sessionMode shares ONE
  *    conversation across every issue of the project — a bare「再测一下」
  *    would not say which issue it belongs to.
- *  - Fresh round (no conversation to resume): the session knows nothing, so
- *    the prompt carries the full thin binding — project, issue, comment, and
- *    the one skill line that names the exit contract.
- * @param project - board project record (name, id, workspacePath).
+ *  - Fresh round (no conversation to resume): the prompt carries the thinnest
+ *    binding that still lets a cold session act — issue identifier + title +
+ *    UUID (the API anchor), the trigger, and the exit contract. Project
+ *    name/id/path and issue status are implied by the routine's cwd and the
+ *    skill, so they stay out.
+ * @param project - board project record (kept for signature stability; the
+ *   prompt itself no longer cites it).
  * @param task - the issue being dispatched (identifier, title, status).
  * @param comment - the human comment that triggered the dispatch, or null for
  *   a zero-input dispatch.
@@ -104,26 +107,29 @@ export function claimRoutinePromptText(project) {
  */
 export function buildDispatchPrompt(project, task, comment, resumed = false) {
   const body = String(comment?.body ?? '').trim().slice(0, 4000)
+  const briefed = body !== ''
   if (resumed) {
     return body !== ''
       ? `来自议题 ${task.identifier} 的评论：\n${body}`
       : `（干一轮）继续推进议题 ${task.identifier}。`
   }
-  const briefed = body !== ''
-  const head = `本轮议题：${task.identifier}「${task.title}」（议题 ID：${task.id}，status=${task.status}）。`
+  // Anchor = identifier + title + issue UUID (the UUID is what the board API
+  // takes). Everything else — project name/id/path, issue status, role line —
+  // is already implied by the routine's cwd and the skill contract, so it
+  // stays out of the card.
+  const head = `议题 ${task.identifier}「${task.title}」（id ${task.id}）。`
   // Exit contract includes an auto-commit step: when the round changed files
   // in a git workspace, the agent commits them with the issue identifier so
   // every completed round leaves a traceable commit (no push, no unrelated
   // files, silent skip when there is nothing to commit).
   const exit = briefed
-    ? '按 manage-taskboard 技能的「评论即执行」流程继续：落实这条评论，回一条总结并把议题移回 in_review。'
-    : '按 manage-taskboard 技能读取该议题的最新内容与全部评论（含附件），从上次停下的地方继续，完成后回一条总结并把议题移回 in_review。'
+    ? '按 manage-taskboard 技能的「评论即执行」流程落实这条评论，回总结并移 in_review。'
+    : '按 manage-taskboard 技能读该议题与全部评论，继续推进；完成后回总结并移 in_review。'
   return [
-    `你是 dsh-taskboard 的自动承接例程，处理「${project.name}」项目（项目 ID：${project.id}，项目目录：${project.workspacePath}）。`,
-    briefed ? `${head}人类刚在它下面评论：` : `${head}人类按了「干一轮」。`,
+    briefed ? `${head}人类刚评论：` : `${head}人类按了「干一轮」。`,
     ...(briefed ? ['---', body, '---'] : []),
     exit,
-    '收尾时若本轮在项目目录产生了文件修改且该目录是 git 仓库：只把与议题相关的改动 git add 并 commit（提交信息以议题编号开头，如「<议题编号> <一句话改动>」），不要 push、不要提交无关文件；无修改或非 git 仓库则静默跳过。',
+    '改动文件则以议题编号开头 commit（不 push），无改动跳过。',
   ].join('\n')
 }
 
