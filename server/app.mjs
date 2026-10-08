@@ -2387,10 +2387,21 @@ export function createTaskboardServer(options = {}) {
             throw new ApiError(409, "CLAIM_ROUTINE_NO_RUNNER",
               "Claim routines run in-process in the DSH host; this server has no in-process runner");
           }
+          // The in-process runner reports where the request actually went:
+          // "queued" means a live round took it and this one runs after — that
+          // is not the same as "started", and the panel must not claim success.
           const handled = await options.routinesRunHandler(name);
+          // Three explicit verdicts: "queued" (a live round took it),
+          // "started"/true (it is running now), "skipped"/false (a gate
+          // refused). A truthy string like "skipped" must not read as success.
+          const claimMode = handled === "queued"
+            ? "queued"
+            : handled === "started" || handled === true
+              ? "in-process"
+              : "gated";
           return sendJson(response, 202, {
-            started: handled ? name : null,
-            mode: handled ? "in-process" : "gated",
+            started: claimMode === "gated" ? null : name,
+            mode: claimMode,
           });
         }
         if (options.routinesRunHandler) {

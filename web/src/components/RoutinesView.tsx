@@ -341,7 +341,14 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
     setRanName(null);
     try {
       const result = await runRoutine(name);
-      if (result.started) {
+      if (result.mode === "queued") {
+        // 有活轮次在跑：这次请求排在它后面，不是「已触发」。
+        setRunNotice(text(
+          "已排队：这一轮跑完接着跑（有轮次正在进行中）",
+          "Queued: it runs when the live round finishes",
+        ));
+        void load();
+      } else if (result.started) {
         setRanName(name);
         setRunNotice(`${routineDisplayName(routines?.find((r) => r.name === name) ?? ({ name } as RoutineInfo))} ${text("已触发 ✓ 运行记录稍后出现在该任务的运行记录里", "triggered ✓ — the run record will appear shortly")}`);
         void load();

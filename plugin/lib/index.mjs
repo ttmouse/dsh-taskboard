@@ -29,6 +29,7 @@ import { fileURLToPath } from 'node:url'
 import z from 'schemastery'
 import { createTaskboardServer } from '../vendor/server/app.mjs'
 import { buildDispatchPrompt, buildSessionTitle, cleanupStaleClaimRoutines, reconcileClaimRoutine, selectNextTask } from './claim-routines.mjs'
+import { createDispatchQueue } from './dispatch-queue.mjs'
 import { activeClaimSessions, executeClaimInProcess, finalizeInterruptedRuns, stopClaimSession, writeRunRecord } from './claim-executor.mjs'
 import { defaultCheckCommand, runCheck } from './check-gate.mjs'
 import { createDshChatEngine } from './dsh-chat-engine.mjs'
@@ -491,12 +492,23 @@ async function runProjectClaimGates(project, baseUrl, log) {
  *  a scheduled claim IS a zero-input dispatch of the picked issue (ADR-0002). */
 async function runInProcessClaim(ctx, app, project, baseUrl, log) {
   const picked = await runProjectClaimGates(project, baseUrl, log)
-  if (picked === null) return false
+  if (picked === null) return 'skipped'
   return runTaskDispatch(ctx, app, baseUrl, picked.task, null, log)
 }
 
 /** In-flight dispatch runs, keyed by task id (one live run per issue). */
 const dispatchInFlight = new Set()
+
+/**
+ * 一轮在跑时收到的派发请求，等这一轮结束再跑（每议题至多一条，不堆叠）。
+ *
+ * 为什么需要它：定时到点和自动化面板的 ▶ 都走同一条派发管线，而管线在议题
+ * 已有活轮次时直接返回——对定时来说那次触发就白费了，对 ▶ 来说更糟：HTTP 早就
+ * 回了 202「已触发」，界面上显示成功，实际什么都没跑。宁可排队，也不静默丢活。
+ *
+ * 语义与测试见 dispatch-queue.mjs。
+ */
+const pendingDispatches = createDispatchQueue()
 
 /**
  * Rounds delivered into one fixed conversation before the automation starts a
@@ -705,7 +717,11 @@ function queuedCommentReader(baseUrl, taskId, sinceIso) {
  *     run's queue reader at its next turn;
  *   • the issue is moved to in_progress first, so every open board shows the
  *     handoff immediately (the server pushes task.moved over SSE).
- * @returns {Promise<boolean>} true when a round actually ran.
+ * @returns {Promise<'ran' | 'failed' | 'queued' | 'skipped'>} 轮次的去向。
+ *   ran     — 跑完了一轮
+ *   failed  — 起了一轮但没跑完（失败已写回议题，见 reportRoundFailure）
+ *   queued  — 已有活轮次，这次请求排到它后面（不丢）
+ *   skipped — 没跑，且没排队（项目没工作区，或人类评论已交给在跑那一轮）
  */
 async function runTaskDispatch(ctx, app, baseUrl, task, comment, log) {
   let project
@@ -716,21 +732,24 @@ async function runTaskDispatch(ctx, app, baseUrl, task, comment, log) {
   }
   if (!project?.workspacePath) {
     log(`[dispatch] ${task.identifier}: project has no workspace, nothing to run`)
-    return false
+    return 'skipped'
   }
   if (dispatchInFlight.has(task.id)) {
-    log(`[dispatch] ${task.identifier}: a run is already live — the comment is queued for its next turn`)
-    return false
+    return queueOrHandOff(project, task, comment, 'another round is live', log)
   }
   dispatchInFlight.add(task.id)
+  // 只有真正拿到租约的那一次才负责释放它。以前的 finally 无条件 release：
+  // 一个因为「已有活轮次」而退出的派发会把**别人**的租约删掉，互斥随之消失，
+  // 第三个派发就能再拿一次租约，同一议题上并排跑两轮（已实测复现）。
+  let holdsLease = false
   try {
     const automation = await readProjectAutomation(baseUrl, project.id)
     const binding = await resolveClaimSession(baseUrl, project, automation, log, task)
     // 轮次租约：跨进程/跨驱动（按钮、评论、另一宿主）的唯一互斥依据（ADR-0001）。
     if (app.database.acquireDispatchLease(task.id, binding.sessionId) === null) {
-      log(`[dispatch] ${task.identifier}: a live round holds the lease — skipped`)
-      return false
+      return queueOrHandOff(project, task, comment, 'a live round holds the lease', log)
     }
+    holdsLease = true
     let current = task
     try {
       const res = await fetch(`${baseUrl}/api/tasks/${encodeURIComponent(task.id)}/move`, {
@@ -785,11 +804,69 @@ async function runTaskDispatch(ctx, app, baseUrl, task, comment, log) {
     })
     if (finished) await countFixedRound(baseUrl, project, binding)
     else await reportRoundFailure(baseUrl, current, binding.sessionId, log)
-    return finished
+    return finished ? 'ran' : 'failed' 
   } finally {
     dispatchInFlight.delete(task.id)
-    app.database.releaseDispatchLease(task.id)
+    // 没拿到租约的这次什么都不该动：既不能释放别人的租约，也不能接着起排队的那轮
+    // （否则「排队 → 立刻发现自己还是忙 → 再排队」会变成一个空转的死循环）。
+    if (holdsLease) {
+      app.database.releaseDispatchLease(task.id)
+      startQueuedRound(ctx, app, baseUrl, task.id, log)
+    }
   }
+}
+
+/**
+ * 一轮结束时，如果这期间有人排过队，就接着跑那一轮。
+ * 不 await：排队的那一轮不该拖住收尾（调用方可能正等这一次的返回）。
+ */
+function startQueuedRound(ctx, app, baseUrl, taskId, log) {
+  const queued = pendingDispatches.take(taskId)
+  if (queued === null) return
+  void (async () => {
+    let fresh
+    try {
+      const res = await fetch(`${baseUrl}/api/tasks/${encodeURIComponent(taskId)}`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      fresh = (await res.json()).task
+    } catch (error) {
+      log(`[dispatch] queued round dropped: could not re-read the issue (${error instanceof Error ? error.message : String(error)})`)
+      return
+    }
+    if (!fresh) return
+    log(`[dispatch] ${fresh.identifier}: starting the queued round (${queued.reason})`)
+    await runTaskDispatch(ctx, app, baseUrl, fresh, queued.comment, log)
+  })().catch((error) => {
+    log(`[dispatch] queued round failed: ${error instanceof Error ? error.message : String(error)}`)
+  })
+}
+
+/**
+ * 议题已有活轮次时，这次派发去哪。
+ *
+ * 人类评论交给在跑那一轮（它的队列读会送达，见 queuedCommentReader），
+ * 再排一轮会把同一句话执行两遍；没有评论载体的请求（定时、▶ 按钮）排队等它。
+ */
+async function queueOrHandOff(project, task, comment, reason, log) {
+  if (comment) {
+    log(`[dispatch] ${task.identifier}: a live round picked the comment up for its next turn (${reason})`)
+    return 'skipped'
+  }
+  // 排队也是一次真实的派发结果，写进运行记录，自动化面板看得见，
+  // 而不是像以前那样只留一句日志、界面显示「已触发」。
+  const first = pendingDispatches.enqueue(task.id, { comment: null, reason })
+  if (first) {
+    await writeRunRecord(project, {
+      status: 'queued',
+      startedAt: Date.now(),
+      finishedAt: Date.now(),
+      durationMs: 0,
+      exitCode: 0,
+      error: `queued: ${reason} — this round starts when the live one ends`,
+    }).catch(() => {})
+  }
+  log(`[dispatch] ${task.identifier}: queued one more round (${reason})`)
+  return 'queued'
 }
 
 /**
@@ -1031,13 +1108,17 @@ export function apply(ctx, config) {
             const picked = await runProjectClaimGates(project, baseUrl, (message) =>
               ctx.logger.info(`dsh-taskboard: ${message}`),
             )
-            if (picked === null) return false
-            void runTaskDispatch(ctx, app, baseUrl, picked.task, null, (message) =>
+            if (picked === null) return 'skipped'
+            // 轮次放后台跑，但「这次请求有没有被接住」要当场定下来：
+            // 已有活轮次时它是排队，不是「已触发」——界面照实说。
+            const task = picked.task
+            const live = dispatchInFlight.has(task.id) || app.database.hasActiveDispatch(task.id)
+            void runTaskDispatch(ctx, app, baseUrl, task, null, (message) =>
               ctx.logger.info(`dsh-taskboard: ${message}`),
             ).catch((error) => {
               ctx.logger.info(`dsh-taskboard: background claim round failed: ${error instanceof Error ? error.message : String(error)}`)
             })
-            return true
+            return live ? 'queued' : 'started' 
           }
           return false
         },
