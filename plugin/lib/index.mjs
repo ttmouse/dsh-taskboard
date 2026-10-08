@@ -508,7 +508,7 @@ const dispatchInFlight = new Set()
  *
  * 语义与测试见 dispatch-queue.mjs。
  */
-const pendingDispatches = createDispatchQueue()
+export const pendingDispatches = createDispatchQueue()
 
 /**
  * Rounds delivered into one fixed conversation before the automation starts a
@@ -847,7 +847,7 @@ function startQueuedRound(ctx, app, baseUrl, taskId, log) {
  * 人类评论交给在跑那一轮（它的队列读会送达，见 queuedCommentReader），
  * 再排一轮会把同一句话执行两遍；没有评论载体的请求（定时、▶ 按钮）排队等它。
  */
-async function queueOrHandOff(project, task, comment, reason, log) {
+export async function queueOrHandOff(project, task, comment, reason, log) {
   if (comment) {
     log(`[dispatch] ${task.identifier}: a live round picked the comment up for its next turn (${reason})`)
     return 'skipped'
