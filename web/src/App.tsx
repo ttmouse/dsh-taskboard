@@ -24,11 +24,13 @@ import {
   addTaskRelation,
   archiveTask as archiveTaskRequest,
   createTask as createTaskRequest,
+  dispatchIssue,
   getTaskboardRevision,
   getWorkflowWorkspace,
   getTaskboardMetadata,
   getProjectAutomation,
   getClaimModels,
+  isGlobalProjectId,
   listArchivedTasks,
   listDevelopmentContexts,
   listDeviceWorkspaces,
@@ -701,6 +703,11 @@ export function App() {
   }, []);
 
   const selectedProject = projects.find((project) => project.id === selectedProjectId) ?? null;
+  // 「全局」视图：聚合展示所有项目的议题（该条目本身没有工作目录，不提供新建议题入口）。
+  const isGlobalView = isGlobalProjectId(selectedProjectId);
+  const projectNames = useMemo(() => (
+    Object.fromEntries(projects.map((project) => [project.id, project.name]))
+  ), [projects]);
   const currentUser = hostContext?.user ?? DEFAULT_USER_ACTOR;
   const selectedDeviceWorkspacePath = deviceWorkspacePaths[selectedProjectId];
   const selectedProjectAutomation = projectAutomations[selectedProjectId];
@@ -809,6 +816,22 @@ export function App() {
     () => projectChoices.filter((project) => project.issueCount === 0),
     [projectChoices],
   );
+  // 项目列表排序：开启自动化的在前，其次按最近议题动态（最近有任务执行的）靠前，
+  // 其余保持原有创建顺序。
+  const sortedSidebarProjects = useMemo(() => {
+    const activityTime = (project: Project) => {
+      const value = project.lastActivityAt ?? project.updatedAt;
+      const time = value ? Date.parse(value) : Number.NaN;
+      return Number.isNaN(time) ? 0 : time;
+    };
+    return projects.map((project, index) => ({ project, index })).sort((left, right) => {
+      const byAutomation = Number(right.project.automationEnabled) - Number(left.project.automationEnabled);
+      if (byAutomation !== 0) return byAutomation;
+      const byActivity = activityTime(right.project) - activityTime(left.project);
+      if (byActivity !== 0) return byActivity;
+      return left.index - right.index;
+    }).map((entry) => entry.project);
+  }, [projects]);
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
 
   const writeProjectAutomation = useCallback((
@@ -1526,6 +1549,7 @@ export function App() {
         && !event.metaKey
         && !event.ctrlKey
         && selectedProjectId
+        && !isGlobalView
         && boardView === "issues"
       ) {
         event.preventDefault();
@@ -1542,7 +1566,7 @@ export function App() {
 
     window.addEventListener("keydown", handleShortcut);
     return () => window.removeEventListener("keydown", handleShortcut);
-  }, [boardView, contextMenu, detailTaskId, editor, projectMenuOpen, selectedProjectId]);
+  }, [boardView, contextMenu, detailTaskId, editor, isGlobalView, projectMenuOpen, selectedProjectId]);
 
   const filteredTasks = useMemo(() => {
     return tasks.filter(
@@ -1642,6 +1666,7 @@ export function App() {
     draft: TaskDraft,
     attachments: File[],
     inlineImages: PendingInlineImage[],
+    runAfterCreate = false,
   ) {
     if (!selectedProjectId || !editor) return;
     setActionError(null);
@@ -1696,6 +1721,13 @@ export function App() {
           await archiveTaskRequest(current);
           setTasks((tasks) => tasks.filter((task) => task.id !== saved.id));
         });
+        if (runAfterCreate) {
+          try {
+            await dispatchIssue(saved.id);
+          } catch {
+            setActionError(`${saved.identifier} 已创建，但自动执行启动失败，可在详情页重试。`);
+          }
+        }
       } else if (editor.task) {
         const previous = editor.task;
         const previousAssigneeTarget = assigneeTargetForActor(previous.assignee, currentUser);
@@ -2290,7 +2322,7 @@ export function App() {
 
           <div className="project-nav">
             <span className="nav-label">项目</span>
-            {projects.map((project) => (
+            {sortedSidebarProjects.map((project) => (
               <button
                 key={project.id}
                 type="button"
@@ -2473,7 +2505,7 @@ export function App() {
                 <LinearIcon name={boardView === "list" ? "boardView" : "listView"} />
               </button>
             )}
-            {selectedProjectId && boardView !== "workflow" && (
+            {selectedProjectId && !isGlobalView && boardView !== "workflow" && (
               <button
                 className="icon-button header-create-button"
                 type="button"
@@ -2680,6 +2712,7 @@ export function App() {
             presentations={taskPresentations}
             currentUser={currentUser}
             hasActiveFilters={hasActiveTaskFilters}
+            projectNames={isGlobalView ? projectNames : undefined}
             onOpenTask={openTaskDetail}
             onOpenConversation={openTaskConversation}
             onUpdate={updateTaskProperties}
@@ -2750,6 +2783,8 @@ export function App() {
                   movingTaskId={movingTaskId}
                   settlingTaskId={settlingTaskId}
                   contextMenuTaskId={contextMenu?.taskId ?? null}
+                  projectNames={isGlobalView ? projectNames : undefined}
+                  canCreate={!isGlobalView}
                   onCreate={(initialStatus) => setEditor({ task: null, status: initialStatus })}
                   onEdit={openTaskDetail}
                   onContextMenu={(task, position) => setContextMenu({ taskId: task.id, ...position })}
@@ -2856,7 +2891,21 @@ export function App() {
         </div>
       )}
       {draggedTaskId && <div className="drag-hint" aria-hidden="true">拖到目标位置后松开</div>}
+      <BuildBadge />
     </div>
     </TaskboardLanguageProvider>
   );
+}
+
+// Shows which frontend bundle is actually running. An iframe SPA keeps the
+// old bundle in memory until the page reloads, so a fix that is "shipped"
+// can still not be what the user sees; this badge makes that gap checkable
+// from any screenshot of the board.
+function BuildBadge() {
+  const hash = useMemo(() => {
+    const script = document.querySelector('script[type="module"][src*="index-"]');
+    return script?.getAttribute("src")?.match(/index-([A-Za-z0-9_-]+)\.js/)?.[1]?.slice(0, 4) ?? null;
+  }, []);
+  if (!hash) return null;
+  return <span className="build-badge" title={`前端构建 ${hash}`}>ui:{hash}</span>;
 }

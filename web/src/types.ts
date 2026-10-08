@@ -203,6 +203,7 @@ export interface Project {
   workspacePath: string | null;
   issueCount: number;
   automationEnabled: boolean;
+  lastActivityAt: string | null;
   createdAt: string;
   updatedAt: string;
 }

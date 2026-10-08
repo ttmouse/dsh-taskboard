@@ -19,6 +19,8 @@ interface IssueListViewProps {
   presentations: Record<string, TaskCardPresentation>;
   currentUser: ActorIdentity;
   hasActiveFilters: boolean;
+  /** projectId → 项目名；「全局」聚合视图传入，用于标注所属项目。 */
+  projectNames?: Record<string, string>;
   onOpenTask: (task: Task) => void;
   onOpenConversation: (conversation: TaskCardPresentation["conversations"][number]) => void;
   onUpdate: (task: Task, changes: Partial<TaskDraft>) => Promise<Task>;
@@ -41,6 +43,7 @@ export function IssueListView({
   presentations,
   currentUser,
   hasActiveFilters,
+  projectNames,
   onOpenTask,
   onOpenConversation,
   onUpdate,
@@ -148,6 +151,9 @@ export function IssueListView({
                       >
                         <span className="issue-list-title-cell">
                           <small>{task.identifier}</small>
+                          {projectNames?.[task.projectId] && (
+                            <small className="card-project-chip" title={`所属项目：${projectNames[task.projectId]}`}>{projectNames[task.projectId]}</small>
+                          )}
                           <strong>{task.title}</strong>
                           {presentations[task.id]?.unread && <span className="task-unread-dot" aria-label={text("有未读更新", "Unread updates")} />}
                         </span>

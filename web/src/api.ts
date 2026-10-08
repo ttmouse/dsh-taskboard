@@ -559,12 +559,21 @@ export async function listDevelopmentContexts(
   );
 }
 
+/** 「全局」项目的固定 id：不对应任何工作目录，仅作为聚合视图加载所有项目的议题。 */
+export const GLOBAL_PROJECT_ID = "local";
+
+export function isGlobalProjectId(projectId: string): boolean {
+  return projectId === GLOBAL_PROJECT_ID;
+}
+
 async function listTasksByArchive(
   projectId: string,
   archived: "true" | "false",
   signal?: AbortSignal,
 ): Promise<Task[]> {
-  const params = new URLSearchParams({ projectId, archived });
+  const params = new URLSearchParams({ archived });
+  // 「全局」视图：不带 projectId，聚合加载所有项目的议题（服务端已支持省略该参数）。
+  if (!isGlobalProjectId(projectId)) params.set("projectId", projectId);
   const data = await request<{ tasks: Task[] }>(`/api/tasks?${params}`, { signal });
   return data.tasks;
 }

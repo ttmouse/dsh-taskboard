@@ -30,6 +30,8 @@ import processingAnimation from "../assets/figma-taskboard/loading-16.svg";
 interface CommonTaskCardProps {
   task: Task;
   variant?: "main" | "sidebar";
+  /** 议题所属项目名；仅「全局」聚合视图等跨项目场景传入，普通项目视图省略。 */
+  projectName?: string;
   isDragging: boolean;
   dragShift: number;
   isMoving: boolean;
@@ -367,6 +369,7 @@ function AssigneeControl({
 function BoardTaskCard({
   task,
   statusIndex,
+  projectName,
   isDragging,
   dragShift,
   isMoving,
@@ -427,6 +430,9 @@ function BoardTaskCard({
       <div className="card-topline">
         <span className="card-reference">
           <span className="task-identifier">{task.identifier}</span>
+          {projectName && (
+            <span className="card-project-chip" title={`所属项目：${projectName}`}>{projectName}</span>
+          )}
           {task.relations.parent && (
             <>
               <LinearIcon name="chevronRight" />

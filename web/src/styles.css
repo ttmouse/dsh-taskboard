@@ -2637,6 +2637,25 @@ kbd {
   white-space: nowrap;
 }
 
+/* 「全局」聚合视图下卡片/列表行上的所属项目标注 */
+.card-project-chip {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 1 auto;
+  max-width: 88px;
+  height: 15px;
+  padding: 0 5px;
+  overflow: hidden;
+  border: var(--border-hairline) solid var(--border);
+  border-radius: 2px;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  font-weight: 450;
+  line-height: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .task-identifier {
   flex: 0 0 auto;
   overflow: hidden;
@@ -7041,6 +7060,19 @@ kbd {
   color: var(--text-primary);
   font-size: 12px;
   cursor: pointer;
+}
+
+/* 附件图抓取渲染期间的加载占位（fetch→blob 成功前不渲染 <img>） */
+.markdown-image-loading {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  vertical-align: middle;
+  opacity: 0.75;
 }
 
 .markdown-image-broken button:hover {
@@ -12863,3 +12895,19 @@ kbd {
   border-radius: 6px;
 }
 .issue-properties-toggle:hover { background: var(--surface-hover); color: var(--text-secondary); }
+
+/* Frontend build badge: makes "which bundle is running" checkable from a
+   screenshot. Bottom-left keeps it clear of the AI chat launcher ball
+   (fixed right:16 bottom:16). Low contrast so it never draws attention. */
+.build-badge {
+  position: fixed;
+  left: 16px;
+  bottom: 10px;
+  z-index: 30;
+  font-size: 10px;
+  line-height: 14px;
+  color: var(--text-tertiary, var(--text-secondary, #999));
+  opacity: 0.6;
+  user-select: text;
+  pointer-events: auto;
+}

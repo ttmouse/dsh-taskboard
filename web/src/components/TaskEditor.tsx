@@ -91,6 +91,7 @@ interface TaskEditorProps {
     draft: TaskDraft,
     attachments: File[],
     inlineImages: PendingInlineImage[],
+    runAfterCreate?: boolean,
   ) => Promise<void>;
 }
 
@@ -148,6 +149,7 @@ export function TaskEditor({
   const titleRef = useRef<HTMLTextAreaElement>(null);
   const descriptionComposerRef = useRef<InlineMediaComposerHandle>(null);
   const createSubmitIntentRef = useRef(false);
+  const createAndRunIntentRef = useRef(false);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
   const [title, setTitle] = useState(task?.title ?? initialDraft?.title ?? "");
   const [description, setDescription] = useState(task?.description ?? "");
@@ -250,6 +252,8 @@ export function TaskEditor({
       const descriptionValue = task
         ? description.trim()
         : serializeInlineMedia(descriptionSegments).trim();
+      const runAfterCreate = createAndRunIntentRef.current;
+      createAndRunIntentRef.current = false;
       await onSave({
         title: cleanTitle,
         description: descriptionValue,
@@ -262,7 +266,7 @@ export function TaskEditor({
         startDate: startDate || null,
         dueDate: dueDate || null,
         recurrence,
-      }, attachments, inlineMediaImages(descriptionSegments));
+      }, attachments, inlineMediaImages(descriptionSegments), runAfterCreate);
     } catch (caught) {
       if (caught instanceof ApiError && caught.code === "VERSION_CONFLICT") {
         setError([
@@ -583,12 +587,30 @@ export function TaskEditor({
             {task && <span aria-hidden="true" />}
             <div className="dialog-actions">
               {task && <span className="dialog-updated">{text(`编辑 ${task.identifier}`, `Editing ${task.identifier}`)}</span>}
+              {!task && (
+                <button
+                  className="button"
+                  type="submit"
+                  disabled={saving}
+                  onClick={() => {
+                    createSubmitIntentRef.current = true;
+                    createAndRunIntentRef.current = true;
+                  }}
+                >
+                  {saving
+                    ? text("正在保存…", "Saving…")
+                    : text("创建并执行", "Create and run")}
+                </button>
+              )}
               <button
                 className="button primary"
                 type="submit"
                 disabled={saving}
                 onClick={() => {
-                  if (!task) createSubmitIntentRef.current = true;
+                  if (!task) {
+                    createSubmitIntentRef.current = true;
+                    createAndRunIntentRef.current = false;
+                  }
                 }}
               >
                 {saving

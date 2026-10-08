@@ -66,6 +66,10 @@ interface BoardColumnProps {
   movingTaskId: string | null;
   settlingTaskId: string | null;
   contextMenuTaskId: string | null;
+  /** projectId → 项目名；「全局」聚合视图传入，用于在卡片上标注所属项目。 */
+  projectNames?: Record<string, string>;
+  /** 是否显示列内「+」新建议题入口（「全局」聚合视图没有落点项目，隐藏）。 */
+  canCreate?: boolean;
   onCreate: (status: TaskStatus) => void;
   onEdit: (task: Task) => void;
   onContextMenu: (task: Task, position: { x: number; y: number }) => void;
@@ -89,6 +93,8 @@ export function BoardColumn({
   movingTaskId,
   settlingTaskId,
   contextMenuTaskId,
+  projectNames,
+  canCreate = true,
   onCreate,
   onEdit,
   onContextMenu,
@@ -179,6 +185,7 @@ export function BoardColumn({
               onAction={() => onHide(status)}
             />
           )}
+          {canCreate && (
           <button
             type="button"
             className="icon-button add-task-button"
@@ -188,6 +195,7 @@ export function BoardColumn({
           >
             <TaskboardIcon name={COLUMN_ADD_ICONS[status] ?? "columnAdd"} />
           </button>
+          )}
         </div>
       </header>
 
@@ -198,6 +206,7 @@ export function BoardColumn({
             <TaskCard
               key={task.id}
               task={task}
+              projectName={projectNames?.[task.projectId]}
               statusIndex={statusIndex}
               isDragging={draggedTaskId === task.id}
               dragShift={dragShift}

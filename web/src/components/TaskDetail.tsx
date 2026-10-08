@@ -338,32 +338,114 @@ function ActivityChangeIcon({ field, before, after }: {
   return <LinearIcon name="write" />;
 }
 
+// Attachment images load through fetch-then-render: the attachment route is
+// same-origin, so the page fetches the bytes itself and renders the blob as
+// the <img> source — the element then never issues its own network request.
+// This sidesteps environments where <img> loads issued while a detail view
+// mounts keep failing until a later manual retry, and it lets the retry
+// chain keep running in the background over a long tail without visual
+// churn. Failures carry the HTTP status into the placeholder. External
+// (non-attachment) images stay on the plain <img> element — fetching them
+// would need CORS they don't have — with remount-based retries instead.
+const ATTACHMENT_RETRY_DELAYS_MS = [600, 1800, 4000, 8000, 15000, 30000] as const;
 const IMAGE_RETRY_DELAYS_MS = [600, 1800, 4000, 8000] as const;
 
-// Rendered markdown images retry transient failures (rebuilt bundles swap
-// asset URLs, brief server restarts) with escalating backoff before giving
-// up with an explicit placeholder — a broken <img> never recovers on its
-// own. Each retry re-mounts the <img> with the SAME clean URL (remounting
-// re-issues the request; the response is `no-store`, so no cache busting is
-// needed and the content route ignores query parameters anyway). When the
-// retries run out, a fetch probe reports the server's actual status in the
-// placeholder so a stuck image reports its real reason instead of a bare
-// "failed".
-function MarkdownImage({ alt, src, ...props }: ImgHTMLAttributes<HTMLImageElement>) {
-  const { text } = useTaskboardI18n();
-  const [attempt, setAttempt] = useState(0);
+class ImageHttpStatusError extends Error {
+  constructor(readonly status: number) {
+    super(`HTTP ${status}`);
+  }
+}
+
+type AttachmentImageState = {
+  blobUrl: string | null;
+  loading: boolean;
+  failed: boolean;
+  failureStatus: number | null;
+};
+
+function useAttachmentImage(src: string | null, nonce: number): AttachmentImageState {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(Boolean(src));
   const [failed, setFailed] = useState(!src);
-  const [reason, setReason] = useState("");
+  const [failureStatus, setFailureStatus] = useState<number | null>(null);
   const retryTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
-    setAttempt(0);
-    setFailed(!src);
-    setReason("");
+    if (retryTimerRef.current !== null) {
+      window.clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
+    if (!src) {
+      setBlobUrl(null);
+      setLoading(false);
+      setFailed(true);
+      setFailureStatus(null);
+      return;
+    }
+    setBlobUrl(null);
+    setLoading(true);
+    setFailed(false);
+    setFailureStatus(null);
+    let cancelled = false;
+    let objectUrl: string | null = null;
+
+    const attempt = async (n: number): Promise<void> => {
+      if (cancelled) return;
+      try {
+        const response = await fetch(src, { cache: "no-store" });
+        if (cancelled) return;
+        if (!response.ok) throw new ImageHttpStatusError(response.status);
+        const blob = await response.blob();
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setBlobUrl(objectUrl);
+        setLoading(false);
+      } catch (error) {
+        if (cancelled) return;
+        const status = error instanceof ImageHttpStatusError ? error.status : null;
+        if (n >= ATTACHMENT_RETRY_DELAYS_MS.length) {
+          setLoading(false);
+          setFailed(true);
+          setFailureStatus(status);
+          return;
+        }
+        retryTimerRef.current = window.setTimeout(() => {
+          retryTimerRef.current = null;
+          void attempt(n + 1);
+        }, ATTACHMENT_RETRY_DELAYS_MS[n]);
+      }
+    };
+    void attempt(0);
     return () => {
+      cancelled = true;
       if (retryTimerRef.current !== null) {
         window.clearTimeout(retryTimerRef.current);
         retryTimerRef.current = null;
+      }
+      if (objectUrl !== null) URL.revokeObjectURL(objectUrl);
+    };
+  }, [src, nonce]);
+
+  return { blobUrl, loading, failed, failureStatus };
+}
+
+function MarkdownImage({ alt, src, ...props }: ImgHTMLAttributes<HTMLImageElement>) {
+  const { text } = useTaskboardI18n();
+  const [nonce, setNonce] = useState(0);
+  const [plainAttempt, setPlainAttempt] = useState(0);
+  const [plainFailed, setPlainFailed] = useState(!src);
+  const plainTimerRef = useRef<number | null>(null);
+
+  const isAttachment = typeof src === "string" && src !== "" && isAttachmentUrl(src);
+  const attachment = useAttachmentImage(isAttachment ? src : null, nonce);
+
+  useEffect(() => {
+    setPlainAttempt(0);
+    setPlainFailed(!src);
+    return () => {
+      if (plainTimerRef.current !== null) {
+        window.clearTimeout(plainTimerRef.current);
+        plainTimerRef.current = null;
       }
     };
   }, [src]);
@@ -375,46 +457,61 @@ function MarkdownImage({ alt, src, ...props }: ImgHTMLAttributes<HTMLImageElemen
     return <code className="markdown-image-invalid">![{alt ?? ""}]({src})</code>;
   }
 
-  // The <img> error event carries no status, so once the retries run out a
-  // one-shot fetch probe recovers the real failure reason for the placeholder.
-  async function diagnose() {
-    if (!src) return;
-    try {
-      const probe = await fetch(src, { cache: "no-store" });
-      setReason(`(HTTP ${probe.status})`);
-    } catch {
-      setReason(text("（网络未连通）", "(network unreachable)"));
-    }
-  }
-
-  function handleError() {
-    if (attempt >= IMAGE_RETRY_DELAYS_MS.length) {
-      setFailed(true);
-      void diagnose();
+  function retryNow() {
+    if (isAttachment) {
+      setNonce((current) => current + 1);
       return;
     }
-    const delay = IMAGE_RETRY_DELAYS_MS[attempt];
-    retryTimerRef.current = window.setTimeout(() => {
-      retryTimerRef.current = null;
-      setAttempt((current) => current + 1);
+    if (plainTimerRef.current !== null) {
+      window.clearTimeout(plainTimerRef.current);
+      plainTimerRef.current = null;
+    }
+    setPlainAttempt(0);
+    setPlainFailed(false);
+  }
+
+  function handlePlainError() {
+    if (plainAttempt >= IMAGE_RETRY_DELAYS_MS.length) {
+      setPlainFailed(true);
+      return;
+    }
+    const delay = IMAGE_RETRY_DELAYS_MS[plainAttempt];
+    plainTimerRef.current = window.setTimeout(() => {
+      plainTimerRef.current = null;
+      setPlainAttempt((current) => current + 1);
     }, delay);
   }
 
-  function retryNow() {
-    if (retryTimerRef.current !== null) {
-      window.clearTimeout(retryTimerRef.current);
-      retryTimerRef.current = null;
+  if (isAttachment) {
+    if (attachment.blobUrl) {
+      return <img {...props} src={attachment.blobUrl} alt={alt ?? ""} />;
     }
-    setAttempt(0);
-    setFailed(false);
-    setReason("");
+    if (attachment.failed) {
+      const reason = attachment.failureStatus !== null
+        ? `(HTTP ${attachment.failureStatus})`
+        : text("（网络未连通）", "(network unreachable)");
+      return (
+        <span className="markdown-image-broken">
+          <LinearIcon name="alert" />
+          <span>{text("图片加载失败", "Image failed to load")}{reason}</span>
+          <button type="button" onClick={retryNow}>
+            {text("重试", "Retry")}
+          </button>
+        </span>
+      );
+    }
+    return (
+      <span className="markdown-image-loading">
+        {text("图片加载中…", "Loading image…")}
+      </span>
+    );
   }
 
-  if (failed || !src) {
+  if (plainFailed || !src) {
     return (
       <span className="markdown-image-broken">
         <LinearIcon name="alert" />
-        <span>{text("图片加载失败", "Image failed to load")}{reason}</span>
+        <span>{text("图片加载失败", "Image failed to load")}</span>
         <button type="button" onClick={retryNow}>
           {text("重试", "Retry")}
         </button>
@@ -424,7 +521,7 @@ function MarkdownImage({ alt, src, ...props }: ImgHTMLAttributes<HTMLImageElemen
 
   // Remounting the element re-issues the request for the same clean URL;
   // mutating state alone would keep the identical src and never reload.
-  return <img {...props} key={attempt} src={src} alt={alt ?? ""} onError={handleError} />;
+  return <img {...props} key={plainAttempt} src={src} alt={alt ?? ""} onError={handlePlainError} />;
 }
 
 function DescriptionDocument({ value }: { value: string }) {
