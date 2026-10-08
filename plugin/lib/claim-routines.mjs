@@ -111,13 +111,19 @@ export function buildDispatchPrompt(project, task, comment, resumed = false) {
   }
   const briefed = body !== ''
   const head = `本轮议题：${task.identifier}「${task.title}」（议题 ID：${task.id}，status=${task.status}）。`
+  // Exit contract includes an auto-commit step: when the round changed files
+  // in a git workspace, the agent commits them with the issue identifier so
+  // every completed round leaves a traceable commit (no push, no unrelated
+  // files, silent skip when there is nothing to commit).
+  const exit = briefed
+    ? '按 manage-taskboard 技能的「评论即执行」流程继续：落实这条评论，回一条总结并把议题移回 in_review。'
+    : '按 manage-taskboard 技能读取该议题的最新内容与全部评论（含附件），从上次停下的地方继续，完成后回一条总结并把议题移回 in_review。'
   return [
     `你是 dsh-taskboard 的自动承接例程，处理「${project.name}」项目（项目 ID：${project.id}，项目目录：${project.workspacePath}）。`,
     briefed ? `${head}人类刚在它下面评论：` : `${head}人类按了「干一轮」。`,
     ...(briefed ? ['---', body, '---'] : []),
-    briefed
-      ? '按 manage-taskboard 技能的「评论即执行」流程继续：落实这条评论，回一条总结并把议题移回 in_review。'
-      : '按 manage-taskboard 技能读取该议题的最新内容与全部评论（含附件），从上次停下的地方继续，完成后回一条总结并把议题移回 in_review。',
+    exit,
+    '收尾时若本轮在项目目录产生了文件修改且该目录是 git 仓库：只把与议题相关的改动 git add 并 commit（提交信息以议题编号开头，如「<议题编号> <一句话改动>」），不要 push、不要提交无关文件；无修改或非 git 仓库则静默跳过。',
   ].join('\n')
 }
 
