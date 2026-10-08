@@ -820,7 +820,7 @@ async function runTaskDispatch(ctx, app, baseUrl, task, comment, log) {
  * 一轮结束时，如果这期间有人排过队，就接着跑那一轮。
  * 不 await：排队的那一轮不该拖住收尾（调用方可能正等这一次的返回）。
  */
-function startQueuedRound(ctx, app, baseUrl, taskId, log) {
+export function startQueuedRound(ctx, app, baseUrl, taskId, log) {
   const queued = pendingDispatches.take(taskId)
   if (queued === null) return
   void (async () => {
