@@ -1478,6 +1478,10 @@ export class TaskboardDatabase {
       where.push("status = ?");
       values.push(filters.status);
     }
+    if (filters.threadId) {
+      where.push("thread_id = ?");
+      values.push(filters.threadId);
+    }
     if (filters.archived === "false") {
       where.push("archived_at IS NULL");
     } else if (filters.archived === "true") {

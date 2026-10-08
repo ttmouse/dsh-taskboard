@@ -827,7 +827,7 @@ async function assertEmptyRequestBody(request, routeLabel) {
 }
 
 function parseTaskFilters(searchParams) {
-  const allowed = new Set(["projectId", "status", "archived"]);
+  const allowed = new Set(["projectId", "status", "archived", "threadId"]);
   for (const key of searchParams.keys()) {
     if (!allowed.has(key)) {
       throw new ApiError(400, "UNKNOWN_QUERY_PARAMETER", `Unknown query parameter '${key}'`);
@@ -847,7 +847,11 @@ function parseTaskFilters(searchParams) {
     throw new ApiError(400, "INVALID_QUERY_PARAMETER", "'archived' must be true, false, or all");
   }
   const projectId = projectIdValue === null ? undefined : validateProjectId(projectIdValue);
-  return { projectId, status: statusValue ?? undefined, archived };
+  const threadIdValue = searchParams.get("threadId");
+  if (threadIdValue !== null && (threadIdValue === "" || threadIdValue.length > 256)) {
+    throw new ApiError(400, "INVALID_QUERY_PARAMETER", "Invalid task threadId filter");
+  }
+  return { projectId, status: statusValue ?? undefined, archived, threadId: threadIdValue ?? undefined };
 }
 
 /**

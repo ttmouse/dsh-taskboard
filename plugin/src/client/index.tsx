@@ -133,6 +133,14 @@ const SIDE_TAB_ID = '@ttmouse/dsh-taskboard/tasks'
 /** Right-sidebar tab kind: a page type, opened from the guide page. */
 const SIDE_TAB_KIND = 'taskboard-tasks'
 
+/** Tab-chip glyph style, matching the official schedule tab title icon. */
+const TAB_TITLE_ICON_STYLE = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  color: 'var(--dsw-alias-label-secondary, inherit)',
+  flex: 'none',
+} as const
+
 /** Hint paragraph style (resolved/empty states; inline keeps style ownership trivial). */
 const SIDE_HINT_STYLE = {
   margin: 0,
@@ -451,6 +459,7 @@ const DICTIONARIES = {
     'turncard.openAria': '打开看板任务 {title}',
     'turncard.loading': '正在读取任务…',
     'turncard.missing': '任务不存在或已删除',
+    'row.open': '打开该会话关联的任务',
     'status.backlog': '待办',
     'status.todo': '待认领',
     'status.in_progress': '推进中',
@@ -478,6 +487,7 @@ const DICTIONARIES = {
     'turncard.openAria': 'Open board task {title}',
     'turncard.loading': 'Loading task…',
     'turncard.missing': 'Task missing or deleted',
+    'row.open': 'Open the tasks linked to this conversation',
     'status.backlog': 'Backlog',
     'status.todo': 'To claim',
     'status.in_progress': 'In progress',
@@ -1160,6 +1170,51 @@ function TaskboardTurnCard(props: TurnTailProps): ReactElement | null {
   )
 }
 
+/**
+ * Workspace-sidebar session-row task entry: one hover icon button per session
+ * row (the `sidebar.workspaces.session.row.action` list, the same seat the
+ * shell's own pin/archive buttons use). Clicking resolves the session's board
+ * project, looks up the tasks bound to this conversation (`threadId` filter),
+ * and deep-links the right-sidebar task tab to the single bound task — or
+ * falls back to the project task list when the session has none or several.
+ * Geometry copies the shell row button (16×16, 14px glyph, tertiary color) so
+ * the three hover buttons read as one row.
+ */
+function SessionRowTaskButton({ sessionId, onOpen, t }: {
+  sessionId: string
+  onOpen: (sessionId: string) => void
+  t: (key: string) => string
+}): ReactElement {
+  const [hover, setHover] = useState(false)
+  const label = t('row.open')
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={() => onOpen(sessionId)}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        width: 16,
+        height: 16,
+        padding: 0,
+        border: 0,
+        borderRadius: 'var(--dsw-radius-xs, 4px)',
+        background: 'transparent',
+        color: hover ? 'var(--dsw-alias-label-primary)' : 'var(--dsw-alias-label-tertiary)',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flex: 'none',
+        cursor: 'pointer',
+      }}
+    >
+      <TasksIcon size={14} />
+    </button>
+  )
+}
+
 export const inject = ['sessions', 'workspaces', 'locale', 'slots', 'layout', 'sidebarRightTabs', 'sidebarRight', 'uiWorkspace', 'uiConversation']
 
 export function apply(ctx: {
@@ -1271,7 +1326,14 @@ export function apply(ctx: {
     name: 'sidebar.right.pane.tab.title',
     key: SIDE_TAB_ID,
     locale: NS,
-  }, () => t('sidepanel.label'))), 'dsh-taskboard: right-sidebar tab title')
+  }, () => (
+    // Icon + label, the same chip shape the official schedule tab title uses
+    // (glyph then text; dockkit owns the spacing and vertical alignment).
+    <>
+      <span style={TAB_TITLE_ICON_STYLE}><TasksIcon size={16} /></span>
+      {t('sidepanel.label')}
+    </>
+  ))), 'dsh-taskboard: right-sidebar tab title')
 
   /**
    * Reveal this session's taskboard tab in the right sidebar (never throwing
@@ -1332,6 +1394,44 @@ export function apply(ctx: {
       t={(key, params) => t(key, params)}
     />
   ))), 'dsh-taskboard: turn-tail task cards')
+
+  /**
+   * The workspace-sidebar session-row entry: one hover button per conversation
+   * row in the history list. The click resolves the conversation's bound
+   * tasks (threadId filter); exactly one deep-links the right-sidebar task tab
+   * to that task's detail, otherwise the tab opens on the project list.
+   */
+  const openSessionTasks = (sessionId: string): void => {
+    void (async () => {
+      try {
+        const project = await resolveProjectForSession(sessionId, ctx.sessions)
+        if (project === null) {
+          openSideTasks(sessionId)
+          return
+        }
+        const response = await fetch(`${BOARD_API_PREFIX}/api/tasks?projectId=${encodeURIComponent(project.id)}&threadId=${encodeURIComponent(sessionId)}&archived=all`)
+        const body = response.ok
+          ? await response.json() as { tasks?: Array<{ id?: unknown }> }
+          : {}
+        const ids = (body.tasks ?? [])
+          .map((task) => task.id)
+          .filter((id): id is string => typeof id === 'string')
+        openSideTasks(sessionId, ids.length === 1 ? ids[0] : undefined)
+      } catch {
+        openSideTasks(sessionId)
+      }
+    })()
+  }
+
+  ctx.effect(() => ctx.slots.inject('sidebar.workspaces.session.row.action', () => ctx.slots.register({
+    name: 'sidebar.workspaces.session.row.action',
+    id: 'taskboard-open',
+    order: 300,
+    locale: NS,
+    inject: (sessionId: unknown) => ({ sessionId: sessionId as string }),
+  }, (props: { sessionId: string; t: (key: string) => string }) => (
+    <SessionRowTaskButton sessionId={props.sessionId} onOpen={openSessionTasks} t={props.t} />
+  ))), 'dsh-taskboard: session row entry')
 
   // The settings card asks to open the board.
   ctx.effect(() => {
