@@ -4,7 +4,7 @@ import { taskPriorityLabel, taskStatusLabel, useTaskboardI18n } from "../i18n";
 import { labelPresentation } from "../labels";
 import type { TaskCardPresentation } from "../taskConversations";
 import { TASK_PRIORITIES, type ActorIdentity, type Task, type TaskDraft, type TaskStatus } from "../types";
-import { BOARD_LANES, LANE_LABELS, isLaneVisible, type BoardLane, type BoardLaneId } from "../boardColumns";
+import { BOARD_LANES, LANE_LABELS, WAITING_REASON_LABELS, isLaneVisible, type BoardLane, type BoardLaneId } from "../boardColumns";
 import { ActorAvatar } from "./ActorAvatar";
 import { StatusIcon } from "./BoardColumn";
 import { LinearIcon, LinearPriorityIcon } from "./LinearIcon";
@@ -161,8 +161,12 @@ export function IssueListView({
                       <div className="issue-list-segment" key={status}>
                         {segmented && (
                           <div className="issue-list-segment-heading">
-                            <span>{taskStatusLabel(language, status)}</span>
-                            <span>{statusTasks.length}</span>
+                            <span className="issue-list-segment-label">
+                              {WAITING_REASON_LABELS[status]
+                                ? text(WAITING_REASON_LABELS[status]!.zh, WAITING_REASON_LABELS[status]!.en)
+                                : taskStatusLabel(language, status)}
+                            </span>
+                            <span className="issue-list-segment-count">{statusTasks.length}</span>
                           </div>
                         )}
                         {statusTasks.length ? statusTasks.map((task) => {

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { DragEvent } from "react";
 import { TASK_STATUSES, type Task, type TaskStatus } from "../types";
-import { LANE_LABELS, type BoardLane, type BoardLaneId } from "../boardColumns";
+import { LANE_LABELS, WAITING_REASON_LABELS, type BoardLane, type BoardLaneId } from "../boardColumns";
 import { ColumnVisibilityMenu } from "./ColumnVisibilityMenu";
 import { TaskCard } from "./TaskCard";
 import {
@@ -281,7 +281,9 @@ export function BoardColumn({
             <div className="column-segment" key={status}>
               {showSegment && (
                 <div className="column-segment-heading">
-                  <span className="column-segment-label">{STATUS_DETAILS[status].label}</span>
+                  <span className="column-segment-label">
+                    {WAITING_REASON_LABELS[status]?.zh ?? STATUS_DETAILS[status].label}
+                  </span>
                   <span className="column-segment-count">{segment.length}</span>
                 </div>
               )}

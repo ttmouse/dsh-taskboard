@@ -12249,21 +12249,32 @@ kbd {
   padding: 2px 8px 0;
 }
 
+/* 每段最后一行不画底线：紧跟下一段标题时，那道线是多余的。 */
+.issue-list-segment:last-child .issue-list-row:last-child {
+  border-bottom: 0;
+}
+
 /* 「等你」组内按来源分段：组说该谁动，段说为什么（与看板同一套读法）。 */
 .issue-list-segment + .issue-list-segment {
   margin-top: 6px;
 }
 
+/* 段名紧跟它的计数，不甩到最右边：宽列表里那会跟标签隔开上千像素，看着像坏了。 */
 .issue-list-segment-heading {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 6px 10px 2px 30px;
+  align-items: baseline;
+  gap: 6px;
+  padding: 8px 10px 2px 30px;
   color: var(--text-tertiary);
   font-size: 10.5px;
   font-weight: 550;
   letter-spacing: 0.02em;
+}
+
+.issue-list-segment-count {
+  color: var(--text-tertiary);
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
 }
 
 /* 唯一需要人动手的那一组，标题重一点。 */

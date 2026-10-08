@@ -36,11 +36,6 @@ interface CommonTaskCardProps {
   isMoving: boolean;
   isSettling: boolean;
   isContextMenuOpen: boolean;
-  /**
-   * 为什么这件事在等（如「待验收」「被阻塞」）。只在合并列里传——
-   * 单状态列里卡片自己就是那个状态，再标一遍是重复。
-   */
-  statusChip?: string;
   onEdit: (task: Task) => void;
   onContextMenu: (task: Task, position: { x: number; y: number }) => void;
   onDragStart: (task: Task, height: number) => void;

@@ -69,6 +69,18 @@ export function isLaneVisible(
   return hasContent || lane.defaultVisible;
 }
 
+/**
+ * 「等你」列里每件事为什么在等你。
+ *
+ * 它标在**每件事自己身上**，不是分组标题——为什么是单件事的属性，不是段落的属性；
+ * 而且分组的动作入口完全一样（打开它）。标签写「要你做什么」而不是状态名，
+ * 所以它不会跟列名重复（列叫「等你」，标签就不能再叫「等你确认」）。
+ */
+export const WAITING_REASON_LABELS: Partial<Record<TaskStatus, { zh: string; en: string }>> = {
+  in_review: { zh: "待验收", en: "Review" },
+  blocked: { zh: "被阻塞", en: "Blocked" },
+};
+
 export function laneById(id: BoardLaneId): BoardLane {
   const lane = BOARD_LANES.find((candidate) => candidate.id === id);
   if (!lane) throw new Error(`unknown board lane '${id}'`);
