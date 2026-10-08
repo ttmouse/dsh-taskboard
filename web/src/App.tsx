@@ -2033,7 +2033,6 @@ export function App() {
           type: "taskboard:open-thread",
           payload: { threadId: trimmed },
         }, "*");
-        setAnnouncement(`已切换到 DeepSeek Harness 会话 ${trimmed}。`);
         return;
       }
       window.open(`${DSH_WEB_URL}/?session=${encodeURIComponent(trimmed)}`, "_blank", "noopener,noreferrer");
@@ -2079,7 +2078,6 @@ export function App() {
           type: "taskboard:open-thread",
           payload: { threadId },
         }, "*");
-        setAnnouncement(`已切换到 DeepSeek Harness 会话 ${threadId}。`);
         return;
       }
       window.open(`${DSH_WEB_URL}/?session=${encodeURIComponent(threadId)}`, "_blank", "noopener,noreferrer");
@@ -2115,7 +2113,6 @@ export function App() {
             projectId: selectedProject?.id ?? null,
           },
         }, "*");
-        setAnnouncement("已发送给 DeepSeek Harness 执行，切换到了对应会话。");
         return;
       }
       setActionError("请在 DSH Web GUI 中以插件方式打开看板，才能驱动真实会话执行议题。");
