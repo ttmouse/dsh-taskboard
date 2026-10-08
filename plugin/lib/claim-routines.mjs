@@ -118,18 +118,19 @@ export function buildDispatchPrompt(project, task, comment, resumed = false) {
   // is already implied by the routine's cwd and the skill contract, so it
   // stays out of the card.
   const head = `议题 ${task.identifier}「${task.title}」（id ${task.id}）。`
-  // Exit contract includes an auto-commit step: when the round changed files
-  // in a git workspace, the agent commits them with the issue identifier so
-  // every completed round leaves a traceable commit (no push, no unrelated
-  // files, silent skip when there is nothing to commit).
+  // Exit contract (2026-10-08, user-directed): finish the work, post ONE
+  // summary, auto-commit issue-related changes, then move the issue straight
+  // to done — no second human confirmation. Server-side guard: the auto
+  // commit on a →done move only fires when the workspace still has uncommitted
+  // changes, so this commit stands and nothing double-commits.
   const exit = briefed
-    ? '按 manage-taskboard 技能的「评论即执行」流程落实这条评论，回总结并移 in_review。'
-    : '按 manage-taskboard 技能读该议题与全部评论，继续推进；完成后回总结并移 in_review。'
+    ? '按 manage-taskboard 技能的「评论即执行」流程落实这条评论，回一条总结。'
+    : '按 manage-taskboard 技能读该议题与全部评论，继续推进；完成后回一条总结。'
   return [
     briefed ? `${head}人类刚评论：` : `${head}人类按了「干一轮」。`,
     ...(briefed ? ['---', body, '---'] : []),
     exit,
-    '改动文件则以议题编号开头 commit（不 push），无改动跳过。',
+    '收尾契约：改动文件则以议题编号开头 commit（不 push、不提交无关文件），然后直接把议题移到 done，不停 in_review 等二次确认；无改动也直接移 done。',
   ].join('\n')
 }
 
