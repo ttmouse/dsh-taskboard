@@ -12249,6 +12249,33 @@ kbd {
   padding: 2px 8px 0;
 }
 
+/* 「等你」组内按来源分段：组说该谁动，段说为什么（与看板同一套读法）。 */
+.issue-list-segment + .issue-list-segment {
+  margin-top: 6px;
+}
+
+.issue-list-segment-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px 2px 30px;
+  color: var(--text-tertiary);
+  font-size: 10.5px;
+  font-weight: 550;
+  letter-spacing: 0.02em;
+}
+
+/* 唯一需要人动手的那一组，标题重一点。 */
+.issue-list-group.lane-you .issue-list-group-header {
+  background: color-mix(in srgb, var(--accent-soft) 40%, var(--surface-muted));
+}
+
+.issue-list-group.lane-you .issue-list-group-header strong {
+  color: var(--text-primary);
+  font-weight: 620;
+}
+
 .issue-list-row {
   display: grid;
   grid-template-columns: minmax(230px, 1fr) max-content 64px;

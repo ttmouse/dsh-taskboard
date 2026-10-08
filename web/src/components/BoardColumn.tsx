@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { DragEvent } from "react";
 import { TASK_STATUSES, type Task, type TaskStatus } from "../types";
-import type { BoardLane, BoardLaneId } from "../boardColumns";
+import { LANE_LABELS, type BoardLane, type BoardLaneId } from "../boardColumns";
 import { ColumnVisibilityMenu } from "./ColumnVisibilityMenu";
 import { TaskCard } from "./TaskCard";
 import {
@@ -88,13 +88,13 @@ interface BoardColumnProps {
   onComplete?: (task: Task) => void;
 }
 
-/** 列的标题与图标只在列模型里定义一处。 */
-const LANE_DETAILS: Record<BoardLaneId, { label: string; status: TaskStatus; countLabel: string }> = {
-  you: { label: "等你", status: "in_review", countLabel: "件待你处理" },
-  running: { label: "处理中", status: "in_progress", countLabel: "件在跑" },
-  queued: { label: "等待认领", status: "todo", countLabel: "件排队" },
-  finished: { label: "已完成", status: "done", countLabel: "件已结束" },
-  parked: { label: "待立项", status: "backlog", countLabel: "件候选" },
+/** 列标题来自共享的列模型；这里只补一个代表性状态（取图标与色调）。 */
+const LANE_SAMPLE_STATUS: Record<BoardLaneId, TaskStatus> = {
+  you: "in_review",
+  running: "in_progress",
+  queued: "todo",
+  finished: "done",
+  parked: "backlog",
 };
 
 export function BoardColumn({
@@ -124,7 +124,13 @@ export function BoardColumn({
   onComplete,
 }: BoardColumnProps) {
   const lane_ = lane;
-  const details = LANE_DETAILS[lane_.id];
+  // 段标题只在「这条列里真有不止一种东西」时才值得出现：只有一种时
+  // 「等你 / 等你确认」只是把列名重说一遍，纯噪音。
+  const populatedStatuses = statuses.filter((status) => tasks.some((task) => task.status === status));
+  const label = LANE_LABELS[lane_.id].zh;
+  const countLabel = LANE_LABELS[lane_.id].zhCount;
+  const sampleStatus = LANE_SAMPLE_STATUS[lane_.id];
+  const details = { label, status: sampleStatus };
   // 拖拽栏里只有一条状态时，落点状态是确定的；「等你」收两个状态，
   // 落点按卡片当前的段位决定（见 resolveDropStatus）。
   const soleStatus = statuses.length === 1 ? statuses[0] : null;
@@ -226,7 +232,7 @@ export function BoardColumn({
             <ColumnStatusIcon status={details.status} />
           </span>
           <h2 id={`column-${lane_.id}`}>{details.label}</h2>
-          <span className="task-count" aria-label={`${tasks.length} ${details.countLabel}`}>{tasks.length}</span>
+          <span className="task-count" aria-label={`${tasks.length} ${countLabel}`}>{tasks.length}</span>
         </div>
         <div className="column-actions">
           {lane_.collapsible && (
@@ -269,7 +275,7 @@ export function BoardColumn({
           const segment = tasks.filter((task) => task.status === status);
           // 「等你」把待验收和被阻塞并在一起，所以每段要自报家门：
           // 列回答「该谁动」，段回答「为什么」。
-          const showSegment = statuses.length > 1;
+          const showSegment = populatedStatuses.length > 1;
           if (showSegment && segment.length === 0) return null;
           return (
             <div className="column-segment" key={status}>

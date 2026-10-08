@@ -2863,7 +2863,7 @@ export function createTaskboardServer(options = {}) {
         return sendEmpty(response, 204);
       }
 
-      const taskRoute = pathname.match(/^\/api\/tasks\/([^/]+)(?:\/(archive|restore|move|dispatch))?$/);
+      const taskRoute = pathname.match(/^\/api\/tasks\/([^/]+)(?:\/(archive|restore|move|dispatch|cancel))?$/);
       if (taskRoute) {
         let id;
         try {
@@ -2943,6 +2943,19 @@ export function createTaskboardServer(options = {}) {
           const task = database.getTask(id);
           if (!task) throw new ApiError(404, "TASK_NOT_FOUND", `Task '${id}' does not exist`);
           return sendJson(response, 200, { dispatch: { busy: database.hasActiveDispatch(id) } });
+        }
+        // 取消一轮：人不必等 60 分钟租约过期才能纠正跑错方向的一轮。
+        // 停止动作由宿主的事件订阅执行（轮次在插件进程里跑）；这里只判定
+        // 「有没有活轮次」，没有就回 409，让人知道这一下点空了。
+        if (action === "cancel" && request.method === "POST") {
+          const task = database.getTask(id);
+          if (!task) throw new ApiError(404, "TASK_NOT_FOUND", `Task '${id}' does not exist`);
+          const lease = database.getDispatchLease(id);
+          if (!lease || !database.hasActiveDispatch(id)) {
+            throw new ApiError(409, "NOT_RUNNING", `Task '${task.identifier}' has no live round to cancel`);
+          }
+          events.emit("task.round-cancel-requested", { task, sessionId: lease.sessionId });
+          return sendJson(response, 202, { task, canceled: { sessionId: lease.sessionId } });
         }
         return methodNotAllowed(response, action ? ["POST"] : ["GET", "PATCH"]);
       }

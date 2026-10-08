@@ -92,6 +92,7 @@ import {
 import {
   BOARD_LANES,
   BOARD_LANE_ORDER,
+  isLaneVisible,
   type BoardLane,
   type BoardLaneId,
 } from "./boardColumns";
@@ -1664,10 +1665,7 @@ export function App() {
   // 看板上不该出现空列。默认只有「等你」例外：「没有等你的事」本身就是要看的信息，
   // 它消失会让人以为看板坏了。其余列空着就不占地方。
   const visibleLanes = useMemo(
-    () => BOARD_LANES.filter((lane) => {
-      const auto = laneHasContent(lane) || !lane.defaultVisible;
-      return auto && (laneVisibility?.[lane.id] ?? lane.defaultVisible);
-    }),
+    () => BOARD_LANES.filter((lane) => isLaneVisible(lane, laneHasContent(lane), laneVisibility?.[lane.id] === false)),
     [laneVisibility, tasksByStatus],
   );
 

@@ -3,7 +3,8 @@ import { assigneeTargetForActor } from "../actors";
 import { taskPriorityLabel, taskStatusLabel, useTaskboardI18n } from "../i18n";
 import { labelPresentation } from "../labels";
 import type { TaskCardPresentation } from "../taskConversations";
-import { TASK_PRIORITIES, TASK_STATUSES, type ActorIdentity, type Task, type TaskDraft, type TaskStatus } from "../types";
+import { TASK_PRIORITIES, type ActorIdentity, type Task, type TaskDraft, type TaskStatus } from "../types";
+import { BOARD_LANES, LANE_LABELS, isLaneVisible, type BoardLane, type BoardLaneId } from "../boardColumns";
 import { ActorAvatar } from "./ActorAvatar";
 import { StatusIcon } from "./BoardColumn";
 import { LinearIcon, LinearPriorityIcon } from "./LinearIcon";
@@ -11,7 +12,12 @@ import { TaskConversationMenu } from "./TaskConversationMenu";
 import { TaskPropertyPicker } from "./TaskPropertyPicker";
 import { TaskboardIcon } from "./TaskboardIcon";
 
-const COLLAPSED_BY_DEFAULT = new Set<TaskStatus>(["backlog", "done", "canceled"]);
+/**
+ * 侧栏列表与看板共用同一套列模型（web/src/boardColumns.ts）：列回答
+ * 「现在该谁动」，所以这里也按列分组，不再按 7 个状态各开一组。
+ * 默认收起的是终态和需求池——它们不该跟待办同权重。
+ */
+const COLLAPSED_BY_DEFAULT = new Set<BoardLaneId>(["finished", "parked"]);
 
 interface IssueListViewProps {
   scrollRef: RefObject<HTMLDivElement | null>;
@@ -53,7 +59,13 @@ export function IssueListView({
   const [collapsed, setCollapsed] = useState(() => new Set(COLLAPSED_BY_DEFAULT));
   const [priorityMenuTaskId, setPriorityMenuTaskId] = useState<string | null>(null);
   const [dragTaskId, setDragTaskId] = useState<string | null>(null);
-  const [dropTarget, setDropTarget] = useState<{ status: TaskStatus; beforeTaskId: string | null } | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ lane: BoardLaneId; beforeTaskId: string | null } | null>(null);
+
+  // 与看板同一条规则（isLaneVisible）：空列不占位置，只有「等你」例外。
+  const visibleLanes = BOARD_LANES.filter((lane) => isLaneVisible(
+    lane,
+    lane.statuses.some((status) => tasks.some((task) => task.status === status)),
+  ));
 
   function stopRow(event: MouseEvent | KeyboardEvent) {
     event.stopPropagation();
@@ -71,8 +83,8 @@ export function IssueListView({
     return hit?.dataset.taskId ?? null;
   }
 
-  /** Drop a dragged row onto a status group at the pointer's position. */
-  function handleDrop(event: DragEvent<HTMLElement>, status: TaskStatus) {
+  /** Drop a dragged row onto a lane at the pointer's position. */
+  function handleDrop(event: DragEvent<HTMLElement>, lane: BoardLane) {
     event.preventDefault();
     const taskId =
       event.dataTransfer.getData("application/x-taskboard-task") ||
@@ -80,55 +92,84 @@ export function IssueListView({
     const beforeTaskId = dropBeforeTaskId(event.currentTarget, event.clientY);
     setDropTarget(null);
     setDragTaskId(null);
-    if (taskId) onMoveTask(status, taskId, beforeTaskId);
+    if (taskId) onMoveTask(resolveDropStatus(lane, taskId, beforeTaskId), taskId, beforeTaskId);
   }
 
-  function toggleStatus(status: TaskStatus) {
+  function toggleLane(lane: BoardLaneId) {
     setCollapsed((current) => {
       const next = new Set(current);
-      if (next.has(status)) next.delete(status);
-      else next.add(status);
+      if (next.has(lane)) next.delete(lane);
+      else next.add(lane);
       return next;
     });
+  }
+
+  /**
+   * 一行落在哪条状态上。单状态列直接返回它；「等你」要按落点判断：
+   * 插在某行前面就沿用那行的现状，落在段尾则沿用被拖行自己的现状
+   * （同列内换位置不该偷偷改状态）。
+   */
+  function resolveDropStatus(lane: BoardLane, taskId: string, beforeTaskId: string | null): TaskStatus {
+    if (lane.statuses.length === 1) return lane.statuses[0];
+    if (beforeTaskId !== null) {
+      const target = tasks.find((task) => task.id === beforeTaskId);
+      if (target) return target.status;
+    }
+    return tasks.find((task) => task.id === taskId)?.status ?? lane.statuses[0];
   }
 
   return (
     <div className="issue-list-view" ref={scrollRef}>
       <div className="issue-list-groups">
-        {TASK_STATUSES.map((status) => {
-          const statusTasks = tasks.filter((task) => task.status === status);
-          const isCollapsed = collapsed.has(status);
-          const statusLabel = taskStatusLabel(language, status);
+        {visibleLanes.map((lane) => {
+          const laneTasks = lane.statuses.flatMap((status) => tasks.filter((task) => task.status === status));
+          const isCollapsed = collapsed.has(lane.id);
+          const label = text(LANE_LABELS[lane.id].zh, LANE_LABELS[lane.id].en);
+          // 「等你」把待验收和被阻塞并在一组，组内按来源分段：
+          // 组回答「该谁动」，段回答「为什么」。
+          // 同看板：只有一种东西时不说段名，否则就是重复列名。
+          const segmented = lane.statuses.filter((status) => tasks.some((task) => task.status === status)).length > 1;
           return (
             <section
-              className={`issue-list-group status-${status}${dropTarget?.status === status ? " is-drop-target" : ""}`}
-              key={status}
+              className={`issue-list-group lane-${lane.id} status-${lane.statuses[0]}${dropTarget?.lane === lane.id ? " is-drop-target" : ""}`}
+              key={lane.id}
               onDragOver={(event) => {
                 if (dragTaskId === null) return;
                 event.preventDefault();
                 event.dataTransfer.dropEffect = "move";
-                setDropTarget({ status, beforeTaskId: dropBeforeTaskId(event.currentTarget, event.clientY) });
+                setDropTarget({ lane: lane.id, beforeTaskId: dropBeforeTaskId(event.currentTarget, event.clientY) });
               }}
               onDragLeave={(event) => {
                 if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) {
-                  setDropTarget((current) => (current?.status === status ? null : current));
+                  setDropTarget((current) => (current?.lane === lane.id ? null : current));
                 }
               }}
-              onDrop={(event) => handleDrop(event, status)}
+              onDrop={(event) => handleDrop(event, lane)}
             >
-              <button className="issue-list-group-header" type="button" onClick={() => toggleStatus(status)} aria-expanded={!isCollapsed}>
+              <button className="issue-list-group-header" type="button" onClick={() => toggleLane(lane.id)} aria-expanded={!isCollapsed}>
                 <LinearIcon name={isCollapsed ? "chevronRight" : "chevronDown"} />
-                <span className="issue-list-status-icon"><StatusIcon status={status} /></span>
-                <strong>{statusLabel}</strong>
-                <span>{statusTasks.length}</span>
+                <span className="issue-list-status-icon"><StatusIcon status={lane.statuses[0]} /></span>
+                <strong>{label}</strong>
+                <span>{laneTasks.length}</span>
               </button>
               {!isCollapsed && (
                 <div className="issue-list-rows">
-                  {statusTasks.length ? statusTasks.map((task) => {
-                    const assigneeTarget = assigneeTargetForActor(task.assignee, currentUser) ?? "current-user";
+                  {lane.statuses.map((status) => {
+                    const statusTasks = tasks.filter((task) => task.status === status);
+                    if (segmented && statusTasks.length === 0) return null;
+                    return (
+                      <div className="issue-list-segment" key={status}>
+                        {segmented && (
+                          <div className="issue-list-segment-heading">
+                            <span>{taskStatusLabel(language, status)}</span>
+                            <span>{statusTasks.length}</span>
+                          </div>
+                        )}
+                        {statusTasks.length ? statusTasks.map((task) => {
+const assigneeTarget = assigneeTargetForActor(task.assignee, currentUser) ?? "current-user";
                     return (
                       <div
-                        className={`issue-list-row${presentations[task.id]?.unread ? " is-unread" : ""}${dragTaskId === task.id ? " is-dragging" : ""}${dropTarget?.status === status && dropTarget.beforeTaskId === task.id ? " is-drop-before" : ""}`}
+                        className={`issue-list-row${presentations[task.id]?.unread ? " is-unread" : ""}${dragTaskId === task.id ? " is-dragging" : ""}${dropTarget?.beforeTaskId === task.id ? " is-drop-before" : ""}`}
                         role="button"
                         tabIndex={0}
                         draggable
@@ -229,13 +270,16 @@ export function IssueListView({
                         </time>
                       </div>
                     );
-                  }) : (
-                    <div className="issue-list-empty">
-                      {hasActiveFilters
-                        ? text("当前筛选下没有匹配议题", "No issues match the current filters")
-                        : text(`没有${statusLabel}议题`, `No ${statusLabel.toLowerCase()} issues`)}
-                    </div>
-                  )}
+                        }) : (
+                          <div className="issue-list-empty">
+                            {hasActiveFilters
+                              ? text("当前筛选下没有匹配议题", "No issues match the current filters")
+                              : text(`没有${label}议题`, `No ${label.toLowerCase()} issues`)}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </section>

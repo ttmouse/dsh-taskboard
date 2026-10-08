@@ -987,6 +987,7 @@ export function apply(ctx, config) {
   let syncTimer = undefined
   let claimTimer = undefined
   let dispatchDisposer = undefined
+  let roundCancelDisposer = undefined
   let baseUrl = undefined
   let stopped = false
   /** AI chat turn engine: panel threads run on in-process DSH sessions. */
@@ -1158,6 +1159,11 @@ export function apply(ctx, config) {
       dispatchDisposer = undefined
       dispose()
     }
+    if (roundCancelDisposer !== undefined) {
+      const dispose = roundCancelDisposer
+      roundCancelDisposer = undefined
+      dispose()
+    }
     await releaseHostResources({
       stopClaims: claimTimer === undefined ? undefined : () => {
         const disposer = claimTimer
@@ -1205,6 +1211,15 @@ export function apply(ctx, config) {
         })
       })
       pluginLog('comment dispatch bridge ready (event-driven, no polling)')
+      // 取消一轮：看板 POST /api/tasks/:id/cancel 发出的事件，落到真正持有
+      // 那一轮的 stopClaimSession 上。人不必等租约过期才能纠正方向。
+      roundCancelDisposer = instance.events.subscribe((event) => {
+        if (event?.type !== 'task.round-cancel-requested' || !event.task) return
+        void stopClaimSession(event.sessionId, log).then((found) => {
+          pluginLog(`[dispatch] ${event.task.identifier}: cancel requested for ${event.sessionId} — ${found ? 'stopped' : 'session not live, lease left to expire'}`)
+        })
+      })
+      pluginLog('round-cancel bridge ready')
     }
     if (!stopped && app !== undefined && baseUrl !== undefined && config.claimPollMs > 0) {
       const instance = app

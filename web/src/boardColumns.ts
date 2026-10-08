@@ -23,19 +23,51 @@ export interface BoardLane {
   statuses: readonly TaskStatus[];
   /** 列默认是否展开；折叠态的列只显示标题行与计数。 */
   collapsible: boolean;
-  /** 列默认是否可见（「等你」永远可见：「没有等你的事」本身就是要看的信息）。 */
+  /**
+   * 空着的时候还留不留在场上。
+   *
+   * 只有「等你」是 true——「没有等你的事」本身就是要看的信息，列消失会让人
+   * 以为看板坏了。其余列空着就不占地方：有内容才出现。
+   */
   defaultVisible: boolean;
 }
 
 export const BOARD_LANES: readonly BoardLane[] = [
   { id: "you", statuses: ["in_review", "blocked"], collapsible: false, defaultVisible: true },
-  { id: "running", statuses: ["in_progress"], collapsible: false, defaultVisible: true },
+  { id: "running", statuses: ["in_progress"], collapsible: false, defaultVisible: false },
   { id: "queued", statuses: ["todo"], collapsible: false, defaultVisible: false },
   { id: "finished", statuses: ["done", "canceled"], collapsible: true, defaultVisible: false },
   { id: "parked", statuses: ["backlog"], collapsible: true, defaultVisible: false },
 ] as const;
 
 export const BOARD_LANE_ORDER: readonly BoardLaneId[] = BOARD_LANES.map((lane) => lane.id);
+
+/**
+ * 列的标题与计数文案。看板与侧栏列表共用这一处定义，
+ * 两个界面才不会各写一套名字（曾经看板叫「等你确认」、列表也叫另一套）。
+ */
+export const LANE_LABELS: Record<BoardLaneId, { zh: string; en: string; zhCount: string; enCount: string }> = {
+  you: { zh: "等你", en: "Waiting on you", zhCount: "件待你处理", enCount: "need you" },
+  running: { zh: "处理中", en: "In progress", zhCount: "件在跑", enCount: "running" },
+  queued: { zh: "等待认领", en: "To do", zhCount: "件排队", enCount: "queued" },
+  finished: { zh: "已完成", en: "Finished", zhCount: "件已结束", enCount: "finished" },
+  parked: { zh: "待立项", en: "Backlog", zhCount: "件候选", enCount: "parked" },
+};
+
+/**
+ * 一条列此刻该不该出现。看板与侧栏列表共用，两个界面才不会各判一套。
+ *
+ *   有内容就出现；空着时只有 defaultVisible 的列（「等你」）留下。
+ *   人手动收起过的列不出现，落到「收起的列」通道里，想看得回来。
+ */
+export function isLaneVisible(
+  lane: BoardLane,
+  hasContent: boolean,
+  manuallyHidden = false,
+): boolean {
+  if (manuallyHidden) return false;
+  return hasContent || lane.defaultVisible;
+}
 
 export function laneById(id: BoardLaneId): BoardLane {
   const lane = BOARD_LANES.find((candidate) => candidate.id === id);
