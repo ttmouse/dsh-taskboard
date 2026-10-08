@@ -3055,7 +3055,7 @@ kbd {
 }
 
 .issue-editor {
-  padding: 0 14px 34px;
+  padding: 0 14px 22px;
 }
 
 .issue-editor-content {
@@ -3428,11 +3428,11 @@ kbd {
 }
 
 .issue-attachments {
-  padding: 0 14px 30px;
+  padding: 0 14px 22px;
 }
 
 .issue-sub-issues {
-  padding: 0 14px 28px;
+  padding: 0 14px 20px;
 }
 
 .issue-sub-issues > header {
@@ -3956,7 +3956,7 @@ kbd {
 
 .activity-section {
   position: relative;
-  padding: 22px 14px 60px;
+  padding: 14px 14px 60px;
 }
 
 .activity-section::before {
@@ -9779,8 +9779,8 @@ kbd {
     line-height: 32px;
   }
 
-  .issue-conversation-link {
-    width: 100%;
+  .issue-conversation-list {
+    justify-items: stretch;
   }
 
   .attachment-list {
@@ -13128,6 +13128,7 @@ kbd {
 .issue-detail-layout.properties-collapsed {
   grid-template-columns: minmax(0, 1fr);
   gap: 0;
+  padding-top: 20px;
 }
 /* 切换行必须独占整行：否则在两栏 grid 里自动放置会把 toggle 放进第 1 列、
    主内容挤进 320px 的属性栏轨道（侧边栏窄开详情后再拖宽时的错版）。 */
