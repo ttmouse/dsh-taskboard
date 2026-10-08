@@ -118,11 +118,10 @@ export function buildDispatchPrompt(project, task, comment, resumed = false) {
   // is already implied by the routine's cwd and the skill contract, so it
   // stays out of the card.
   const head = `议题 ${task.identifier}「${task.title}」（id ${task.id}）。`
-  // Exit contract (2026-10-08, user-directed): finish the work, post ONE
-  // summary, auto-commit issue-related changes, then move the issue straight
-  // to done — no second human confirmation. Server-side guard: the auto
-  // commit on a →done move only fires when the workspace still has uncommitted
-  // changes, so this commit stands and nothing double-commits.
+  // Exit contract (2026-10-09, user-directed rework of the 2026-10-08 rule):
+  // finish the work, post ONE summary (with inline image), then move the issue
+  // to in_review and STOP — done requires explicit human confirmation, the
+  // agent never moves an issue to done itself.
   const exit = briefed
     ? '按 manage-taskboard 技能的「评论即执行」流程落实这条评论，回一条总结。'
     : '按 manage-taskboard 技能读该议题与全部评论，继续推进；完成后回一条总结。'
@@ -130,7 +129,7 @@ export function buildDispatchPrompt(project, task, comment, resumed = false) {
     briefed ? `${head}人类刚评论：` : `${head}人类按了「干一轮」。`,
     ...(briefed ? ['---', body, '---'] : []),
     exit,
-    '收尾契约：改动文件则以议题编号开头 commit（不 push、不提交无关文件），然后直接把议题移到 done，不停 in_review 等二次确认；无改动也直接移 done。总结评论必须附一张图（截图或对比图，markdown 内嵌 /api/attachments）让人一眼确认结果，纯文字不算完成。',
+    '收尾契约：改动文件则以议题编号开头 commit（不 push、不提交无关文件）。总结评论必须附一张图（截图或对比图，markdown 内嵌 /api/attachments）让人一眼确认结果，纯文字不算完成。发完总结后把议题移到 in_review 即停，绝不能自己移到 done——done 只能由人类确认后操作。',
   ].join('\n')
 }
 
