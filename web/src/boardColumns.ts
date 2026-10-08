@@ -37,13 +37,6 @@ export const BOARD_LANES: readonly BoardLane[] = [
 
 export const BOARD_LANE_ORDER: readonly BoardLaneId[] = BOARD_LANES.map((lane) => lane.id);
 
-/** 一个状态属于哪条列（每个状态恰好属于一条）。 */
-export function laneOfStatus(status: TaskStatus): BoardLaneId {
-  const lane = BOARD_LANES.find((candidate) => candidate.statuses.includes(status));
-  if (!lane) throw new Error(`status '${status}' is not mapped to a board lane`);
-  return lane.id;
-}
-
 export function laneById(id: BoardLaneId): BoardLane {
   const lane = BOARD_LANES.find((candidate) => candidate.id === id);
   if (!lane) throw new Error(`unknown board lane '${id}'`);
