@@ -12818,6 +12818,10 @@ kbd {
    keep create / drag / detail / automation / search. */
 .app-shell.compact { grid-template-columns: minmax(0, 1fr); }
 .app-shell.compact .app-nav { display: none; }
+/* Compact chrome hides the sticky 46px nav, so the workspace must not keep
+   the narrow-viewport calc(100vh - 46px) reservation — it left a dead band
+   at the bottom of the sidebar embed. */
+.app-shell.compact .workspace { height: 100vh; }
 .app-shell.compact .header-project-switcher { display: none; }
 .app-shell.compact .project-home-button,
 .app-shell.compact .breadcrumb-chevron { display: none; }
