@@ -154,7 +154,16 @@ export function IssueListView({
               </button>
               {!isCollapsed && (
                 <div className="issue-list-rows">
-                  {lane.statuses.map((status) => {
+                  {/* 空态是「这一列没有东西」，不是「这个状态没有东西」：
+                      合并列有两个状态，按状态渲染就会印两遍同一句话。 */}
+                  {laneTasks.length === 0 && (
+                    <div className="issue-list-empty">
+                      {hasActiveFilters
+                        ? text("当前筛选下没有匹配议题", "No issues match the current filters")
+                        : text(`没有${label}议题`, `No ${label.toLowerCase()} issues`)}
+                    </div>
+                  )}
+                  {laneTasks.length > 0 && lane.statuses.map((status) => {
                     const statusTasks = tasks.filter((task) => task.status === status);
                     if (segmented && statusTasks.length === 0) return null;
                     return (
@@ -274,13 +283,7 @@ const assigneeTarget = assigneeTargetForActor(task.assignee, currentUser) ?? "cu
                         </time>
                       </div>
                     );
-                        }) : (
-                          <div className="issue-list-empty">
-                            {hasActiveFilters
-                              ? text("当前筛选下没有匹配议题", "No issues match the current filters")
-                              : text(`没有${label}议题`, `No ${label.toLowerCase()} issues`)}
-                          </div>
-                        )}
+                        }) : null}
                       </div>
                     );
                   })}

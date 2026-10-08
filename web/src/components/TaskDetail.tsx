@@ -11,6 +11,7 @@ import {
   createComment,
   deleteAttachment,
   deleteComment,
+  cancelIssueRound,
   dispatchIssue,
   fetchDispatchState,
   isAttachmentUrl,
@@ -640,6 +641,7 @@ export function TaskDetail({
   const [pendingCommentFiles, setPendingCommentFiles] = useState<File[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [dispatchBusy, setDispatchBusy] = useState(false);
+  const [cancelingRound, setCancelingRound] = useState(false);
   const [dispatchStarting, setDispatchStarting] = useState(false);
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -1016,6 +1018,30 @@ export function TaskDetail({
       }
     } finally {
       setDispatchStarting(false);
+    }
+  }
+
+  /**
+   * 取消正在跑的那一轮。轮次在插件进程里跑，服务端把请求转成事件、
+   * 由宿主停掉那个会话；租约由轮次自己收尾时释放，所以这里只等它转过去。
+   */
+  async function cancelRound() {
+    if (cancelingRound) return;
+    setCancelingRound(true);
+    setCommentsError(null);
+    try {
+      await cancelIssueRound(task.id);
+      setDispatchBusy(false);
+      onAnnounce(text("已请求取消这一轮。", "Asked to cancel this round."));
+    } catch (error) {
+      if (error instanceof ApiError && error.code === "NOT_RUNNING") {
+        // 轮次刚好自己结束了：这不是错误，界面跟着回正就行。
+        setDispatchBusy(false);
+      } else {
+        setCommentsError(messageFor(error));
+      }
+    } finally {
+      setCancelingRound(false);
     }
   }
 
@@ -1864,6 +1890,22 @@ export function TaskDetail({
                           ? text("派发中…", "Dispatching…")
                           : text("干一轮", "Run a round")}
                     </button>
+                    {dispatchBusy && (
+                      <button
+                        className="button secondary"
+                        type="button"
+                        disabled={cancelingRound}
+                        title={text(
+                          "停掉正在跑的这一轮，不必等它自己超时",
+                          "Stop the running round instead of waiting for it to time out",
+                        )}
+                        onClick={() => void cancelRound()}
+                      >
+                        {cancelingRound
+                          ? text("取消中…", "Canceling…")
+                          : text("取消本轮", "Cancel round")}
+                      </button>
+                    )}
                     <kbd>⌘ Enter</kbd>
                     <button
                       className="button primary"

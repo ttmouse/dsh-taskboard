@@ -743,6 +743,17 @@ export async function dispatchIssue(taskId: string): Promise<void> {
   );
 }
 
+/**
+ * 取消正在跑的那一轮。人不必等 60 分钟租约过期才能纠正跑错方向的一轮。
+ * 没有活轮次时服务端回 409 `NOT_RUNNING`。
+ */
+export async function cancelIssueRound(taskId: string): Promise<void> {
+  await request<{ task: Task; canceled: { sessionId: string } }>(
+    `/api/tasks/${encodeURIComponent(taskId)}/cancel`,
+    { method: "POST" },
+  );
+}
+
 export async function fetchDispatchState(taskId: string, signal?: AbortSignal): Promise<boolean> {
   const data = await request<{ dispatch: { busy: boolean } }>(
     `/api/tasks/${encodeURIComponent(taskId)}/dispatch`,
