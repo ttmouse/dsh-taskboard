@@ -42,5 +42,8 @@
 - `HiddenColumns`、`BoardSettingsMenu`、`IssueListView` 仍按状态工作，不受影响。
 - 界面上的折叠态与显隐态存在 localStorage（`taskboard.laneCollapsed.v1`、`taskboard.laneVisibility.v1`），
   按项目区分。旧的两个键（`showEmptyColumns`、`columnVisibility`）废弃，不再读取。
-- 失败轮次目前只有数据、没有界面位置：轮次记录有 `failed` 状态（`plugin/lib/claim-executor.mjs`），
-  但看板不看它。列模型已经给它留好位置（「等你」），接上是独立的一步。
+- 失败轮次已经接进「等你」：一轮没跑完时，派发管线把失败写回议题
+  （agent 署名的评论 + 移 `blocked`，见 `plugin/lib/index.mjs` 的 `reportRoundFailure`）。
+  只写评论不建新状态：失败是**轮次的结果**，任务本身仍该人处理，所以它就是「等你」。
+  移 `blocked` 前会重读一次最新状态，只在该议题仍是 `in_progress` 时移动——
+  一轮如果先做了有意义的流转再死掉，不该被拖回去。

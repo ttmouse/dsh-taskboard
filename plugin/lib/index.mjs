@@ -610,6 +610,71 @@ async function countFixedRound(baseUrl, project, binding) {
 }
 
 /**
+ * Write a failed round back to the issue, so a round that died is visible where
+ * the human is already looking — the issue — instead of only in the run record
+ * under `.dsh/routines/runs/`, which nobody reads.
+ *
+ * Before this, a round that never finished left the issue exactly as it was:
+ * 2026-10-09 five issues on this project carried a threadId from a round that
+ * failed and still read as if nothing had happened. The lease expires silently
+ * after 60 minutes and the board looks idle, so a dead round is indistinguishable
+ * from one that was never started.
+ *
+ * The comment is attributed to the agent (that keeps it out of the dispatch
+ * gate, so reporting a failure can never start another round), and the issue is
+ * moved to `blocked` — the state that already means "a human has to look at
+ * this" — but only when it is still `in_progress`: a round that actually moved
+ * the issue somewhere deliberate before dying should not be dragged backwards.
+ */
+async function reportRoundFailure(baseUrl, task, sessionId, log) {
+  const body = [
+    '这一轮没有跑完就中断了，议题没有发生变化。',
+    '',
+    `- 会话：${sessionId}`,
+    `- 轮次记录：\`.dsh/routines/runs/\`（状态 failed，含结束原因）`,
+    '',
+    '常见原因是这一轮超过了 60 分钟上限，或者宿主进程被重启。',
+    '需要继续的话，评论一句话，或在卡片上点「干一轮」。',
+  ].join('\n')
+  try {
+    await fetch(`${baseUrl}/api/tasks/${encodeURIComponent(task.id)}/comments`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'X-Taskboard-Client': 'taskctl',
+        'X-Taskboard-Agent-Id': 'dsh-agent',
+        'X-Taskboard-Agent-Name': 'DSH Agent',
+      },
+      body: JSON.stringify({ body, threadId: sessionId }),
+    })
+  } catch (error) {
+    log(`[dispatch] ${task.identifier}: could not report the failed round: ${error instanceof Error ? error.message : String(error)}`)
+    return
+  }
+  // Re-read for a fresh version: the round may have moved the issue itself
+  // before dying, and the version captured at dispatch time is then stale.
+  try {
+    const res = await fetch(`${baseUrl}/api/tasks/${encodeURIComponent(task.id)}`)
+    if (!res.ok) return
+    const latest = (await res.json()).task
+    if (!latest || latest.status !== 'in_progress') return
+    await fetch(`${baseUrl}/api/tasks/${encodeURIComponent(task.id)}/move`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'X-Taskboard-Client': 'taskctl',
+        'X-Taskboard-Agent-Id': 'dsh-agent',
+        'X-Taskboard-Agent-Name': 'DSH Agent',
+      },
+      body: JSON.stringify({ version: latest.version, status: 'blocked', threadId: sessionId }),
+    })
+  } catch (error) {
+    log(`[dispatch] ${task.identifier}: could not park the failed round: ${error instanceof Error ? error.message : String(error)}`)
+  }
+  log(`[dispatch] ${task.identifier}: round did not finish — reported on the issue`)
+}
+
+/**
  * Read the comments a human wrote *after* the run started, as followup text.
  * The watermark advances per delivery, so a turn that ends with no new input
  * delivers nothing (and a delivered comment is never sent twice).
@@ -719,6 +784,7 @@ async function runTaskDispatch(ctx, app, baseUrl, task, comment, log) {
       log,
     })
     if (finished) await countFixedRound(baseUrl, project, binding)
+    else await reportRoundFailure(baseUrl, current, binding.sessionId, log)
     return finished
   } finally {
     dispatchInFlight.delete(task.id)
