@@ -227,7 +227,8 @@ function resolveAgentOptions(ctx, model, log) {
  * "排队，下一轮开始时送达" contract. Bounded so a chatty thread cannot loop
  * forever.
  * @param options - ctx, project, model, prompt, log, optional queue reader,
- *   optional sessionId / resumeSessionId.
+ *   optional sessionId / resumeSessionId, optional explicit sessionTitle
+ *   (fresh sessions only; pinned via the session-title service).
  * @returns {Promise<boolean>} true when the turn ended (ok or error).
  */
 export async function executeClaimInProcess({
@@ -239,6 +240,7 @@ export async function executeClaimInProcess({
   fetchQueuedComments = null,
   sessionId: requestedSessionId = null,
   resumeSessionId = null,
+  sessionTitle = null,
   deadlineMs = 60 * 60 * 1000,
 }) {
   const sessionId = requestedSessionId ?? resumeSessionId ?? `claim-${project.id.slice(0, 8)}-${randomUUID().slice(0, 8)}`
@@ -306,6 +308,21 @@ export async function executeClaimInProcess({
           : {}),
         agentOptions: resolveAgentOptions(ctx, model, log),
       })
+    }
+    // Name the session so it does not sit in the GUI sidebar as 「未命名」.
+    // The dispatch prompt carries source kind "schedule" (trigger-card
+    // rendering), and the session-title service only derives titles from
+    // source kind "user" messages — automation rounds would never get one.
+    // An explicit rename pins a title instead. Shared (resumed) conversations
+    // belong to the human: never overwrite a title they may have chosen.
+    if (!shared && sessionTitle !== null) {
+      try {
+        const titles = ctx.get('sessionTitle')
+        const live = ctx.agents.get(sessionId)
+        if (titles && live?.session) titles.rename(live.session, sessionTitle)
+      } catch (titleError) {
+        log(`[claim] ${project.id}: session title failed: ${titleError instanceof Error ? titleError.message : String(titleError)}`)
+      }
     }
   } catch (error) {
     const message = `agent ${shared ? 'resume' : 'create'} failed: ${error instanceof Error ? error.message : String(error)}`

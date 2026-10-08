@@ -708,6 +708,10 @@ async function runTaskDispatch(ctx, app, baseUrl, task, comment, log) {
       ),
       sessionId: binding.resumeSessionId === null ? binding.sessionId : null,
       resumeSessionId: binding.resumeSessionId,
+      // Fresh automation sessions get an explicit title: the dispatch prompt
+      // is source kind "schedule", which the session-title service ignores,
+      // so without this they show up as 「未命名」 in the sidebar.
+      sessionTitle: `议题 ${current.identifier}：${current.title}`,
       log,
     })
     if (finished) await countFixedRound(baseUrl, project, binding)
