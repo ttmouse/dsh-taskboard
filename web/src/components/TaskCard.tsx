@@ -24,7 +24,6 @@ import { LabelPicker } from "./LabelPicker";
 import { TaskPropertyPicker } from "./TaskPropertyPicker";
 import { TaskConversationMenu } from "./TaskConversationMenu";
 import { TaskboardIcon } from "./TaskboardIcon";
-import completeIcon from "../assets/figma-taskboard/card-complete.svg";
 import processingAnimation from "../assets/figma-taskboard/loading-16.svg";
 
 interface CommonTaskCardProps {
@@ -37,6 +36,11 @@ interface CommonTaskCardProps {
   isMoving: boolean;
   isSettling: boolean;
   isContextMenuOpen: boolean;
+  /**
+   * 为什么这件事在等（如「待验收」「被阻塞」）。只在合并列里传——
+   * 单状态列里卡片自己就是那个状态，再标一遍是重复。
+   */
+  statusChip?: string;
   onEdit: (task: Task) => void;
   onContextMenu: (task: Task, position: { x: number; y: number }) => void;
   onDragStart: (task: Task, height: number) => void;
@@ -381,7 +385,6 @@ function BoardTaskCard({
   onDragStart,
   onDragEnd,
   onOpenThread,
-  onComplete,
 }: BoardTaskCardProps) {
   const dueDate = task.dueDate
     ? new Intl.DateTimeFormat("zh-CN", { month: "short", day: "numeric" }).format(new Date(`${task.dueDate}T12:00:00`))
@@ -442,18 +445,6 @@ function BoardTaskCard({
             </>
           )}
         </span>
-        {task.status === "in_review" && onComplete && (
-          <button
-            className="task-card-complete"
-            type="button"
-            aria-label={`完成 ${task.identifier}`}
-            title="验收通过：状态改为完成并记录你的验收"
-            onClick={stopThen(() => onComplete(task))}
-          >
-            <img src={completeIcon} alt="" aria-hidden="true" />
-            <span>完成</span>
-          </button>
-        )}
         <ActorAvatar actor={task.assignee} className="card-assignee-avatar" />
         <div className="card-actions" aria-label="移动议题" style={{ pointerEvents: "auto" }}>
           <button
@@ -539,7 +530,6 @@ function FullTaskCard({
   currentUser,
   onEdit,
   onUpdate,
-  onComplete,
   onContextMenu,
   onDragStart,
   onDragEnd,
@@ -609,21 +599,6 @@ function FullTaskCard({
           <span className="task-identifier">ID: {task.identifier}</span>
         </span>
         {presentation.unread && <span className="task-unread-dot" aria-label={text("有未读更新", "Unread updates")} />}
-        {task.status === "in_review" && onComplete && (
-          <button
-            className="task-card-complete"
-            type="button"
-            aria-label={text(`完成 ${task.identifier}`, `Complete ${task.identifier}`)}
-            title={text("完成", "Complete")}
-            onClick={(event) => {
-              event.stopPropagation();
-              onComplete(task);
-            }}
-          >
-            <img src={completeIcon} alt="" aria-hidden="true" />
-            <span>{text("完成", "Complete")}</span>
-          </button>
-        )}
         {variant === "sidebar" && (
           <span className="sidebar-card-creator">
             <AssigneeControl
