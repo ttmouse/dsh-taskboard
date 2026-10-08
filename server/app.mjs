@@ -688,6 +688,28 @@ function parseMove(body) {
   };
 }
 
+/**
+ * Auto-commit when a human confirms completion (move to done): commit the
+ * project workspace changes with the issue identifier in the message so every
+ * confirmed issue leaves a traceable commit. Best-effort — not a git repo,
+ * nothing to commit, or a git failure only logs; the move itself always
+ * succeeds. The commit is workspace-wide (add -A): the server cannot tell
+ * which files belong to which issue.
+ */
+async function autoCommitOnDone(project, task) {
+  if (!project?.workspacePath) return;
+  const gitArgs = ["-C", project.workspacePath];
+  const message = `${task.identifier} ${task.title}`.slice(0, 200);
+  try {
+    await execFileAsync("git", [...gitArgs, "add", "-A"]);
+    const { stdout } = await execFileAsync("git", [...gitArgs, "commit", "-m", message]);
+    console.log(`auto-commit ${task.identifier}: ${stdout.trim().split("\n")[0]}`);
+  } catch (error) {
+    const reason = String(error.stderr ?? error.message ?? "").trim().split("\n")[0] || "git failed";
+    console.log(`auto-commit ${task.identifier}: skipped (${reason})`);
+  }
+}
+
 function parseArchive(body) {
   assertPlainObject(body);
   assertAllowedKeys(body, new Set(["version", "threadId"]));
@@ -2853,6 +2875,11 @@ export function createTaskboardServer(options = {}) {
           const move = parseMove(await readJson(request));
           const task = database.moveTask(id, move.version, move.status, move.sortOrder, move.threadId, actorFromRequest(request));
           events.emit("task.moved", { task });
+          // 人类在任务详情点「确认完成」（→ done）时，自动把项目工作区的
+          // 修改提交到 Git（尽力而为，见 autoCommitOnDone）。
+          if (move.status === "done" && !task.archivedAt) {
+            await autoCommitOnDone(database.getProject(task.projectId), task);
+          }
           return sendJson(response, 200, { task });
         }
         if (action === "archive" && request.method === "POST") {
