@@ -3,7 +3,7 @@ import type { TaskStatus } from "../types";
 import { STATUS_DETAILS, StatusIcon } from "./BoardColumn";
 import { ColumnVisibilityMenu } from "./ColumnVisibilityMenu";
 import { LinearIcon } from "./LinearIcon";
-import { laneById, type BoardLaneId } from "../boardColumns";
+import { LANE_LABELS, laneById, type BoardLaneId } from "../boardColumns";
 
 interface HiddenColumnsProps {
   lanes: BoardLaneId[];
@@ -55,6 +55,9 @@ export function HiddenColumns({
           // 列可以收多个状态，落到这条列时按第一个状态摆放。
           const status = lane.statuses[0];
           const details = STATUS_DETAILS[status];
+          // 货架上用**列名**，不是代表状态的名字：收起来的是「处理中」这一列，
+          // 不该在货架上改口叫「进行中」——同一个东西在界面上只能有一个名字。
+          const label = LANE_LABELS[laneId].zh;
           const count = counts[laneId];
           const canShow = count > 0;
           return (
@@ -81,13 +84,13 @@ export function HiddenColumns({
                 <button
                   type="button"
                   className="hidden-column-show"
-                  aria-label={`显示${details.label}列`}
+                  aria-label={`显示${label}列`}
                   onClick={() => onShow(laneId)}
                 >
                   <span className={`status-icon status-icon-${details.tone}`}>
                     <StatusIcon status={status} />
                   </span>
-                  <strong>{details.label}</strong>
+                  <strong>{label}</strong>
                   <span className="hidden-column-count">{count}</span>
                 </button>
               ) : (
@@ -95,13 +98,13 @@ export function HiddenColumns({
                   <span className={`status-icon status-icon-${details.tone}`}>
                     <StatusIcon status={status} />
                   </span>
-                  <strong>{details.label}</strong>
+                  <strong>{label}</strong>
                   <span className="hidden-column-count">{count}</span>
                 </div>
               )}
               {canShow && (
                 <ColumnVisibilityMenu
-                  label={details.label}
+                  label={label}
                   action="show"
                   className="icon-button hidden-column-menu"
                   onAction={() => onShow(laneId)}
