@@ -12841,9 +12841,11 @@ kbd {
 .app-shell.compact .header-actions .toolbar-tools { gap: 6px; }
 .app-shell.compact .header-actions .search-field input { width: 120px; }
 
-/* Compact chrome: in the narrow sidebar the board stacks its columns
-   vertically — one full-width column section after another, the whole board
-   scrolls vertically like a page; no horizontal scrolling, no hidden columns. */
+/* Compact chrome: the narrow-sidebar board adapts to the panel width —
+   columns wrap like flex items: as many readable columns side by side as the
+   width allows (each grows from a 240px floor), the rest wrap into the next
+   row, down to a single full-width column when the panel is very narrow.
+   Vertical scrolling only, never horizontal. */
 .app-shell.compact .board-scroll {
   overflow-x: hidden;
   overflow-y: auto;
@@ -12855,18 +12857,21 @@ kbd {
 }
 .app-shell.compact .board {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
+  align-items: stretch;
   width: 100%;
   min-width: 0;
   height: auto;
   min-height: 0;
-  gap: 14px;
+  gap: 12px;
 }
 .app-shell.compact .board-column {
-  flex: 0 0 auto;
+  flex: 1 1 240px;
+  width: auto;
+  min-width: 0;
+  max-width: 100%;
   height: auto;
   min-height: 0;
-  max-height: none;
   overflow: visible;
   border-radius: 8px;
 }
