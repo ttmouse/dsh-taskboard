@@ -130,7 +130,7 @@ export function buildDispatchPrompt(project, task, comment, resumed = false) {
     briefed ? `${head}人类刚评论：` : `${head}人类按了「干一轮」。`,
     ...(briefed ? ['---', body, '---'] : []),
     exit,
-    '收尾契约：改动文件则以议题编号开头 commit（不 push、不提交无关文件），然后直接把议题移到 done，不停 in_review 等二次确认；无改动也直接移 done。',
+    '收尾契约：改动文件则以议题编号开头 commit（不 push、不提交无关文件），然后直接把议题移到 done，不停 in_review 等二次确认；无改动也直接移 done。总结评论必须附一张图（截图或对比图，markdown 内嵌 /api/attachments）让人一眼确认结果，纯文字不算完成。',
   ].join('\n')
 }
 
