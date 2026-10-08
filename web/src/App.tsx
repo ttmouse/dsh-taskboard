@@ -90,6 +90,12 @@ import {
   writeTaskFilters,
 } from "./taskFilters";
 import {
+  BOARD_LANES,
+  BOARD_LANE_ORDER,
+  type BoardLane,
+  type BoardLaneId,
+} from "./boardColumns";
+import {
   TASK_STATUSES,
   type ActorIdentity,
   type AiChatThread,
@@ -163,7 +169,10 @@ interface UndoNotice {
   message: string;
 }
 
-type ColumnVisibilityByProject = Record<string, Partial<Record<TaskStatus, boolean>>>;
+/** 折叠态的列：只显示标题行与计数，点开才铺开卡片（按项目存）。 */
+type LaneCollapsedByProject = Record<string, Partial<Record<BoardLaneId, boolean>>>;
+/** 列的手动显隐（按项目存）；未记录的列用它的 defaultVisible。 */
+type LaneVisibilityByProject = Record<string, Partial<Record<BoardLaneId, boolean>>>;
 type ProjectAutomationStatus = "ACTIVE" | "PAUSED";
 type AutomationQuotaState = "available" | "blocked" | "unknown" | "unavailable";
 type AutomationIntervalMinutes = 5 | 10 | 15 | 30 | 60;
@@ -239,8 +248,8 @@ const DEFAULT_USER_ACTOR: ActorIdentity = {
 const LAST_PROJECT_KEY = "taskboard.lastProjectId";
 const FAVORITE_PROJECTS_KEY = "taskboard.favoriteProjectIds";
 const DEVICE_WORKSPACE_PATHS_KEY = "taskboard.deviceWorkspacePaths.v1";
-const SHOW_EMPTY_COLUMNS_KEY = "taskboard.showEmptyColumns.v1";
-const COLUMN_VISIBILITY_KEY = "taskboard.columnVisibility.v1";
+const LANE_COLLAPSED_KEY = "taskboard.laneCollapsed.v1";
+const LANE_VISIBILITY_KEY = "taskboard.laneVisibility.v1";
 const PROJECT_AUTOMATIONS_KEY = "taskboard.projectAutomations.v1";
 /** DeepSeek Harness Web GUI 地址：dsh 心跳线程的"查看对话"指向其会话浏览页。 */
 const DSH_WEB_URL = "http://127.0.0.1:3080";
@@ -307,10 +316,6 @@ function readDeviceWorkspacePaths(): Record<string, string> {
   } catch {
     return {};
   }
-}
-
-function readShowEmptyColumns(): boolean {
-  return window.localStorage.getItem(SHOW_EMPTY_COLUMNS_KEY) === "true";
 }
 
 function readProjectAutomations(): ProjectAutomations {
@@ -396,24 +401,35 @@ function intervalMinutesFromRrule(value: string): AutomationIntervalMinutes | nu
   return match ? Number(match[1]) as AutomationIntervalMinutes : null;
 }
 
-function readColumnVisibilityByProject(): ColumnVisibilityByProject {
+function readLaneBooleanByProject<T extends string>(
+  key: string,
+  allowed: readonly T[],
+): Record<string, Partial<Record<T, boolean>>> {
   try {
-    const value = JSON.parse(window.localStorage.getItem(COLUMN_VISIBILITY_KEY) ?? "{}");
+    const value = JSON.parse(window.localStorage.getItem(key) ?? "{}");
     if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-    const result: ColumnVisibilityByProject = {};
-    for (const [projectId, visibilityValue] of Object.entries(value)) {
-      if (!visibilityValue || typeof visibilityValue !== "object" || Array.isArray(visibilityValue)) continue;
-      const visibility: Partial<Record<TaskStatus, boolean>> = {};
-      for (const status of TASK_STATUSES) {
-        const visible = (visibilityValue as Record<string, unknown>)[status];
-        if (typeof visible === "boolean") visibility[status] = visible;
+    const result: Record<string, Partial<Record<T, boolean>>> = {};
+    for (const [projectId, laneValue] of Object.entries(value)) {
+      if (!laneValue || typeof laneValue !== "object" || Array.isArray(laneValue)) continue;
+      const entry: Partial<Record<T, boolean>> = {};
+      for (const id of allowed) {
+        const flag = (laneValue as Record<string, unknown>)[id];
+        if (typeof flag === "boolean") entry[id] = flag;
       }
-      result[projectId] = visibility;
+      result[projectId] = entry;
     }
     return result;
   } catch {
     return {};
   }
+}
+
+function readLaneCollapsedByProject(): LaneCollapsedByProject {
+  return readLaneBooleanByProject(LANE_COLLAPSED_KEY, BOARD_LANE_ORDER);
+}
+
+function readLaneVisibilityByProject(): LaneVisibilityByProject {
+  return readLaneBooleanByProject(LANE_VISIBILITY_KEY, BOARD_LANE_ORDER);
 }
 
 function workspaceName(path?: string): string | null {
@@ -624,8 +640,8 @@ export function App() {
   const [connection, setConnection] = useState<ConnectionState>("connecting");
   const [search, setSearch] = useState("");
   const [filters, setFilters] = useState(readTaskFilters);
-  const [showEmptyColumns, setShowEmptyColumns] = useState(readShowEmptyColumns);
-  const [columnVisibilityByProject, setColumnVisibilityByProject] = useState(readColumnVisibilityByProject);
+  const [laneCollapsedByProject, setLaneCollapsedByProject] = useState(readLaneCollapsedByProject);
+  const [laneVisibilityByProject, setLaneVisibilityByProject] = useState(readLaneVisibilityByProject);
   const [boardView, setBoardView] = useState<BoardView>(() => {
     // Initial view from the URL (?view=list), used by the right-sidebar
     // embed so the compact panel opens straight onto the list. Absent or
@@ -1629,44 +1645,62 @@ export function App() {
     ) as Record<TaskStatus, Task[]>;
   }, [filteredTasks]);
 
-  const columnVisibility = columnVisibilityByProject[selectedProjectId];
+  const laneCollapsed = laneCollapsedByProject[selectedProjectId];
+  const laneVisibility = laneVisibilityByProject[selectedProjectId];
 
-  // 窄侧栏（compact）下所有列竖向堆叠（见 styles.css compact 分支），
-  // 列的显示/隐藏逻辑与宽面板完全一致。
-  const visibleStatuses = useMemo(
-    () => TASK_STATUSES.filter((status) => (
-      tasksByStatus[status].length === 0
-        ? showEmptyColumns
-        : (columnVisibility?.[status] ?? true)
-    )),
-    [columnVisibility, showEmptyColumns, tasksByStatus],
-  );
+  /** 每条列的卡片，按状态顺序拼起来（「等你」= 待验收 + 被阻塞）。 */
+  const laneTasks = useMemo(() => {
+    return Object.fromEntries(
+      BOARD_LANES.map((lane) => [
+        lane.id,
+        lane.statuses.flatMap((status) => tasksByStatus[status]),
+      ]),
+    ) as Record<BoardLaneId, Task[]>;
+  }, [tasksByStatus]);
 
-  const hiddenStatuses = useMemo(
-    () => TASK_STATUSES.filter((status) => (
-      tasksByStatus[status].length === 0
-        ? !showEmptyColumns
-        : !(columnVisibility?.[status] ?? true)
-    )),
-    [columnVisibility, showEmptyColumns, tasksByStatus],
-  );
-
-  function updateShowEmptyColumns(show: boolean) {
-    window.localStorage.setItem(SHOW_EMPTY_COLUMNS_KEY, String(show));
-    setShowEmptyColumns(show);
+  /** 某条列此刻有没有内容——决定它该不该出现在看板上。 */
+  function laneHasContent(lane: BoardLane): boolean {
+    return lane.statuses.some((status) => tasksByStatus[status].length > 0);
   }
 
-  function updateColumnVisibility(status: TaskStatus, visible: boolean) {
-    if (!selectedProjectId || tasksByStatus[status].length === 0) return;
-    setColumnVisibilityByProject((current) => {
+  // 看板上不该出现空列。默认只有「等你」例外：「没有等你的事」本身就是要看的信息，
+  // 它消失会让人以为看板坏了。其余列空着就不占地方。
+  const visibleLanes = useMemo(
+    () => BOARD_LANES.filter((lane) => {
+      const auto = laneHasContent(lane) || !lane.defaultVisible;
+      return auto && (laneVisibility?.[lane.id] ?? lane.defaultVisible);
+    }),
+    [laneVisibility, tasksByStatus],
+  );
+
+  /** 有内容但没显示出来的列（收起来的通道）。 */
+  const hiddenLanes = useMemo(
+    () => BOARD_LANES
+      .filter((lane) => laneHasContent(lane) && !visibleLanes.some((visible) => visible.id === lane.id))
+      .map((lane) => lane.id),
+    [visibleLanes, tasksByStatus],
+  );
+
+  function updateLaneCollapsed(lane: BoardLaneId, collapsed: boolean) {
+    if (!selectedProjectId) return;
+    setLaneCollapsedByProject((current) => {
       const next = {
         ...current,
-        [selectedProjectId]: {
-          ...current[selectedProjectId],
-          [status]: visible,
-        },
+        [selectedProjectId]: { ...current[selectedProjectId], [lane]: collapsed },
       };
-      window.localStorage.setItem(COLUMN_VISIBILITY_KEY, JSON.stringify(next));
+      window.localStorage.setItem(LANE_COLLAPSED_KEY, JSON.stringify(next));
+      return next;
+    });
+  }
+
+  function updateLaneVisibility(lane: BoardLaneId, visible: boolean) {
+    if (!selectedProjectId) return;
+    setLaneVisibilityByProject((current) => {
+      const next = {
+        ...current,
+        [selectedProjectId]: { ...current[selectedProjectId], [lane]: visible },
+      };
+      window.localStorage.setItem(LANE_VISIBILITY_KEY, JSON.stringify(next));
       return next;
     });
   }
@@ -2275,10 +2309,7 @@ export function App() {
               onChange={setFilters}
             />
             {boardView === "issues" && (
-              <BoardSettingsMenu
-                showEmptyColumns={showEmptyColumns}
-                onShowEmptyColumnsChange={updateShowEmptyColumns}
-              />
+              <BoardSettingsMenu />
             )}
             {(search || activeFilterCount > 0) && (
               <button
@@ -2771,7 +2802,7 @@ export function App() {
         ) : (
           <div className="board-scroll" aria-label="Issue board">
             <div className="board">
-              {filteredTasks.length === 0 && tasks.length > 0 && !showEmptyColumns && (
+              {filteredTasks.length === 0 && tasks.length > 0 && (
                 <section className="page-empty filter-empty board-filter-empty">
                   <span className="empty-search" aria-hidden="true"><LinearIcon name="search" /></span>
                   <h2>没有匹配的议题</h2>
@@ -2785,13 +2816,15 @@ export function App() {
                   </button>
                 </section>
               )}
-              {visibleStatuses.map((status) => (
+              {visibleLanes.map((lane) => (
                 <BoardColumn
-                  key={status}
-                  status={status}
-                  statusIndex={TASK_STATUSES.indexOf(status)}
-                  tasks={tasksByStatus[status]}
-                  isDropTarget={dropTarget === status}
+                  key={lane.id}
+                  lane={lane}
+                  statuses={lane.statuses}
+                  tasks={laneTasks[lane.id]}
+                  isCollapsed={laneCollapsed?.[lane.id] ?? lane.collapsible}
+                  onToggleCollapsed={() => updateLaneCollapsed(lane.id, !(laneCollapsed?.[lane.id] ?? lane.collapsible))}
+                  isDropTarget={lane.statuses.includes(dropTarget as TaskStatus)}
                   draggedTaskId={draggedTaskId}
                   draggedTaskHeight={draggedTaskHeight}
                   movingTaskId={movingTaskId}
@@ -2816,20 +2849,20 @@ export function App() {
                   onDragEnter={setDropTarget}
                   onDrop={finishTaskDrop}
                   onOpenThread={openThread}
-                  onHide={(hiddenStatus) => updateColumnVisibility(hiddenStatus, false)}
+                  onHide={() => updateLaneVisibility(lane.id, false)}
                   onComplete={(task) => void acceptIssueFromCard(task)}
                 />
               ))}
-              {hiddenStatuses.length > 0 && (
+              {hiddenLanes.length > 0 && (
                 <HiddenColumns
-                  statuses={hiddenStatuses}
+                  lanes={hiddenLanes}
                   counts={Object.fromEntries(
-                    TASK_STATUSES.map((status) => [status, tasksByStatus[status].length]),
-                  ) as Record<TaskStatus, number>}
+                    BOARD_LANES.map((lane) => [lane.id, laneTasks[lane.id].length]),
+                  ) as Record<BoardLaneId, number>}
                   dropTarget={dropTarget}
                   onDragTargetChange={setDropTarget}
                   onDrop={(destination, taskId) => finishTaskDrop(destination, taskId)}
-                  onShow={(shownStatus) => updateColumnVisibility(shownStatus, true)}
+                  onShow={(shownLane) => updateLaneVisibility(shownLane, true)}
                 />
               )}
             </div>

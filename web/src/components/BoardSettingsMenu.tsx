@@ -2,15 +2,11 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { LinearIcon } from "./LinearIcon";
 
-interface BoardSettingsMenuProps {
-  showEmptyColumns: boolean;
-  onShowEmptyColumnsChange: (show: boolean) => void;
-}
-
-export function BoardSettingsMenu({
-  showEmptyColumns,
-  onShowEmptyColumnsChange,
-}: BoardSettingsMenuProps) {
+/**
+ * 看板设置。列模型收敛之后，「显示空列」这个开关没有存在意义了：
+ * 空列不再占地方，需要常驻的只有「等你」一条（它空着也是信息）。
+ */
+export function BoardSettingsMenu() {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
@@ -89,19 +85,10 @@ export function BoardSettingsMenu({
     >
       <section className="board-settings-section" aria-labelledby="board-options-heading">
         <h2 id="board-options-heading">看板选项</h2>
-        <div className="board-setting-row">
-          <span>显示空列</span>
-          <button
-            type="button"
-            className={`board-setting-switch${showEmptyColumns ? " is-on" : ""}`}
-            role="switch"
-            aria-checked={showEmptyColumns}
-            onClick={() => onShowEmptyColumnsChange(!showEmptyColumns)}
-          >
-            <span aria-hidden="true" />
-            <span className="sr-only">{showEmptyColumns ? "关闭显示空列" : "开启显示空列"}</span>
-          </button>
-        </div>
+        <p className="board-settings-note">
+          空列不再占位置。有内容的列才出现，「等你」例外：它空着也留着，
+          因为「没有等你的事」本身就是要看的信息。
+        </p>
       </section>
     </div>,
     document.body,
@@ -112,7 +99,7 @@ export function BoardSettingsMenu({
       <button
         ref={triggerRef}
         type="button"
-        className={`board-settings-trigger${open ? " is-open" : ""}${showEmptyColumns ? " is-active" : ""}`}
+        className={`board-settings-trigger${open ? " is-open" : ""}`}
         aria-label="看板设置"
         aria-haspopup="dialog"
         aria-expanded={open}
@@ -125,7 +112,6 @@ export function BoardSettingsMenu({
         }}
       >
         <LinearIcon name="displayOptions" />
-        {showEmptyColumns && <span className="board-settings-active-dot" aria-hidden="true" />}
       </button>
       {menu}
     </>

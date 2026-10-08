@@ -3,18 +3,23 @@ import type { TaskStatus } from "../types";
 import { STATUS_DETAILS, StatusIcon } from "./BoardColumn";
 import { ColumnVisibilityMenu } from "./ColumnVisibilityMenu";
 import { LinearIcon } from "./LinearIcon";
+import { laneById, type BoardLaneId } from "../boardColumns";
 
 interface HiddenColumnsProps {
-  statuses: TaskStatus[];
-  counts: Record<TaskStatus, number>;
+  lanes: BoardLaneId[];
+  counts: Record<BoardLaneId, number>;
   dropTarget: TaskStatus | null;
   onDragTargetChange: (status: TaskStatus | null) => void;
   onDrop: (status: TaskStatus, taskId: string) => void;
-  onShow: (status: TaskStatus) => void;
+  onShow: (lane: BoardLaneId) => void;
 }
 
+/**
+ * 收起来的列。列模型收敛成 5 条之后这里通常只有「已完成」一条，
+ * 但它是通道，不能省：终态和需求池默认不占地方，想看得回得来。
+ */
 export function HiddenColumns({
-  statuses,
+  lanes,
   counts,
   dropTarget,
   onDragTargetChange,
@@ -32,7 +37,7 @@ export function HiddenColumns({
   }
 
   return (
-    <section className={`hidden-columns${open ? " is-open" : ""}`} aria-label="隐藏列">
+    <section className={`hidden-columns${open ? " is-open" : ""}`} aria-label="收起的列">
       <button
         type="button"
         className="hidden-columns-heading"
@@ -41,17 +46,21 @@ export function HiddenColumns({
         onClick={() => setOpen((current) => !current)}
       >
         <LinearIcon name="chevronDown" />
-        <span>隐藏列</span>
+        <span>收起的列</span>
       </button>
 
       <div className="hidden-columns-list" id="hidden-columns-list" hidden={!open}>
-        {statuses.map((status) => {
+        {lanes.map((laneId) => {
+          const lane = laneById(laneId);
+          // 列可以收多个状态，落到这条列时按第一个状态摆放。
+          const status = lane.statuses[0];
           const details = STATUS_DETAILS[status];
-          const canShow = counts[status] > 0;
+          const count = counts[laneId];
+          const canShow = count > 0;
           return (
             <div
               className={`hidden-column-item status-${status}${dropTarget === status ? " is-drop-target" : ""}`}
-              key={status}
+              key={laneId}
               onDragEnter={(event) => {
                 event.preventDefault();
                 onDragTargetChange(status);
@@ -73,13 +82,13 @@ export function HiddenColumns({
                   type="button"
                   className="hidden-column-show"
                   aria-label={`显示${details.label}列`}
-                  onClick={() => onShow(status)}
+                  onClick={() => onShow(laneId)}
                 >
                   <span className={`status-icon status-icon-${details.tone}`}>
                     <StatusIcon status={status} />
                   </span>
                   <strong>{details.label}</strong>
-                  <span className="hidden-column-count">{counts[status]}</span>
+                  <span className="hidden-column-count">{count}</span>
                 </button>
               ) : (
                 <div className="hidden-column-show is-empty">
@@ -87,7 +96,7 @@ export function HiddenColumns({
                     <StatusIcon status={status} />
                   </span>
                   <strong>{details.label}</strong>
-                  <span className="hidden-column-count">{counts[status]}</span>
+                  <span className="hidden-column-count">{count}</span>
                 </div>
               )}
               {canShow && (
@@ -95,7 +104,7 @@ export function HiddenColumns({
                   label={details.label}
                   action="show"
                   className="icon-button hidden-column-menu"
-                  onAction={() => onShow(status)}
+                  onAction={() => onShow(laneId)}
                 />
               )}
             </div>

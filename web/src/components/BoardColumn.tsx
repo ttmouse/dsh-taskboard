@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { DragEvent } from "react";
-import type { Task, TaskStatus } from "../types";
+import { TASK_STATUSES, type Task, type TaskStatus } from "../types";
+import type { BoardLane, BoardLaneId } from "../boardColumns";
 import { ColumnVisibilityMenu } from "./ColumnVisibilityMenu";
 import { TaskCard } from "./TaskCard";
 import {
@@ -57,9 +58,13 @@ function ColumnStatusIcon({ status }: { status: TaskStatus }) {
 }
 
 interface BoardColumnProps {
-  status: TaskStatus;
-  statusIndex: number;
+  /** 这条列是什么（决定标题、图标、默认折叠与「+」落到哪个状态）。 */
+  lane: BoardLane;
+  /** 这条列收拢哪些状态（「等你」= 待验收 + 被阻塞）。 */
+  statuses: readonly TaskStatus[];
   tasks: Task[];
+  isCollapsed: boolean;
+  onToggleCollapsed: () => void;
   isDropTarget: boolean;
   draggedTaskId: string | null;
   draggedTaskHeight: number;
@@ -79,14 +84,25 @@ interface BoardColumnProps {
   onDragEnter: (status: TaskStatus) => void;
   onDrop: (status: TaskStatus, taskId: string, beforeTaskId: string | null) => void;
   onOpenThread: (threadId: string) => void;
-  onHide: (status: TaskStatus) => void;
+  onHide: () => void;
   onComplete?: (task: Task) => void;
 }
 
+/** 列的标题与图标只在列模型里定义一处。 */
+const LANE_DETAILS: Record<BoardLaneId, { label: string; status: TaskStatus; countLabel: string }> = {
+  you: { label: "等你", status: "in_review", countLabel: "件待你处理" },
+  running: { label: "处理中", status: "in_progress", countLabel: "件在跑" },
+  queued: { label: "等待认领", status: "todo", countLabel: "件排队" },
+  finished: { label: "已完成", status: "done", countLabel: "件已结束" },
+  parked: { label: "待立项", status: "backlog", countLabel: "件候选" },
+};
+
 export function BoardColumn({
-  status,
-  statusIndex,
+  lane,
+  statuses,
   tasks,
+  isCollapsed,
+  onToggleCollapsed,
   isDropTarget,
   draggedTaskId,
   draggedTaskHeight,
@@ -107,8 +123,13 @@ export function BoardColumn({
   onHide,
   onComplete,
 }: BoardColumnProps) {
-  const details = STATUS_DETAILS[status];
+  const lane_ = lane;
+  const details = LANE_DETAILS[lane_.id];
+  // 拖拽栏里只有一条状态时，落点状态是确定的；「等你」收两个状态，
+  // 落点按卡片当前的段位决定（见 resolveDropStatus）。
+  const soleStatus = statuses.length === 1 ? statuses[0] : null;
   const [dropBeforeTaskId, setDropBeforeTaskId] = useState<string | null | undefined>();
+  const [dropStatus, setDropStatus] = useState<TaskStatus | null>(null);
   const taskIndexes = new Map(tasks.map((task, index) => [task.id, index]));
   const remainingTasks = tasks.filter((task) => task.id !== draggedTaskId);
   const remainingIndexes = new Map(remainingTasks.map((task, index) => [task.id, index]));
@@ -130,13 +151,38 @@ export function BoardColumn({
       ?.dataset.taskId ?? null;
   }
 
+  /**
+   * 卡片落在哪条状态上。单状态列直接返回它；「等你」要按落点位置判断：
+   * 卡片插在某个同类卡片前面就沿用那条卡片的现状，落在段尾则沿用被拖卡片
+   * 自己的现状（同列内换位置不该偷偷改状态）。
+   */
+  function resolveDropStatus(taskId: string, beforeTaskId: string | null): TaskStatus {
+    if (soleStatus !== null) return soleStatus;
+    if (beforeTaskId !== null) {
+      const target = tasks.find((task) => task.id === beforeTaskId);
+      if (target) return target.status;
+    }
+    const dragged = tasks.find((task) => task.id === taskId);
+    return dragged?.status ?? statuses[0];
+  }
+
   function handleDrop(event: DragEvent<HTMLElement>) {
     event.preventDefault();
     const taskId =
       event.dataTransfer.getData("application/x-taskboard-task") ||
       event.dataTransfer.getData("text/plain");
-    if (taskId) onDrop(status, taskId, findDropBefore(event.currentTarget, event.clientY));
+    if (taskId) {
+      const before = findDropBefore(event.currentTarget, event.clientY);
+      onDrop(resolveDropStatus(taskId, before), taskId, before);
+    }
     setDropBeforeTaskId(undefined);
+    setDropStatus(null);
+  }
+
+  /** 被拖卡片此刻的状态（判断跨列拖动落到哪条状态用）。 */
+  function currentDraggedStatus(): TaskStatus | null {
+    if (!draggedTaskId) return null;
+    return tasks.find((task) => task.id === draggedTaskId)?.status ?? null;
   }
 
   function getTaskDragShift(task: Task): number {
@@ -152,14 +198,20 @@ export function BoardColumn({
 
   return (
     <section
-      className={`board-column status-${status}${isDropTarget ? " is-drop-target" : ""}`}
-      aria-labelledby={`column-${status}`}
-      onDragEnter={() => onDragEnter(status)}
+      className={`board-column lane-${lane_.id} status-${details.status}${isDropTarget ? " is-drop-target" : ""}${isCollapsed ? " is-collapsed" : ""}${lane_.id === "you" ? " is-primary" : ""}`}
+      aria-labelledby={`column-${lane_.id}`}
+      onDragEnter={() => {
+        const status = soleStatus ?? currentDraggedStatus();
+        if (status) onDragEnter(status);
+      }}
       onDragOver={(event) => {
         event.preventDefault();
         event.dataTransfer.dropEffect = "move";
+        const before = findDropBefore(event.currentTarget, event.clientY);
+        const status = soleStatus ?? currentDraggedStatus() ?? statuses[0];
         onDragEnter(status);
-        setDropBeforeTaskId(findDropBefore(event.currentTarget, event.clientY));
+        setDropStatus(status);
+        setDropBeforeTaskId(before);
       }}
       onDragLeave={(event) => {
         if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) {
@@ -170,60 +222,91 @@ export function BoardColumn({
     >
       <header className="column-header">
         <div className="column-heading">
-          <span className={`column-status-icon status-icon-${details.tone}`}>
-            <ColumnStatusIcon status={status} />
+          <span className={`column-status-icon status-icon-${STATUS_DETAILS[details.status].tone}`}>
+            <ColumnStatusIcon status={details.status} />
           </span>
-          <h2 id={`column-${status}`}>{details.label}</h2>
-          <span className="task-count" aria-label={`${tasks.length} 个议题`}>{tasks.length}</span>
+          <h2 id={`column-${lane_.id}`}>{details.label}</h2>
+          <span className="task-count" aria-label={`${tasks.length} ${details.countLabel}`}>{tasks.length}</span>
         </div>
         <div className="column-actions">
+          {lane_.collapsible && (
+            <button
+              type="button"
+              className={`icon-button lane-toggle${isCollapsed ? "" : " is-expanded"}`}
+              onClick={onToggleCollapsed}
+              aria-expanded={!isCollapsed}
+              aria-label={isCollapsed ? `展开${details.label}` : `折叠${details.label}`}
+              title={isCollapsed ? `展开${details.label}` : `折叠${details.label}`}
+            >
+              <TaskboardIcon name="dropdown" />
+            </button>
+          )}
           {tasks.length > 0 && (
             <ColumnVisibilityMenu
               label={details.label}
               action="hide"
               className="icon-button column-menu"
-              onAction={() => onHide(status)}
+              onAction={onHide}
             />
           )}
-          {canCreate && (
+          {canCreate && soleStatus !== null && (
           <button
             type="button"
             className="icon-button add-task-button"
-            onClick={() => onCreate(status)}
+            onClick={() => onCreate(soleStatus)}
             aria-label={`在${details.label}中新建议题`}
             title={`添加到${details.label}`}
           >
-            <TaskboardIcon name={COLUMN_ADD_ICONS[status] ?? "columnAdd"} />
+            <TaskboardIcon name="columnAdd" />
           </button>
           )}
         </div>
       </header>
 
+      {!isCollapsed && (
       <div className="column-list">
-        {tasks.map((task) => {
-          const dragShift = getTaskDragShift(task);
+        {statuses.map((status) => {
+          const segment = tasks.filter((task) => task.status === status);
+          // 「等你」把待验收和被阻塞并在一起，所以每段要自报家门：
+          // 列回答「该谁动」，段回答「为什么」。
+          const showSegment = statuses.length > 1;
+          if (showSegment && segment.length === 0) return null;
           return (
-            <TaskCard
-              key={task.id}
-              task={task}
-              projectName={projectNames?.[task.projectId]}
-              statusIndex={statusIndex}
-              isDragging={draggedTaskId === task.id}
-              dragShift={dragShift}
-              isMoving={movingTaskId === task.id}
-              isSettling={settlingTaskId === task.id}
-              isContextMenuOpen={contextMenuTaskId === task.id}
-              onEdit={onEdit}
-              onContextMenu={onContextMenu}
-              onMove={onMove}
-              onDragStart={onDragStart}
-              onDragEnd={onDragEnd}
-              onOpenThread={onOpenThread}
-              onComplete={onComplete}
-            />
+            <div className="column-segment" key={status}>
+              {showSegment && (
+                <div className="column-segment-heading">
+                  <span className="column-segment-label">{STATUS_DETAILS[status].label}</span>
+                  <span className="column-segment-count">{segment.length}</span>
+                </div>
+              )}
+              {segment.map((task) => {
+                const dragShift = getTaskDragShift(task);
+                return (
+                  <TaskCard
+                    key={task.id}
+                    task={task}
+                    projectName={projectNames?.[task.projectId]}
+                    statusIndex={TASK_STATUSES.indexOf(task.status)}
+                    isDragging={draggedTaskId === task.id}
+                    dragShift={dragShift}
+                    isMoving={movingTaskId === task.id}
+                    isSettling={settlingTaskId === task.id}
+                    isContextMenuOpen={contextMenuTaskId === task.id}
+                    onEdit={onEdit}
+                    onContextMenu={onContextMenu}
+                    onMove={onMove}
+                    onDragStart={onDragStart}
+                    onDragEnd={onDragEnd}
+                    onOpenThread={onOpenThread}
+                    onComplete={onComplete}
+                  />
+                );
+              })}
+            </div>
           );
         })}
       </div>
+      )}
     </section>
   );
 }

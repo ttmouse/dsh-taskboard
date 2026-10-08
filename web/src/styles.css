@@ -1443,6 +1443,70 @@ kbd {
   animation: context-menu-in 90ms ease-out both;
 }
 
+.board-settings-note {
+  margin: 0;
+  padding: 0 8px 6px;
+  color: var(--text-tertiary);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
+/* ── 列模型 ─────────────────────────────────────────────────────────────
+   列回答「现在该谁动」。看板默认只剩「等你」一条（它空着也在），
+   其余列有内容才出现。「等你」是唯一要人动手的地方，所以它最重。 */
+
+.lane-toggle > svg {
+  transition: transform 140ms cubic-bezier(0.23, 1, 0.32, 1);
+  transform: rotate(-90deg);
+}
+
+.lane-toggle.is-expanded > svg {
+  transform: rotate(0deg);
+}
+
+.board-column.is-collapsed {
+  height: auto;
+  min-height: 0;
+  align-self: start;
+}
+
+.board-column.is-primary .column-header h2 {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.board-column.is-primary .task-count {
+  background: var(--accent-soft);
+  color: var(--text-primary);
+}
+
+/* 「等你」里两段来源各自报家门：列说该谁动，段说为什么。 */
+.column-segment {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.column-segment + .column-segment {
+  margin-top: 10px;
+}
+
+.column-segment-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 2px 8px 0;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 550;
+  letter-spacing: 0.02em;
+}
+
+.column-segment-count {
+  font-variant-numeric: tabular-nums;
+}
+
 .board-settings-section h2 {
   margin: 0;
   padding: 4px 8px 6px;
