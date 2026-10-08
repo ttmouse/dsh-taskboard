@@ -134,6 +134,66 @@ export function buildDispatchPrompt(project, task, comment, resumed = false) {
   ].join('\n')
 }
 
+/**
+ * Byte budget the host's session-title service enforces on an explicit rename
+ * (`normalizeSessionTitle(text, config.maxTitleBytes)`, measured in UTF-8
+ * bytes, no ellipsis, no word boundary — 2026-10-09 measured at 80). Passing
+ * the raw issue title through made the sidebar end mid-sentence (issue
+ * 832047A82866-3: a 46-character title rendered as
+ * 「我感觉自动触发的任务的这个标题，前面可以简化点，这个ID」), which reads
+ * as a truncated fragment. Kept as a named constant so a title derived here
+ * provably survives the host's normalization untouched.
+ */
+const SESSION_TITLE_MAX_BYTES = 80
+
+/** UTF-8 byte length of a string (the unit the host's title budget uses). */
+function utf8Bytes(text) {
+  return Buffer.byteLength(text, 'utf8')
+}
+
+/**
+ * Derive a session title a human can read, from an issue title.
+ *
+ * The host truncates an explicit rename at a raw UTF-8 byte budget, so a long
+ * Chinese issue title loses its tail mid-word. This derives the title in the
+ * plugin instead: keep the issue title verbatim when it already fits, otherwise
+ * cut on a readable boundary (a CJK punctuation mark or whitespace) and append
+ * an ellipsis so the shortening is visibly intentional rather than a bug.
+ *
+ * Identifiers and UUIDs deliberately stay out: the user reads the conversation
+ * list to recognise the task, and a project/task id there is noise
+ * (2026-10-09 user feedback on issue 832047A82866-3).
+ * @param task - the issue being dispatched (title, identifier as last resort).
+ * @returns a title guaranteed to fit the host's byte budget.
+ */
+export function buildSessionTitle(task) {
+  // The ellipsis is 3 bytes; reserve it so the result never exceeds the budget.
+  const ELLIPSIS = '…'
+  const clean = String(task?.title ?? '').replace(/\s+/gu, ' ').trim()
+  const fallback = String(task?.identifier ?? '').trim()
+  const source = clean !== '' ? clean : fallback
+  if (source === '') return ''
+  if (utf8Bytes(source) <= SESSION_TITLE_MAX_BYTES) return source
+  const budget = SESSION_TITLE_MAX_BYTES - utf8Bytes(ELLIPSIS)
+  // Walk code points so a multi-byte character is never split in half.
+  let used = 0
+  let cut = ''
+  for (const character of source) {
+    const bytes = utf8Bytes(character)
+    if (used + bytes > budget) break
+    cut += character
+    used += bytes
+  }
+  // Prefer a boundary a reader recognises: drop a trailing partial clause at
+  // the last clause-separating punctuation, else at the last space.
+  const boundary = Math.max(
+    ...['，', '。', '；', '：', '、', ',', '.', ';', ':', ' '].map((mark) => cut.lastIndexOf(mark)),
+  )
+  // Only honour a boundary that keeps a worthwhile amount of the title.
+  if (boundary >= cut.length / 2) cut = cut.slice(0, boundary)
+  return `${cut.trimEnd()}${ELLIPSIS}`
+}
+
 /** Serialize one routine YAML via the shared writer (stable, human-diffable). */
 export function buildRoutineYaml(project, automation, apiBase, paused = false) {
   return serializeRoutine({
