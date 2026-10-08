@@ -253,6 +253,7 @@ function projectFromRow(row) {
     workspacePath: row.workspace_path,
     issueCount: Number(row.issue_count ?? 0),
     automationEnabled: Number(row.automation_enabled ?? 0) === 1,
+    lastActivityAt: row.last_activity_at ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -846,11 +847,14 @@ export class TaskboardDatabase {
         projects.created_at,
         projects.updated_at,
         projects.automation_enabled,
-        COUNT(tasks.id) AS issue_count
+        COUNT(DISTINCT tasks.id) AS issue_count,
+        MAX(task_activities.created_at) AS last_activity_at
       FROM projects
       LEFT JOIN tasks
         ON tasks.project_id = projects.id
         AND tasks.archived_at IS NULL
+      LEFT JOIN task_activities
+        ON task_activities.task_id = tasks.id
       GROUP BY
         projects.id,
         projects.name,
@@ -858,7 +862,8 @@ export class TaskboardDatabase {
         projects.created_at,
         projects.updated_at,
         projects.automation_enabled
-      ORDER BY projects.created_at, projects.id
+      /* 「全局」(local) 是聚合视图，固定排在项目列表最前面 */
+      ORDER BY (projects.id = 'local') DESC, projects.created_at, projects.id
     `).all().map(projectFromRow);
   }
 
