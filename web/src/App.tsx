@@ -117,6 +117,7 @@ import {
 // The poller stays in ESM JavaScript so its lifecycle can be tested directly with node:test.
 // @ts-expect-error The module's option contract is enforced by its focused node tests.
 import { createRevisionPoller, getRevisionPollingInterval } from "./revisionPolling.mjs";
+import { useAppVersionCheck } from "./appVersionCheck";
 
 type ConnectionState = "connecting" | "live" | "reconnecting";
 type Theme = "light" | "dark";
@@ -586,6 +587,7 @@ function LocalRealtimeSync({
 }
 
 export function App() {
+  useAppVersionCheck();
   const query = useMemo(() => new URLSearchParams(getTaskboardLocation().search), []);
   const embedded = query.get("host") === "codex";
   // Compact chrome (?chrome=min): the right-sidebar embed — the left nav,
