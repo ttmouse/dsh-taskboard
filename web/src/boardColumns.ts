@@ -81,6 +81,15 @@ export const WAITING_REASON_LABELS: Partial<Record<TaskStatus, { zh: string; en:
   blocked: { zh: "被阻塞", en: "Blocked" },
 };
 
+/**
+ * 段名与列名重复时不要段头：「已完成」列里的 done 段叫「完成」，
+ * 等于在列名下面又印一遍列名（就是那个奇怪的子分组）。段的段头只在
+ * 它比列名多说一点东西时才出现——canceled 的「已取消」值得说，done 不值得。
+ */
+export function laneSegmentHeadingNeeded(laneId: BoardLaneId, status: TaskStatus): boolean {
+  return !(laneId === "finished" && status === "done");
+}
+
 export function laneById(id: BoardLaneId): BoardLane {
   const lane = BOARD_LANES.find((candidate) => candidate.id === id);
   if (!lane) throw new Error(`unknown board lane '${id}'`);
