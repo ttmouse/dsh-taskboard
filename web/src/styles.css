@@ -4121,8 +4121,8 @@ kbd {
 }
 
 .actor-avatar-agent-image {
-  border-radius: 0;
-  object-fit: contain;
+  border-radius: 50%;
+  object-fit: cover;
 }
 
 .actor-avatar.card-assignee-avatar {
