@@ -12846,7 +12846,9 @@ kbd {
   grid-template-columns: minmax(0, 1fr);
   gap: 0;
 }
-.issue-properties-toggle-row { display: flex; justify-content: flex-end; }
+/* 切换行必须独占整行：否则在两栏 grid 里自动放置会把 toggle 放进第 1 列、
+   主内容挤进 320px 的属性栏轨道（侧边栏窄开详情后再拖宽时的错版）。 */
+.issue-properties-toggle-row { display: flex; justify-content: flex-end; grid-column: 1 / -1; }
 .issue-properties-toggle {
   appearance: none;
   display: inline-flex;

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ImgHTMLAttributes, type KeyboardEvent, type MouseEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type ImgHTMLAttributes, type KeyboardEvent, type MouseEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -492,7 +492,20 @@ export function TaskDetail({
   // Narrow containers (the right-sidebar iframe) collapse the properties
   // aside by default: the column would otherwise eat most of the pane
   // width. The main panel stays wide and keeps the aside open.
-  const narrowContainer = useMemo(() => window.innerWidth <= 720, []);
+  // The breakpoint is tracked reactively: the host sidebar can be resized
+  // at any time (拖宽侧边栏), and a frozen value leaves a stale properties
+  // toggle in the two-column grid, pushing the main column into the aside's
+  // 320px track. When the container turns wide again the aside reopens.
+  const [narrowContainer, setNarrowContainer] = useState(() => window.innerWidth <= 720);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 720px)");
+    const onChange = (event: MediaQueryListEvent) => {
+      setNarrowContainer(event.matches);
+      if (!event.matches) setPropertiesCollapsed(false);
+    };
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
   const [propertiesCollapsed, setPropertiesCollapsed] = useState(narrowContainer);
   // 原标题滚出视口后，顶部吸附条展示当前议题的标识与标题（滚动中也不丢失上下文）。
   const [titleScrolledOut, setTitleScrolledOut] = useState(false);
