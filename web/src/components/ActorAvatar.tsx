@@ -16,7 +16,7 @@ export function ActorAvatar({
       {actor.type === "agent" ? (
         <img
           className="actor-avatar-image actor-avatar-agent-image"
-          src="favicon.svg"
+          src="agent-avatar.png"
           alt=""
         />
       ) : actor.avatarUrl ? (
