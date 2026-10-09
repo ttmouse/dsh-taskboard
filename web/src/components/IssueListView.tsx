@@ -10,6 +10,7 @@ import { StatusIcon } from "./BoardColumn";
 import { LinearIcon, LinearPriorityIcon } from "./LinearIcon";
 import { TaskConversationMenu } from "./TaskConversationMenu";
 import { TaskPropertyPicker } from "./TaskPropertyPicker";
+import { ProjectRefChip } from "./TaskCard";
 import { TaskboardIcon } from "./TaskboardIcon";
 
 /**
@@ -204,9 +205,10 @@ const assigneeTarget = assigneeTargetForActor(task.assignee, currentUser) ?? "cu
                         }}
                       >
                         <span className="issue-list-title-cell">
-                          <small>{task.identifier}</small>
-                          {projectNames?.[task.projectId] && (
-                            <small className="card-project-chip" title={`所属项目：${projectNames[task.projectId]}`}>{projectNames[task.projectId]}</small>
+                          {projectNames?.[task.projectId] ? (
+                            <ProjectRefChip task={task} projectName={projectNames[task.projectId]} />
+                          ) : (
+                            <small>{task.identifier}</small>
                           )}
                           <strong>{task.title}</strong>
                           {presentations[task.id]?.unread && <span className="task-unread-dot" aria-label={text("有未读更新", "Unread updates")} />}

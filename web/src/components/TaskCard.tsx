@@ -364,6 +364,35 @@ function AssigneeControl({
   );
 }
 
+/** 「全局」聚合视图的所属项目标注：默认只显示项目名，卡片悬停时切换为议题 ID，点击 ID 复制。 */
+export function ProjectRefChip({ task, projectName }: { task: Task; projectName: string }) {
+  const [copied, setCopied] = useState(false);
+  const copyTimer = useRef<number | null>(null);
+  useEffect(() => () => {
+    if (copyTimer.current !== null) window.clearTimeout(copyTimer.current);
+  }, []);
+  return (
+    <span className="card-ref-swap">
+      <span className="card-project-chip" title={`所属项目：${projectName}`}>{projectName}</span>
+      <button
+        type="button"
+        className={`task-identifier card-id-copy${copied ? " is-copied" : ""}`}
+        title={`点击复制 ID：${task.identifier}`}
+        onClick={(event) => {
+          event.stopPropagation();
+          navigator.clipboard?.writeText(task.identifier).then(() => {
+            setCopied(true);
+            if (copyTimer.current !== null) window.clearTimeout(copyTimer.current);
+            copyTimer.current = window.setTimeout(() => setCopied(false), 1500);
+          }).catch(() => {});
+        }}
+      >
+        {copied ? "已复制" : task.identifier}
+      </button>
+    </span>
+  );
+}
+
 /** 看板列简化卡片：由 BoardColumn 驱动（onMove/onOpenThread） */
 function BoardTaskCard({
   task,
@@ -427,9 +456,10 @@ function BoardTaskCard({
 
       <div className="card-topline">
         <span className="card-reference">
-          <span className="task-identifier">{task.identifier}</span>
-          {projectName && (
-            <span className="card-project-chip" title={`所属项目：${projectName}`}>{projectName}</span>
+          {projectName ? (
+            <ProjectRefChip task={task} projectName={projectName} />
+          ) : (
+            <span className="task-identifier">{task.identifier}</span>
           )}
           {task.relations.parent && (
             <>

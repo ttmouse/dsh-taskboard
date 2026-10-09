@@ -2744,6 +2744,41 @@ kbd {
   -webkit-line-clamp: 2;
 }
 
+/* 「全局」视图的所属项目标注：默认只显示项目名，卡片/行悬停时切换为可点击复制的议题 ID */
+.card-ref-swap {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.card-ref-swap .card-id-copy {
+  display: none;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+  /* 卡片正文默认 pointer-events:none 让点击穿透到整卡打开按钮，ID 需要自己可点 */
+  pointer-events: auto;
+}
+
+.card-ref-swap .card-id-copy:hover {
+  color: var(--text-secondary);
+}
+
+.task-card:hover .card-ref-swap .card-project-chip,
+.issue-list-row:hover .card-ref-swap .card-project-chip {
+  display: none;
+}
+
+.task-card:hover .card-ref-swap .card-id-copy,
+.issue-list-row:hover .card-ref-swap .card-id-copy {
+  display: inline;
+}
+
 .card-properties {
   min-width: 0;
   height: 20px;
