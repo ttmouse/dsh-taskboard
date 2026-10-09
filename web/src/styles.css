@@ -6865,6 +6865,31 @@ kbd {
    scheduling chips. Rows are explicit tracks rather than a wrapping flex line,
    so a chip can never end up orphaned beside the "…" button and the two lines
    keep a consistent gap. */
+/* 新建议题默认折叠行：只留状态 + 附件入口 + 「⋯」展开按钮。
+   附件入口在这里与底部操作按钮分离，不再紧贴「创建」按钮。
+   （曾被并行提交 2971086 的 styles.css 覆盖丢失，此处恢复。） */
+.dock-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+}
+
+.dock-summary .property-more {
+  margin-left: auto;
+}
+
+/* 折叠行内所有控件（状态胶囊 / 附件圆钮 / ⋯）统一 28px 高，与展开后的属性行节奏一致。 */
+.dock-summary .composer-attach-icon {
+  width: 28px;
+  height: 28px;
+}
+
+.dock-summary .composer-attach-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
 .task-form-dock > .property-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
