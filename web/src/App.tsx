@@ -53,7 +53,6 @@ import {
 } from "./actors";
 import { BoardColumn, STATUS_DETAILS } from "./components/BoardColumn";
 import { AiChat, type AiChatOpenThreadRequest } from "./components/AiChat";
-import { BoardSettingsMenu } from "./components/BoardSettingsMenu";
 import { DashboardView } from "./components/DashboardView";
 import { HiddenColumns } from "./components/HiddenColumns";
 import {
@@ -2374,9 +2373,6 @@ export function App() {
               filters={filters}
               onChange={setFilters}
             />
-            {boardView === "issues" && (
-              <BoardSettingsMenu />
-            )}
             {(search || activeFilterCount > 0) && (
               <button
                 className="clear-filter"
@@ -2646,7 +2642,8 @@ export function App() {
           <div ref={dragRegionRef} className="workspace-drag-region" aria-hidden="true" />
 
           <div className="header-actions">
-            {selectedProjectId && (
+            {/* 自动认领开关也是列表/项目视角的图标：详情打开时收起，避免歧义。 */}
+            {selectedProjectId && !detailTask && (
               <ProjectAutomationMenu
                 automation={selectedProjectAutomation}
                 projectId={selectedProjectId}
