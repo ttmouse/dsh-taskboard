@@ -13435,36 +13435,18 @@ kbd {
 }
 
 /* Narrow detail (right-sidebar): properties aside collapses to a toggle. */
-.issue-detail-layout {
-  position: relative;
-}
 .issue-detail-layout.properties-collapsed {
   grid-template-columns: minmax(0, 1fr);
   gap: 0;
   padding-top: 20px;
 }
-/* 弱化形态：不独占一行，只是一枚浮在右上角的小箭头（仅图标、无文字），
-   展开状态才出现在文档流上方一角；窄容器下 layout 转为 flex 列时同样成立。 */
+/* 弱化形态：开关放进顶栏图标行（与搜索/筛选同排），仅一枚小箭头，
+   默认降透明度，悬停恢复；箭头方向随展开/收起翻转（行内 transform）。 */
 .issue-properties-toggle {
-  position: absolute;
-  top: 14px;
-  right: 12px;
-  z-index: 2;
-  appearance: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border: 0;
-  background: transparent;
   color: var(--text-tertiary);
   opacity: 0.55;
-  cursor: pointer;
-  padding: 0;
-  border-radius: 6px;
 }
-.issue-properties-toggle:hover { background: var(--surface-hover); color: var(--text-secondary); opacity: 1; }
+.issue-properties-toggle:hover { color: var(--text-secondary); opacity: 1; }
 
 /* Frontend build badge: makes "which bundle is running" checkable from a
    screenshot. Bottom-left keeps it clear of the AI chat launcher ball

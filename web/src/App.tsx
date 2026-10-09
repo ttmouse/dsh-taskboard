@@ -612,6 +612,8 @@ export function App() {
   // the project switcher, and the view tabs are hidden; everything else
   // (create, drag, detail, automation menu, search) stays.
   const compact = query.get("chrome") === "min";
+  // 详情属性栏折叠状态（宿主持有，开关按钮在顶栏图标行里）。
+  const [propertiesCollapsed, setPropertiesCollapsed] = useState(() => window.innerWidth <= 720);
   // host=dsh enables the parent-message protocol (theme sync etc.) while
   // keeping automation on the direct local API path.
   const hostMode = query.get("host");
@@ -2668,7 +2670,23 @@ export function App() {
                 onChange={(options) => void saveProjectAutomation(options)}
               />
             )}
-            {compact && toolbarTools}
+            {compact && detailTask && (
+              <button
+                className="icon-button issue-properties-toggle"
+                type="button"
+                aria-expanded={!propertiesCollapsed}
+                aria-label={propertiesCollapsed ? text("显示属性", "Show properties") : text("隐藏属性", "Hide properties")}
+                title={propertiesCollapsed ? text("显示属性", "Show properties") : text("隐藏属性", "Hide properties")}
+                onClick={() => setPropertiesCollapsed((current) => !current)}
+              >
+                <LinearIcon
+                  name="chevronDown"
+                  style={propertiesCollapsed ? undefined : { transform: "rotate(180deg)" }}
+                />
+              </button>
+            )}
+            {/* 详情态隐藏列表工具（搜索/筛选/看板设置都是列表视角的功能）。 */}
+            {compact && !detailTask && toolbarTools}
             {/* Compact chrome view toggle: the sidebar embed opens on the list,
                 so the header icon row gets the one switch it hides — list ⟷
                 issue board (the same views the full app's tabs offer). */}
@@ -2868,6 +2886,8 @@ export function App() {
             onCopy={(content, message) => void copyText(content, message)}
             openingThread={openingThreadTaskId === detailTask.id}
             onError={(message) => setActionError(message === null ? null : typeof message === "string" ? message : message.join(" "))}
+            propertiesCollapsed={propertiesCollapsed}
+            onSetPropertiesCollapsed={setPropertiesCollapsed}
             onAnnounce={setAnnouncement}
             onClose={closeTaskDetail}
             onAccepted={acceptTaskFromDetail}
