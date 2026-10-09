@@ -166,6 +166,8 @@ export function TaskEditor({
   const [dueDate, setDueDate] = useState(task?.dueDate ?? initialDraft?.dueDate ?? "");
   const [recurrence, setRecurrence] = useState<Recurrence | null>(task?.recurrence ?? initialDraft?.recurrence ?? null);
   const [menu, setMenu] = useState<"status" | "priority" | "assignee" | "labels" | "more" | "due" | "recurrence" | null>(null);
+  // 新建议题时低频属性（优先级/指派/标签/工作流/分支/日期）默认折叠，点「⋯」展开；编辑既有议题保持展开。
+  const [dockOpen, setDockOpen] = useState(() => task != null);
   const [expanded, setExpanded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<TaskEditorError | null>(null);
@@ -428,6 +430,30 @@ export function TaskEditor({
         </div>
 
         <div className="task-form-dock">
+          <input ref={attachmentInputRef} type="file" multiple hidden onChange={(event) => { if (event.currentTarget.files) addAttachments(event.currentTarget.files); event.currentTarget.value = ""; }} />
+          {!dockOpen && (
+            <div className="dock-summary">
+              <TaskPropertyPicker
+                value={status}
+                options={TASK_STATUSES.map((value) => ({
+                  value,
+                  label: taskStatusLabel(language, value),
+                  icon: <StatusIcon status={value} />,
+                  className: `status-icon-${STATUS_DETAILS[value].tone}`,
+                }))}
+                open={menu === "status"}
+                triggerClassName="property-control property-status"
+                ariaLabel={text("状态", "Status")}
+                onOpenChange={(open) => setMenu(open ? "status" : null)}
+                onChange={setStatus}
+              />
+              <button className="composer-attach-icon" type="button" disabled={saving} onClick={() => attachmentInputRef.current?.click()} aria-label={text("上传附件", "Upload attachments")}>
+                <LinearIcon name="attachment" />{attachments.length > 0 && <span>{attachments.length}</span>}
+              </button>
+              <button className="property-control property-more" type="button" aria-label={text("更多属性", "More properties")} onClick={() => setDockOpen(true)}><LinearIcon name="more" /></button>
+            </div>
+          )}
+          {dockOpen && (
           <div className="property-row">
             <div className="property-row-main">
               <TaskPropertyPicker
@@ -486,6 +512,12 @@ export function TaskEditor({
                 onChange={setSelectedLabels}
               />
 
+              {!task && (
+                <button className="composer-attach-icon" type="button" disabled={saving} onClick={() => attachmentInputRef.current?.click()} aria-label={text("上传附件", "Upload attachments")}>
+                  <LinearIcon name="attachment" />{attachments.length > 0 && <span>{attachments.length}</span>}
+                </button>
+              )}
+
               <label className="property-control property-workflow">
                 <LinearIcon name="dashboard" />
                 <span className="sr-only">{text("工作流", "Workflow")}</span>
@@ -539,7 +571,7 @@ export function TaskEditor({
             </div>
 
             <div className="composer-menu-anchor">
-              <button className="property-control property-more" type="button" aria-label={text("更多属性", "More properties")} onClick={() => setMenu(menu === "more" ? null : "more")}><LinearIcon name="more" /></button>
+              <button className="property-control property-more" type="button" aria-label={task ? text("更多属性", "More properties") : text("收起属性", "Collapse properties")} onClick={() => (task ? setMenu(menu === "more" ? null : "more") : setDockOpen(false))}><LinearIcon name="more" /></button>
               {menu === "more" && (
                 <div className="composer-popover more-popover">
                   <button type="button" onClick={() => setMenu("due")}><span><LinearIcon name="calendarAdd" /></span><strong>{text("设置截止日期", "Set due date")}</strong><kbd>⇧ D</kbd><b><LinearIcon name="chevronRight" /></b></button>
@@ -565,6 +597,7 @@ export function TaskEditor({
               )}
             </div>
           </div>
+          )}
 
           {attachmentError && (
             <div className="form-error" role="alert">
@@ -580,14 +613,6 @@ export function TaskEditor({
           )}
 
           <footer className="dialog-footer">
-            {!task && (
-              <>
-                <button className="composer-attach-icon" type="button" disabled={saving} onClick={() => attachmentInputRef.current?.click()} aria-label={text("上传附件", "Upload attachments")}>
-                  <LinearIcon name="attachment" />{attachments.length > 0 && <span>{attachments.length}</span>}
-                </button>
-                <input ref={attachmentInputRef} type="file" multiple hidden onChange={(event) => { if (event.currentTarget.files) addAttachments(event.currentTarget.files); event.currentTarget.value = ""; }} />
-              </>
-            )}
             {task && <span aria-hidden="true" />}
             <div className="dialog-actions">
               {task && <span className="dialog-updated">{text(`编辑 ${task.identifier}`, `Editing ${task.identifier}`)}</span>}
