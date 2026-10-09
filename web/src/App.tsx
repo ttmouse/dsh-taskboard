@@ -666,9 +666,11 @@ export function App() {
     }
     // Remembered view: reopening the sidebar returns to the last used view.
     const saved = window.localStorage.getItem("taskboard.boardView");
-    return saved === "issues" || saved === "list" || saved === "gantt" || saved === "dashboard" || saved === "workflow"
-      ? saved
-      : "issues";
+    if (saved === "issues" || saved === "list" || saved === "gantt" || saved === "dashboard" || saved === "workflow") {
+      return saved;
+    }
+    // First open of the compact right-sidebar embed defaults to the list.
+    return getTaskboardLocation().searchParams.get("chrome") === "min" ? "list" : "issues";
   });
   const [ganttZoom, setGanttZoom] = useState<GanttZoom>("week");
   const [ganttHideCompleted, setGanttHideCompleted] = useState(false);

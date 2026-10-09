@@ -808,7 +808,7 @@ interface TabInfo {
 
 /**
  * Right-sidebar tab body: the current session's project task list, rendered
- * by the board SPA's own List view (`view=list` + `chrome=min`). The compact
+ * by the board SPA's own List view (`chrome=min`). The compact
  * chrome strips the left nav, project switcher, and view tabs — everything
  * else (create, drag-to-move, detail, automation menu, search) stays — and
  * `project` pins the view to the resolved session's project so the sidebar
@@ -896,7 +896,7 @@ function SideTasksBody({ sessionId, sessions, onFrame, t, locale, useTabInfo }: 
         key={`${issueParam ?? ''}`}
         frameRef={frame}
         locale={locale}
-        url={`/dsh-taskboard/?project=${encodeURIComponent(project.id)}&view=list&chrome=min${issueParam === null ? '' : `&issue=${encodeURIComponent(issueParam)}`}`}
+        url={`/dsh-taskboard/?project=${encodeURIComponent(project.id)}&chrome=min${issueParam === null ? '' : `&issue=${encodeURIComponent(issueParam)}`}`}
         title={project.name}
       />
     </div>
