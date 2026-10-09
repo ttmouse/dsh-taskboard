@@ -1304,7 +1304,8 @@ kbd {
 }
 
 .task-filter-trigger:hover,
-.other-tasks-trigger:hover {
+.other-tasks-trigger:hover,
+.search-field:hover {
   background: var(--surface-hover);
 }
 
