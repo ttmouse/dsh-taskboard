@@ -667,7 +667,9 @@ function DescriptionDocument({ value }: { value: string }) {
     <div className="issue-description-document">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        urlTransform={(url) => defaultUrlTransform(resolvePersistedAttachmentUrl(url))}
+        // Validate the persisted Markdown URL before resolving attachments to
+        // the desktop's dsh-app: origin, which defaultUrlTransform rejects.
+        urlTransform={(url) => resolvePersistedAttachmentUrl(defaultUrlTransform(url))}
         components={{
           a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer" />,
           img: ({ node: _node, ...props }) => <MarkdownImage {...props} />,
