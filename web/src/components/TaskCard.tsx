@@ -493,18 +493,6 @@ function BoardTaskCard({
           >
             <LinearIcon name="chevronRight" />
           </button>
-          {onComplete && task.status !== "done" && task.status !== "canceled" && (
-            <button
-              className="icon-button compact card-complete-button"
-              type="button"
-              disabled={isMoving}
-              aria-label={`${task.identifier} 确认完成`}
-              title="直接完成（验收通过，移入已完成）"
-              onClick={stopThen(() => onComplete(task))}
-            >
-              <LinearIcon name="check" />
-            </button>
-          )}
         </div>
       </div>
 
@@ -546,6 +534,19 @@ function BoardTaskCard({
             onClick={stopThen(() => onOpenThread(task.threadId!))}
           >
             <TaskboardIcon name="conversation" />
+          </button>
+        )}
+        {onComplete && task.status !== "done" && task.status !== "canceled" && (
+          <button
+            className="card-complete-pill"
+            type="button"
+            disabled={isMoving}
+            aria-label={`${task.identifier} 确认完成`}
+            title="直接完成（验收通过，移入已完成）"
+            onClick={stopThen(() => onComplete(task))}
+          >
+            <LinearIcon name="check" />
+            完成
           </button>
         )}
       </div>
