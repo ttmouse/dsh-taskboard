@@ -695,6 +695,8 @@ export function App() {
   const issueListRef = useRef<HTMLDivElement>(null);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [sidebarProjectMenuOpen, setSidebarProjectMenuOpen] = useState(false);
+  // 「全局」视图新建议题时的项目选择菜单。
+  const [globalCreateMenuOpen, setGlobalCreateMenuOpen] = useState(false);
   const [projectMenuQuery, setProjectMenuQuery] = useState("");
   const [favoriteProjectIds, setFavoriteProjectIds] = useState(readFavoriteProjectIds);
   const [deviceWorkspacePaths, setDeviceWorkspacePaths] = useState(readDeviceWorkspacePaths);
@@ -2289,19 +2291,6 @@ export function App() {
     void loadProjectList();
   }
 
-  function toggleFavoriteProject() {
-    if (!selectedProjectId) return;
-    const shouldFavorite = !favoriteProjectIds.has(selectedProjectId);
-    setFavoriteProjectIds((current) => {
-      const next = new Set(current);
-      if (shouldFavorite) next.add(selectedProjectId);
-      else next.delete(selectedProjectId);
-      window.localStorage.setItem(FAVORITE_PROJECTS_KEY, JSON.stringify([...next]));
-      return next;
-    });
-    setAnnouncement(`${selectedProject?.name ?? "项目"}${shouldFavorite ? "已收藏。" : "已取消收藏。"}`);
-  }
-
   async function selectProject(choice: ProjectChoice) {
     if (openingProjectId) return;
     setOpeningProjectId(choice.id);
@@ -2628,18 +2617,6 @@ export function App() {
                   <span className="breadcrumb-chevron" aria-hidden="true"><LinearIcon name="chevronRight" /></span>
                   <strong>项目</strong>
                 </>
-              )}
-              {!detailTask && selectedProjectId && (
-                <button
-                  className={`favorite-button${favoriteProjectIds.has(selectedProjectId) ? " active" : ""}`}
-                  type="button"
-                  aria-label={favoriteProjectIds.has(selectedProjectId) ? "取消收藏项目" : "收藏项目"}
-                  aria-pressed={favoriteProjectIds.has(selectedProjectId)}
-                  title={favoriteProjectIds.has(selectedProjectId) ? "取消收藏" : "收藏项目"}
-                  onClick={toggleFavoriteProject}
-                >
-                  <LinearIcon className="favorite-icon" name="favorite" />
-                </button>
               )}
               {!detailTask && selectedProjectId && embedded && contextName && <span className="codex-context">{contextName}</span>}
             </div>

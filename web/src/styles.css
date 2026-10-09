@@ -1085,40 +1085,6 @@ kbd {
   font-size: 11px;
 }
 
-.favorite-button {
-  display: grid;
-  place-items: center;
-  flex: 0 0 auto;
-  width: 22px;
-  height: 22px;
-  margin-left: 2px;
-  padding: 0;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--text-tertiary);
-  cursor: pointer;
-}
-
-.favorite-button:hover {
-  background: var(--surface-hover);
-  color: var(--text-primary);
-}
-
-.favorite-button:focus-visible {
-  outline: 0;
-  box-shadow: 0 0 0 2px var(--accent-soft);
-}
-
-.favorite-button.active {
-  color: var(--warning);
-}
-
-.favorite-icon {
-  width: 14px;
-  height: 14px;
-}
-
 .breadcrumb-chevron {
   color: var(--text-tertiary);
   font-size: 15px;
