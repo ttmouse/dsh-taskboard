@@ -10541,13 +10541,29 @@ kbd {
   height: 6px;
 }
 
-/* 看板卡片右上角的常驻「直接完成」按钮：验收动作跟着人走，不必点进详情。 */
-.task-card .card-complete-button {
+/* 看板卡片底部右侧的常驻「完成」按钮：验收动作跟着人走，不必点进详情。 */
+.task-card .card-complete-pill {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  height: 18px;
+  margin-left: auto;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 32px;
+  background: var(--accent-soft);
   color: var(--accent);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 18px;
+  cursor: pointer;
 }
 
-.task-card .card-complete-button:hover {
-  background: var(--accent-soft);
+.task-card .card-complete-pill:hover {
+  background: var(--accent);
+  color: var(--surface, #fff);
 }
 
 .card-reference {
