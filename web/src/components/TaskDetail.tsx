@@ -1086,10 +1086,6 @@ export function TaskDetail({
           )
         : { ...comment, attachments: [...comment.attachments, ...uploaded] };
       setComments((current) => [...current, nextComment]);
-      // 同步清掉草稿存储：成功路径紧接着 onClose() 卸载本组件，挂载在
-      // commentSegments 上的草稿落盘 effect 不会再执行，仅 setState 清空
-      // 会把已发送的评论留在 localStorage，下次打开被当成草稿回填。
-      taskboardStorage.removeItem(`taskboard.comment-draft.${task.id}`);
       setCommentSegments(createInlineMediaSegments());
       setPendingCommentFiles([]);
       if (commentAttachmentInputRef.current) commentAttachmentInputRef.current.value = "";
