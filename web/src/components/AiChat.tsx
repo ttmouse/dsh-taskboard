@@ -73,6 +73,7 @@ interface AiChatProps {
   issueId: string | null;
   onThreadsChange?: (threads: AiChatThread[]) => void;
   openThreadRequest?: AiChatOpenThreadRequest | null;
+  hideLauncher?: boolean;
 }
 
 type MenuName = "model" | "model-list" | "effort-list" | "sandbox" | null;
@@ -1035,6 +1036,7 @@ export function AiChat({
   issueId,
   onThreadsChange,
   openThreadRequest,
+  hideLauncher,
 }: AiChatProps) {
   const { locale, text } = useTaskboardI18n();
   const [panelOpen, setPanelOpen] = useState(false);
@@ -3030,7 +3032,7 @@ export function AiChat({
         </section>
       )}
 
-      {!panelOpen && (
+      {!panelOpen && !hideLauncher && (
         <button
           type="button"
           className={`ai-chat-launcher is-${launcherState}`}

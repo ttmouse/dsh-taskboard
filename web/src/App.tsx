@@ -2912,6 +2912,7 @@ export function App() {
         issueId={detailTaskId}
         onThreadsChange={setAiThreads}
         openThreadRequest={aiOpenThreadRequest}
+        hideLauncher={compact}
       />
 
       <div className="sr-only" role="status" aria-live="polite">{announcement}</div>
