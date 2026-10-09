@@ -10591,29 +10591,16 @@ kbd {
   height: 6px;
 }
 
-/* 看板卡片底部右侧的常驻「完成」按钮：验收动作跟着人走，不必点进详情。 */
+/* 底部右侧的「直接完成」按钮：复用 icon-button 外观（含悬停 surface-hover），仅用强调色区分。 */
 .task-card .card-complete-pill {
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  height: 18px;
   margin-left: auto;
-  padding: 0 8px;
-  border: 0;
-  border-radius: 32px;
-  background: var(--accent-soft);
   color: var(--accent);
-  font-size: 10px;
-  font-weight: 500;
-  line-height: 18px;
-  cursor: pointer;
+  pointer-events: auto;
 }
 
-.task-card .card-complete-pill:hover {
-  background: var(--accent);
-  color: var(--surface, #fff);
+.task-card .card-complete-pill:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text-primary);
 }
 
 .card-reference {
