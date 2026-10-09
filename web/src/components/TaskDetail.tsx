@@ -398,13 +398,34 @@ function useAttachmentImage(src: string | null, nonce: number): AttachmentImageS
     let cancelled = false;
     let objectUrl: string | null = null;
 
+    // Transport matrix, in order: fetch with no-store (the normal path),
+    // plain fetch, then XHR. Some desktop webviews fail one transport at the
+    // network layer while another succeeds; walking the matrix both heals
+    // those cases and names the failing transport in the final placeholder.
     const attempt = async (n: number): Promise<void> => {
       if (cancelled) return;
+      const transport = n === 0 ? "fetch" : n === 1 ? "fetch-plain" : "xhr";
       try {
-        const response = await fetch(src, { cache: "no-store" });
-        if (cancelled) return;
-        if (!response.ok) throw new ImageHttpStatusError(response.status);
-        const blob = await response.blob();
+        let blob: Blob;
+        if (transport === "xhr") {
+          blob = await new Promise<Blob>((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open("GET", src);
+            xhr.responseType = "blob";
+            xhr.onload = () => {
+              if (xhr.status >= 200 && xhr.status < 300) resolve(xhr.response as Blob);
+              else reject(new ImageHttpStatusError(xhr.status));
+            };
+            xhr.onerror = () => reject(new Error("network error"));
+            xhr.onabort = () => reject(new Error("aborted"));
+            xhr.send();
+          });
+        } else {
+          const response = await fetch(src, transport === "fetch" ? { cache: "no-store" } : undefined);
+          if (cancelled) return;
+          if (!response.ok) throw new ImageHttpStatusError(response.status);
+          blob = await response.blob();
+        }
         if (cancelled) return;
         objectUrl = URL.createObjectURL(blob);
         setBlobUrl(objectUrl);
@@ -416,7 +437,7 @@ function useAttachmentImage(src: string | null, nonce: number): AttachmentImageS
           setLoading(false);
           setFailed(true);
           setFailureStatus(status);
-          setFailureMessage(error instanceof Error ? error.message : String(error));
+          setFailureMessage(`${transport}: ${error instanceof Error ? error.message : String(error)}`);
           return;
         }
         retryTimerRef.current = window.setTimeout(() => {
