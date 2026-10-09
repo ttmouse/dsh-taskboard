@@ -4109,10 +4109,9 @@ kbd {
 }
 
 .actor-avatar-agent {
-  overflow: visible;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--bg);
 }
 
 .actor-avatar-image {
@@ -10693,7 +10692,6 @@ kbd {
 .task-card .actor-avatar-agent {
   box-sizing: border-box;
   overflow: hidden;
-  padding: 1px;
   border: 1px solid var(--surface);
   border-radius: 50%;
   background: var(--surface);
