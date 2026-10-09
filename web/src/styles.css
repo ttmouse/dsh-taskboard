@@ -13414,13 +13414,15 @@ kbd {
   gap: 0;
   padding-top: 20px;
 }
-/* 弱化形态：开关放进顶栏图标行（与搜索/筛选同排），仅一枚小箭头，
-   默认降透明度，悬停恢复；箭头方向随展开/收起翻转（行内 transform）。 */
+/* 弱化形态：开关放进顶栏图标行（与搜索/筛选同排）。基础样式沿用 .icon-button，
+   这里只做「默认半透明、悬停恢复」的弱化，颜色/悬停底色与相邻图标完全一致；
+   箭头方向随展开/收起翻转（行内 transform）。 */
 .issue-properties-toggle {
-  color: var(--text-tertiary);
   opacity: 0.55;
 }
-.issue-properties-toggle:hover { color: var(--text-secondary); opacity: 1; }
+.issue-properties-toggle:hover:not(:disabled) {
+  opacity: 1;
+}
 
 /* Frontend build badge: makes "which bundle is running" checkable from a
    screenshot. Bottom-left keeps it clear of the AI chat launcher ball
