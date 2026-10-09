@@ -291,6 +291,9 @@ export function IssueSubIssues({
   ));
   const progress = subIssues.length > 0 ? Math.round((done / subIssues.length) * 100) : 0;
 
+  // 空的子议题区块不渲染：90%+ 的议题没有子议题，固定占一整块空间得不偿失。
+  if (subIssues.length === 0) return null;
+
   return (
     <section className="issue-sub-issues" aria-labelledby="sub-issues-heading">
       <header>

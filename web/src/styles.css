@@ -3074,7 +3074,14 @@ kbd {
 }
 
 .issue-parent-link:not(.has-parent) {
+  /* 没有父议题时不预留整行空间：悬停/聚焦标题区时才浮现「+ 设置父议题」。 */
+  display: none;
   min-height: 22px;
+}
+
+.issue-editor-content:hover .issue-parent-link:not(.has-parent),
+.issue-editor-content:focus-within .issue-parent-link:not(.has-parent) {
+  display: flex;
 }
 
 .issue-parent-prefix {
@@ -4096,7 +4103,6 @@ kbd {
   flex: 0 0 auto;
   width: 24px;
   height: 24px;
-  border: 2px solid var(--bg);
   border-radius: 50%;
   color: white;
   font-size: 9px;
@@ -4110,6 +4116,7 @@ kbd {
 
 .actor-avatar-agent {
   overflow: hidden;
+  border: 0;
   border-radius: 50%;
   background: var(--bg);
 }
@@ -10692,7 +10699,7 @@ kbd {
 .task-card .actor-avatar-agent {
   box-sizing: border-box;
   overflow: hidden;
-  border: 1px solid var(--surface);
+  border: 0;
   border-radius: 50%;
   background: var(--surface);
   filter: none;

@@ -1562,12 +1562,7 @@ export function TaskDetail({
                     </li>
                   ))}
                 </ul>
-              ) : (
-                <p className="attachments-empty">{text(
-                  "添加图片、文档或其他文件，单个文件不超过 25 MB。",
-                  "Add images, documents, or other files up to 25 MB each.",
-                )}</p>
-              )}
+              ) : null}
               {attachmentsError && (
                 <div className="attachments-error" role="alert">
                   {typeof attachmentsError === "string"
