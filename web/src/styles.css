@@ -13374,36 +13374,36 @@ kbd {
 }
 
 /* Narrow detail (right-sidebar): properties aside collapses to a toggle. */
+.issue-detail-layout {
+  position: relative;
+}
 .issue-detail-layout.properties-collapsed {
   grid-template-columns: minmax(0, 1fr);
   gap: 0;
   padding-top: 20px;
 }
-/* 切换行必须独占整行：否则在两栏 grid 里自动放置会把 toggle 放进第 1 列、
-   主内容挤进 320px 的属性栏轨道（侧边栏窄开详情后再拖宽时的错版）。 */
-.issue-properties-toggle-row {
-  display: flex;
-  justify-content: flex-end;
-  grid-column: 1 / -1;
-  /* 窄容器下父级 layout 转为 flex 列且 align-items:start，会把本行收缩成
-     内容宽（justify-content 没了作用宽度，按钮孤在左侧）；拉伸回整行才靠右。 */
-  align-self: stretch;
-  padding-right: 14px;
-}
+/* 弱化形态：不独占一行，只是一枚浮在右上角的小箭头（仅图标、无文字），
+   展开状态才出现在文档流上方一角；窄容器下 layout 转为 flex 列时同样成立。 */
 .issue-properties-toggle {
+  position: absolute;
+  top: 14px;
+  right: 12px;
+  z-index: 2;
   appearance: none;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
   border: 0;
   background: transparent;
   color: var(--text-tertiary);
-  font-size: 12px;
+  opacity: 0.55;
   cursor: pointer;
-  padding: 4px 8px;
+  padding: 0;
   border-radius: 6px;
 }
-.issue-properties-toggle:hover { background: var(--surface-hover); color: var(--text-secondary); }
+.issue-properties-toggle:hover { background: var(--surface-hover); color: var(--text-secondary); opacity: 1; }
 
 /* Frontend build badge: makes "which bundle is running" checkable from a
    screenshot. Bottom-left keeps it clear of the AI chat launcher ball

@@ -1448,20 +1448,19 @@ export function TaskDetail({
         </div>
         <div className={`issue-detail-layout${propertiesCollapsed ? " properties-collapsed" : ""}`}>
           {narrowContainer && (
-            <div className="issue-properties-toggle-row">
-              <button
-                type="button"
-                className="issue-properties-toggle"
-                onClick={() => setPropertiesCollapsed((current) => !current)}
-                aria-expanded={!propertiesCollapsed}
-              >
-                <LinearIcon
-                  name="chevronDown"
-                  style={propertiesCollapsed ? undefined : { transform: "rotate(180deg)" }}
-                />
-                {propertiesCollapsed ? text("显示属性", "Show properties") : text("隐藏属性", "Hide properties")}
-              </button>
-            </div>
+            <button
+              type="button"
+              className="issue-properties-toggle"
+              onClick={() => setPropertiesCollapsed((current) => !current)}
+              aria-expanded={!propertiesCollapsed}
+              aria-label={propertiesCollapsed ? text("显示属性", "Show properties") : text("隐藏属性", "Hide properties")}
+              title={propertiesCollapsed ? text("显示属性", "Show properties") : text("隐藏属性", "Hide properties")}
+            >
+              <LinearIcon
+                name="chevronDown"
+                style={propertiesCollapsed ? undefined : { transform: "rotate(180deg)" }}
+              />
+            </button>
           )}
           <div className="issue-detail-main">
             <article className="issue-editor" aria-label={text("议题内容", "Issue content")}>
