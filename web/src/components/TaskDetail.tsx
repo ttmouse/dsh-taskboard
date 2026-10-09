@@ -536,11 +536,17 @@ function AttachmentImageViewer({ attachment, onClose }: { attachment: Attachment
   const image = useAttachmentImage(attachmentContentUrl(attachment), 0);
 
   useEffect(() => {
+    // Capture phase + stopPropagation: without this, the App-level Escape
+    // handler (closes the whole task detail) fires for the same event and
+    // ESC would exit both the viewer and the detail pane (issue -103).
     const handleKey = (event: Event) => {
-      if ((event as globalThis.KeyboardEvent).key === "Escape") onClose();
+      if ((event as globalThis.KeyboardEvent).key === "Escape") {
+        event.stopPropagation();
+        onClose();
+      }
     };
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
+    window.addEventListener("keydown", handleKey, true);
+    return () => window.removeEventListener("keydown", handleKey, true);
   }, [onClose]);
 
   return (
@@ -1474,6 +1480,7 @@ export function TaskDetail({
               )}
             />
 
+            {(visibleTaskAttachments.length > 0 || attachmentsLoading || attachmentsError) && (
             <section className="issue-attachments" aria-labelledby="attachments-heading">
               <header className="attachments-heading">
                 <div>
@@ -1491,15 +1498,6 @@ export function TaskDetail({
                     ? text("上传中…", "Uploading…")
                     : text("添加附件", "Add attachment")}
                 </button>
-                <input
-                  ref={attachmentInputRef}
-                  type="file"
-                  multiple
-                  hidden
-                  onChange={(event) => {
-                    if (event.currentTarget.files) void uploadFiles(event.currentTarget.files);
-                  }}
-                />
               </header>
 
               {attachmentsLoading ? (
@@ -1571,6 +1569,7 @@ export function TaskDetail({
                 </div>
               )}
             </section>
+            )}
 
             <section className="activity-section" aria-labelledby="activity-heading">
               <header className="activity-heading">
@@ -2041,6 +2040,20 @@ export function TaskDetail({
                 <span className="detail-copy-action-icon" aria-hidden="true"><img src={copyLinkIcon} alt="" /></span>
                 <span className="detail-copy-action-label">{text("复制链接", "Copy link")}</span>
               </button>
+              <button
+                className="detail-copy-action detail-attach-action"
+                type="button"
+                disabled={uploadingAttachments}
+                title={text("上传附件（图片、文档等）", "Attach files (images, documents, etc.)")}
+                onClick={() => attachmentInputRef.current?.click()}
+              >
+                <LinearIcon name="attachment" />
+                <span className="detail-copy-action-label">{uploadingAttachments
+                  ? text("上传中…", "Uploading…")
+                  : visibleTaskAttachments.length > 0
+                    ? text(`附件 ${visibleTaskAttachments.length} · 添加`, `Attachments ${visibleTaskAttachments.length} · Add`)
+                    : text("添加附件", "Add attachment")}</span>
+              </button>
             </div>
             <h2>{text("属性", "Properties")}</h2>
             <div className="detail-property-row">
@@ -2283,6 +2296,16 @@ export function TaskDetail({
       {viewingImage && (
         <AttachmentImageViewer attachment={viewingImage} onClose={() => setViewingImage(null)} />
       )}
+      {/* 附件上传的隐藏 input 常驻挂载：附件区块为空时不渲染，入口移到右栏。 */}
+      <input
+        ref={attachmentInputRef}
+        type="file"
+        multiple
+        hidden
+        onChange={(event) => {
+          if (event.currentTarget.files) void uploadFiles(event.currentTarget.files);
+        }}
+      />
       {farFromBottom && (
         <button
           type="button"
