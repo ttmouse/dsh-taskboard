@@ -1211,11 +1211,11 @@ kbd {
 .header-create-button {
   width: 28px;
   height: 28px;
-  border: var(--border-hairline) solid var(--border-strong);
-  border-radius: 50%;
-  background: var(--surface);
-  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.03);
-  color: var(--text-secondary);
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-tertiary);
 }
 
 .header-create-button:hover:not(:disabled) {
@@ -1471,7 +1471,7 @@ kbd {
   height: 28px;
   padding: 0 8px;
   border: 0;
-  border-radius: 5px;
+  border-radius: 6px;
   background: transparent;
   color: var(--text-tertiary);
   font-size: 11px;
@@ -1559,11 +1559,11 @@ kbd {
   width: 28px;
   height: 28px;
   padding: 0;
-  border: var(--border-hairline) solid var(--border-strong);
-  border-radius: 50%;
-  background: var(--surface);
-  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.03);
-  color: var(--text-secondary);
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-tertiary);
   cursor: pointer;
 }
 
@@ -10152,22 +10152,22 @@ kbd {
 }
 
 .project-automation-trigger {
-  height: 29px;
+  height: 28px;
   gap: 5px;
-  padding: 0 11px;
-  border: var(--border-hairline) solid var(--border);
-  border-radius: 14px;
-  background: var(--surface);
-  color: var(--text-secondary);
-  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.025);
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-tertiary);
+  box-shadow: none;
   font-size: 11px;
   font-weight: 500;
 }
 
 .project-automation-trigger:hover,
 .project-automation-trigger:focus-visible {
-  border-color: var(--border-strong);
   background: var(--surface-hover);
+  color: var(--text-primary);
 }
 
 .project-automation-trigger.is-active {
@@ -10188,13 +10188,27 @@ kbd {
 .header-create-button {
   width: 28px;
   height: 28px;
-  border-color: var(--border);
-  background: var(--surface);
+  border: 0;
+  background: transparent;
 }
 
 .header-create-button svg {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
+}
+
+/* 头部图标行统一规格：所有图标按钮同尺寸（28px）、同圆角（6px）、
+   同 ghost 底（透明 → 悬停 surface-hover），悬停反馈一致。 */
+.header-actions .icon-button {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  color: var(--text-tertiary);
+}
+
+.header-actions .icon-button:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text-primary);
 }
 
 .board-toolbar {
