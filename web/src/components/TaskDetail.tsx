@@ -366,6 +366,7 @@ type AttachmentImageState = {
   loading: boolean;
   failed: boolean;
   failureStatus: number | null;
+  failureMessage: string | null;
 };
 
 function useAttachmentImage(src: string | null, nonce: number): AttachmentImageState {
@@ -373,6 +374,7 @@ function useAttachmentImage(src: string | null, nonce: number): AttachmentImageS
   const [loading, setLoading] = useState(Boolean(src));
   const [failed, setFailed] = useState(!src);
   const [failureStatus, setFailureStatus] = useState<number | null>(null);
+  const [failureMessage, setFailureMessage] = useState<string | null>(null);
   const retryTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -385,12 +387,14 @@ function useAttachmentImage(src: string | null, nonce: number): AttachmentImageS
       setLoading(false);
       setFailed(true);
       setFailureStatus(null);
+      setFailureMessage(null);
       return;
     }
     setBlobUrl(null);
     setLoading(true);
     setFailed(false);
     setFailureStatus(null);
+    setFailureMessage(null);
     let cancelled = false;
     let objectUrl: string | null = null;
 
@@ -412,6 +416,7 @@ function useAttachmentImage(src: string | null, nonce: number): AttachmentImageS
           setLoading(false);
           setFailed(true);
           setFailureStatus(status);
+          setFailureMessage(error instanceof Error ? error.message : String(error));
           return;
         }
         retryTimerRef.current = window.setTimeout(() => {
@@ -431,7 +436,7 @@ function useAttachmentImage(src: string | null, nonce: number): AttachmentImageS
     };
   }, [src, nonce]);
 
-  return { blobUrl, loading, failed, failureStatus };
+  return { blobUrl, loading, failed, failureStatus, failureMessage };
 }
 
 function MarkdownImage({ alt, src, ...props }: ImgHTMLAttributes<HTMLImageElement>) {
@@ -525,7 +530,7 @@ function MarkdownImage({ alt, src, ...props }: ImgHTMLAttributes<HTMLImageElemen
     }    if (attachment.failed) {
       const reason = attachment.failureStatus !== null
         ? `(HTTP ${attachment.failureStatus})`
-        : text("（网络未连通）", "(network unreachable)");
+        : `${text("（网络未连通）", "(network unreachable)")}${attachment.failureMessage ? ` ${attachment.failureMessage}` : ""}`;
       return (
         <span className="markdown-image-broken">
           <LinearIcon name="alert" />
@@ -550,7 +555,7 @@ function MarkdownImage({ alt, src, ...props }: ImgHTMLAttributes<HTMLImageElemen
   if (fetchFallback && fallback.failed) {
     const reason = fallback.failureStatus !== null
       ? `(HTTP ${fallback.failureStatus})`
-      : text("（网络未连通）", "(network unreachable)");
+      : `${text("（网络未连通）", "(network unreachable)")}${fallback.failureMessage ? ` ${fallback.failureMessage}` : ""}`;
     return (
       <span className="markdown-image-broken">
         <LinearIcon name="alert" />

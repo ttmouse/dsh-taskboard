@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { execFile, spawn } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
-import { mkdir, readFile, readdir, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, readdir, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { isIP } from "node:net";
 import os from "node:os";
@@ -2831,6 +2831,13 @@ export function createTaskboardServer(options = {}) {
         const attachment = database.getAttachment(id);
         if (!attachment) throw new ApiError(404, "ATTACHMENT_NOT_FOUND", `Attachment '${id}' does not exist`);
         const body = await readFile(path.join(resolved.attachmentsDirectory, attachment.id));
+        // Temporary access log for issue 09582F74F86A-105: proves whether a
+        // client-side attachment request actually reaches this server.
+        appendFile(
+          path.join(os.homedir(), ".dsh", "storages", "dsh-taskboard", "attachment-access.log"),
+          `${new Date().toISOString()} ${request.method} id=${id} status=200 ua=${String(request.headers["user-agent"] ?? "-").slice(0, 120)}\n`,
+          () => {},
+        );
         const encodedFilename = encodeURIComponent(attachment.filename).replace(/['()*]/g, (character) => (
           `%${character.charCodeAt(0).toString(16).toUpperCase()}`
         ));
