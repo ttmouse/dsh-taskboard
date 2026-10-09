@@ -1344,13 +1344,13 @@
 }
 
 .routine-row .routine-name {
-  font-size: 14.5px;
-  font-weight: 620;
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .routine-row-meta {
-  font-size: 12.5px;
-  gap: 5px;
+  font-size: 13px;
+  gap: 0;
 }
 
 .routine-row-side .routine-switch {
@@ -1709,6 +1709,7 @@
   padding: 8px;
   border-radius: 12px;
   gap: 12px;
+  align-items: flex-start;
 }
 
 .routine-row:hover {
@@ -1738,6 +1739,7 @@
   width: 16px;
   height: 20px;
   flex: none;
+  margin-top: 2px;
 }
 
 .routine-row .routine-name {
@@ -1746,13 +1748,15 @@
   line-height: 23px;
 }
 
-/* 官方摘要行是纯文本，频率在列表里不再是芯片 */
+/* 官方摘要行是纯文本，频率在列表里不再是芯片，字号与摘要行一致 */
 .routine-row .routine-schedule {
   height: auto;
   padding: 0;
   border: none;
   border-radius: 0;
   background: none;
+  font-size: 13px;
+  font-weight: 400;
 }
 
 .routine-row-meta {
