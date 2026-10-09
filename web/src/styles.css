@@ -13337,6 +13337,9 @@ kbd {
 
 .app-shell.compact .header-project-menu {
   top: calc(100% + 4px);
+  /* 议题 09582F74F86A-119：悬停浮层的左缘与上方宿主 Tab 胶囊左缘对齐
+     （compact 标题 padding 已把切换器容器起点放在 20px，menu 不再偏移）。 */
+  left: 0;
 }
 
 /* Compact chrome: drop the letter avatar from the project switcher (button
