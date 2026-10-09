@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ImgHTMLAttributes, type KeyboardEvent, type MouseEvent } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
 import { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { taskboardStorage } from "../storage";
@@ -120,6 +120,9 @@ interface TaskDetailProps {
   onClose: () => void;
   /** 验收成功后回调：宿主负责落卡动画并退出详情回列表。 */
   onAccepted?: (taskId: string) => void;
+  /** 属性栏折叠状态由宿主持有：开关按钮放在宿主顶栏图标行里。 */
+  propertiesCollapsed: boolean;
+  onSetPropertiesCollapsed: (next: boolean | ((current: boolean) => boolean)) => void;
 }
 
 function messageFor(error: unknown): TaskDetailError {
@@ -460,6 +463,25 @@ function useAttachmentImage(src: string | null, nonce: number): AttachmentImageS
   return { blobUrl, loading, failed, failureStatus, failureMessage };
 }
 
+// Image attachments show a real thumbnail in the attachment list: the bytes
+// are fetched once through the same fetch-then-blob loader used by markdown
+// images, and while loading (or after failure) the generic file icon stays.
+function AttachmentThumbnail({ attachment }: { attachment: Attachment }) {
+  // useAttachmentImage already re-runs whenever src changes, so no extra
+  // state is needed here.
+  const src = resolvePersistedAttachmentUrl(attachmentContentUrl(attachment));
+  const image = useAttachmentImage(src, 0);
+
+  if (image.blobUrl) {
+    return <img className="attachment-thumb" src={image.blobUrl} alt="" aria-hidden="true" />;
+  }
+  return (
+    <span className="attachment-file-icon" aria-hidden="true">
+      <LinearIcon name="file" />
+    </span>
+  );
+}
+
 function MarkdownImage({ alt, src, ...props }: ImgHTMLAttributes<HTMLImageElement>) {
   const { text } = useTaskboardI18n();
   const [nonce, setNonce] = useState(0);
@@ -662,6 +684,12 @@ function AttachmentImageViewer({ attachment, onClose }: { attachment: Attachment
   );
 }
 
+// Keep renderer identities stable so composer edits preserve loaded images.
+const markdownComponents: Components = {
+  a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer" />,
+  img: ({ node: _node, ...props }) => <MarkdownImage {...props} />,
+};
+
 function DescriptionDocument({ value }: { value: string }) {
   return (
     <div className="issue-description-document">
@@ -670,10 +698,7 @@ function DescriptionDocument({ value }: { value: string }) {
         // Validate the persisted Markdown URL before resolving attachments to
         // the desktop's dsh-app: origin, which defaultUrlTransform rejects.
         urlTransform={(url) => resolvePersistedAttachmentUrl(defaultUrlTransform(url))}
-        components={{
-          a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer" />,
-          img: ({ node: _node, ...props }) => <MarkdownImage {...props} />,
-        }}
+        components={markdownComponents}
       >
         {value}
       </ReactMarkdown>
@@ -726,26 +751,21 @@ export function TaskDetail({
   onAnnounce,
   onClose,
   onAccepted,
+  propertiesCollapsed,
+  onSetPropertiesCollapsed,
 }: TaskDetailProps) {
   const { language, locale, text } = useTaskboardI18n();
-  // Narrow containers (the right-sidebar iframe) collapse the properties
-  // aside by default: the column would otherwise eat most of the pane
-  // width. The main panel stays wide and keeps the aside open.
+  // 折叠断点仍在此跟踪：容器拖宽时属性栏自动展开（状态本体在宿主）。
   // The breakpoint is tracked reactively: the host sidebar can be resized
-  // at any time (拖宽侧边栏), and a frozen value leaves a stale properties
-  // toggle in the two-column grid, pushing the main column into the aside's
-  // 320px track. When the container turns wide again the aside reopens.
-  const [narrowContainer, setNarrowContainer] = useState(() => window.innerWidth <= 720);
+  // at any time (拖宽侧边栏); when the container turns wide the aside reopens.
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 720px)");
     const onChange = (event: MediaQueryListEvent) => {
-      setNarrowContainer(event.matches);
-      if (!event.matches) setPropertiesCollapsed(false);
+      if (!event.matches) onSetPropertiesCollapsed(false);
     };
     mq.addEventListener("change", onChange);
     return () => mq.removeEventListener("change", onChange);
   }, []);
-  const [propertiesCollapsed, setPropertiesCollapsed] = useState(narrowContainer);
   // 原标题滚出视口后，顶部吸附条展示当前议题的标识与标题（滚动中也不丢失上下文）。
   const [titleScrolledOut, setTitleScrolledOut] = useState(false);
   // 离开底部较远时显示「回到底部」悬浮按钮（聊天应用习惯）。
@@ -1447,21 +1467,6 @@ export function TaskDetail({
           </div>
         </div>
         <div className={`issue-detail-layout${propertiesCollapsed ? " properties-collapsed" : ""}`}>
-          {narrowContainer && (
-            <button
-              type="button"
-              className="issue-properties-toggle"
-              onClick={() => setPropertiesCollapsed((current) => !current)}
-              aria-expanded={!propertiesCollapsed}
-              aria-label={propertiesCollapsed ? text("显示属性", "Show properties") : text("隐藏属性", "Hide properties")}
-              title={propertiesCollapsed ? text("显示属性", "Show properties") : text("隐藏属性", "Hide properties")}
-            >
-              <LinearIcon
-                name="chevronDown"
-                style={propertiesCollapsed ? undefined : { transform: "rotate(180deg)" }}
-              />
-            </button>
-          )}
           <div className="issue-detail-main">
             <article className="issue-editor" aria-label={text("议题内容", "Issue content")}>
               <div className="issue-editor-content">
@@ -1595,9 +1600,7 @@ export function TaskDetail({
                           title={text(`查看 ${attachment.filename}`, `View ${attachment.filename}`)}
                           onClick={() => setViewingImage(attachment)}
                         >
-                          <span className="attachment-file-icon" aria-hidden="true">
-                            <LinearIcon name="file" />
-                          </span>
+                          <AttachmentThumbnail attachment={attachment} />
                           <span className="attachment-copy">
                             <strong>{attachment.filename}</strong>
                             <span>{fileSize(attachment.size)} · {relativeTime(attachment.createdAt, locale)}</span>

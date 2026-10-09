@@ -1014,6 +1014,32 @@ kbd {
   font-weight: 550;
 }
 
+.header-project-search {
+  width: 100%;
+  min-width: 0;
+  height: 26px;
+  margin: 2px 0 5px;
+  padding: 0 8px;
+  border: var(--border-hairline) solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 11px;
+}
+
+.header-project-search:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.header-project-empty {
+  display: block;
+  padding: 8px 7px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
 .header-project-menu button {
   display: grid;
   grid-template-columns: 22px minmax(0, 1fr) auto auto;
@@ -4034,6 +4060,16 @@ kbd {
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 1.2;
+}
+
+/* 图片附件缩略图：与文件图标同尺寸占位，图片就绪后撑到 44px 方块。 */
+.attachment-thumb {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: var(--surface-muted, rgba(127, 127, 127, 0.2));
 }
 
 .attachment-copy {
