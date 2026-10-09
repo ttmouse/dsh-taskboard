@@ -1026,10 +1026,29 @@
 
 .routine-row-main {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  align-items: center;
+  gap: 8px;
   min-width: 0;
   flex: 1;
+}
+
+/* 议题 09582F74F86A-111：紧凑单行布局——名称 + 徽标靠左，
+   「下次」时间右对齐收拢到控件之前，去掉两行大行高。 */
+.routine-row-main .routine-next {
+  margin-left: auto;
+  padding-left: 12px;
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.routine-row-main .routine-name {
+  flex: 0 1 auto;
+}
+
+.routine-row-main .routine-schedule {
+  flex: none;
 }
 
 .routine-row-title {
@@ -1716,7 +1735,7 @@
 .routine-row-icon {
   width: 16px;
   height: 20px;
-  margin-top: 2px;
+  flex: none;
 }
 
 .routine-row .routine-name {
