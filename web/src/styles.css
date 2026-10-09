@@ -3073,15 +3073,9 @@ kbd {
   font-size: 11px;
 }
 
-.issue-parent-link:not(.has-parent) {
-  /* 没有父议题时不预留整行空间：悬停/聚焦标题区时才浮现「+ 设置父议题」。 */
+.issue-parent-link {
+  /* 父议题入口已收进右栏 Relations（固定一行、不推挤布局），主栏整行不再渲染。 */
   display: none;
-  min-height: 22px;
-}
-
-.issue-editor-content:hover .issue-parent-link:not(.has-parent),
-.issue-editor-content:focus-within .issue-parent-link:not(.has-parent) {
-  display: flex;
 }
 
 .issue-parent-prefix {

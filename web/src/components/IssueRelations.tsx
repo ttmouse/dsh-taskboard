@@ -352,6 +352,7 @@ export function IssueSubIssues({
 }
 
 const RELATION_GROUPS = [
+  { type: "parent", field: "parent", chineseLabel: "父议题", englishLabel: "Parent issue", chineseAddLabel: "设置父议题", englishAddLabel: "Set parent issue", tone: "parent" },
   { type: "blocked_by", field: "blockedBy", chineseLabel: "阻塞于", englishLabel: "Blocked by", chineseAddLabel: "添加阻塞议题", englishAddLabel: "Add blocker", tone: "blocked-by" },
   { type: "blocks", field: "blocks", chineseLabel: "阻塞", englishLabel: "Blocks", chineseAddLabel: "添加被阻塞议题", englishAddLabel: "Add blocked issue", tone: "blocks" },
   { type: "related", field: "related", chineseLabel: "相关议题", englishLabel: "Related issues", chineseAddLabel: "添加相关议题", englishAddLabel: "Add related issue", tone: "related" },
@@ -372,12 +373,25 @@ export function IssueRelationSidebar({
       <h2 id="relations-heading">{text("关系", "Relations")}</h2>
       {RELATION_GROUPS.map((group) => {
         const label = text(group.chineseLabel, group.englishLabel);
-        const issues = task.relations[group.field];
+        // parent 在数据里是单对象（或 null），其余关系是数组——这里统一成数组处理。
+        const issues = group.field === "parent"
+          ? (task.relations.parent ? [task.relations.parent] : [])
+          : task.relations[group.field];
         const existing = new Set(issues.map((issue) => issue.id));
+        // 父议题候选要再排除全部祖先，避免把自己挂成自己的环路。
+        const excludeIds = new Set(existing);
+        if (group.field === "parent") {
+          excludeIds.add(task.id);
+          let node = task.relations.parent;
+          while (node) {
+            excludeIds.add(node.id);
+            node = tasks.find((candidate) => candidate.id === node?.id)?.relations.parent ?? null;
+          }
+        }
         const candidates = tasks.filter((candidate) => (
           candidate.archivedAt === null
           && candidate.id !== task.id
-          && !existing.has(candidate.id)
+          && !excludeIds.has(candidate.id)
         ));
         return (
           <div className={`issue-relation-group is-${group.tone}`} key={group.type}>
@@ -385,6 +399,8 @@ export function IssueRelationSidebar({
               <span>
                 {group.type === "related" ? (
                   <LinearIcon name="link" />
+                ) : group.type === "parent" ? (
+                  <LinearIcon name="branch" />
                 ) : (
                   <TaskboardIcon name={group.type === "blocked_by" ? "relationBlockedBy" : "relationBlocks"} />
                 )}
