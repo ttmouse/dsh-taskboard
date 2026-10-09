@@ -141,6 +141,8 @@ const GanttView = lazy(() => import("./components/GanttView").then((module) => (
 interface EditorState {
   task: Task | null;
   status: TaskStatus;
+  /** 「全局」视图下新建议题时人工选定的落点项目；普通项目视图省略。 */
+  projectId?: string;
 }
 
 interface ContextMenuState {
@@ -1790,16 +1792,17 @@ export function App() {
     inlineImages: PendingInlineImage[],
     runAfterCreate = false,
   ) {
-    if (!selectedProjectId || !editor) return;
+    const targetProjectId = editor?.projectId ?? selectedProjectId;
+    if (!targetProjectId || !editor) return;
     setActionError(null);
     try {
       const creating = editor.task === null;
       let saved = editor.task
         ? await updateTaskRequest(editor.task, draft)
-        : await createTaskRequest(selectedProjectId, draft);
+        : await createTaskRequest(targetProjectId, draft);
       if (creating) {
         setProjects((current) => current.map((project) => (
-          project.id === selectedProjectId
+          project.id === targetProjectId
             ? { ...project, issueCount: project.issueCount + 1 }
             : project
         )));
@@ -2681,16 +2684,39 @@ export function App() {
                 <LinearIcon name={boardView === "list" ? "boardView" : "listView"} />
               </button>
             )}
-            {selectedProjectId && !isGlobalView && boardView !== "workflow" && (
-              <button
-                className="icon-button header-create-button"
-                type="button"
-                onClick={() => setEditor({ task: null, status: "todo" })}
-                aria-label={text("新建议题", "Create issue")}
-                title={text("新建议题 (C)", "Create issue (C)")}
-              >
-                <TaskboardIcon name="create" />
-              </button>
+            {selectedProjectId && boardView !== "workflow" && (
+              <div className="header-create-anchor">
+                <button
+                  className="icon-button header-create-button"
+                  type="button"
+                  onClick={() => {
+                    if (isGlobalView) setGlobalCreateMenuOpen((current) => !current);
+                    else setEditor({ task: null, status: "todo" });
+                  }}
+                  aria-label={text("新建议题", "Create issue")}
+                  title={isGlobalView ? text("新建议题（先选项目）", "Create issue (pick a project)") : text("新建议题 (C)", "Create issue (C)")}
+                >
+                  <TaskboardIcon name="create" />
+                </button>
+                {isGlobalView && globalCreateMenuOpen && (
+                  <div className="sidebar-project-menu global-create-menu" role="menu" aria-label="选择议题所属项目">
+                    {sortedSidebarProjects.map((project) => (
+                      <button
+                        key={project.id}
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setGlobalCreateMenuOpen(false);
+                          setEditor({ task: null, status: "todo", projectId: project.id });
+                        }}
+                      >
+                        <span className="project-dot" aria-hidden="true" />
+                        <span>{project.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             )}
           </div>
           </header>
@@ -3007,7 +3033,7 @@ export function App() {
 
       {editor && (
         <TaskEditor
-          key={editor.task?.id ?? `new-${editor.status}`}
+          key={editor.task?.id ?? `new-${editor.status}-${editor.projectId ?? selectedProjectId ?? ""}`}
           task={editor.task}
           initialStatus={editor.status}
           labels={availableLabels}

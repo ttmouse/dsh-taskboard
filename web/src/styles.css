@@ -1189,6 +1189,21 @@ kbd {
   color: var(--text-primary);
 }
 
+/* 「全局」视图的新建议题按钮锚点：项目选择菜单相对它定位。 */
+.header-create-anchor {
+  position: relative;
+  display: inline-flex;
+}
+
+.header-create-anchor .global-create-menu {
+  top: calc(100% + 6px);
+  right: 0;
+  left: auto;
+  min-width: 180px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
 .board-toolbar {
   display: flex;
   flex: 0 0 44px;
