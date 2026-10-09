@@ -154,6 +154,9 @@ interface ProjectChoice {
   id: string;
   name: string;
   issueCount: number;
+  youCount: number;
+  inProgressCount: number;
+  openCount: number;
   inCodex: boolean;
   persisted: boolean;
 }
@@ -686,6 +689,7 @@ export function App() {
   const issueListRef = useRef<HTMLDivElement>(null);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [sidebarProjectMenuOpen, setSidebarProjectMenuOpen] = useState(false);
+  const [projectMenuQuery, setProjectMenuQuery] = useState("");
   const [favoriteProjectIds, setFavoriteProjectIds] = useState(readFavoriteProjectIds);
   const [deviceWorkspacePaths, setDeviceWorkspacePaths] = useState(readDeviceWorkspacePaths);
   const [projectAutomations, setProjectAutomations] = useState(readProjectAutomations);
@@ -817,6 +821,9 @@ export function App() {
         id: project.id,
         name: persistedById.get(project.id)?.name ?? project.name,
         issueCount: persistedById.get(project.id)?.issueCount ?? 0,
+        youCount: persistedById.get(project.id)?.youCount ?? 0,
+        inProgressCount: persistedById.get(project.id)?.inProgressCount ?? 0,
+        openCount: persistedById.get(project.id)?.openCount ?? 0,
         inCodex: true,
         persisted: persistedById.has(project.id),
       });
@@ -827,6 +834,9 @@ export function App() {
         id: project.id,
         name: project.name,
         issueCount: project.issueCount,
+        youCount: project.youCount,
+        inProgressCount: project.inProgressCount,
+        openCount: project.openCount,
         inCodex: false,
         persisted: true,
       });
@@ -862,6 +872,32 @@ export function App() {
     }).map((entry) => entry.project);
   }, [projects]);
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
+
+  // 项目切换菜单的排序：等你（in_review/blocked）→ 有进行中 → 有未完任务 →
+  // 没有任务；同级内收藏的在前，其余按 issueCount 降序再按名称。
+  const projectMenuChoices = useMemo(() => {
+    const tier = (project: ProjectChoice) => {
+      if (isGlobalProjectId(project.id)) return -1;
+      if (project.youCount > 0) return 0;
+      if (project.inProgressCount > 0) return 1;
+      if (project.openCount > 0) return 2;
+      return 3;
+    };
+    return [...projectChoices].sort((left, right) => {
+      const byTier = tier(left) - tier(right);
+      if (byTier !== 0) return byTier;
+      const byFavorite = Number(favoriteProjectIds.has(right.id)) - Number(favoriteProjectIds.has(left.id));
+      if (byFavorite !== 0) return byFavorite;
+      const byIssues = right.openCount - left.openCount;
+      if (byIssues !== 0) return byIssues;
+      return left.name.localeCompare(right.name);
+    });
+  }, [favoriteProjectIds, projectChoices]);
+  const filteredProjectMenuChoices = useMemo(() => {
+    const query = projectMenuQuery.trim().toLowerCase();
+    if (!query) return projectMenuChoices;
+    return projectMenuChoices.filter((project) => project.name.toLowerCase().includes(query));
+  }, [projectMenuChoices, projectMenuQuery]);
 
   const writeProjectAutomation = useCallback((
     projectId: string,
@@ -1239,12 +1275,14 @@ export function App() {
       if (!target.closest("[data-project-switcher]")) {
         setProjectMenuOpen(false);
         setSidebarProjectMenuOpen(false);
+        setProjectMenuQuery("");
       }
     }
     function closeProjectMenuWithEscape(event: KeyboardEvent) {
       if (event.key === "Escape") {
         setProjectMenuOpen(false);
         setSidebarProjectMenuOpen(false);
+        setProjectMenuQuery("");
       }
     }
     document.addEventListener("pointerdown", closeProjectMenu);
@@ -2529,7 +2567,7 @@ export function App() {
                     aria-label="切换项目"
                     aria-haspopup="menu"
                     aria-expanded={projectMenuOpen}
-                    onClick={() => setProjectMenuOpen((current) => !current)}
+                    onClick={() => { setProjectMenuQuery(""); setProjectMenuOpen((current) => !current); }}
                   >
                     <span className="project-avatar" aria-hidden="true">
                       {headerProjectName.slice(0, 1).toUpperCase()}
@@ -2539,8 +2577,16 @@ export function App() {
                   </button>
                   {projectMenuOpen && (
                     <div className="header-project-menu" role="menu" aria-label="项目">
-                      <span>切换项目</span>
-                      {projectChoices.map((project) => (
+                      <input
+                        className="header-project-search"
+                        type="text"
+                        placeholder="搜索项目…"
+                        aria-label="搜索项目"
+                        autoFocus
+                        value={projectMenuQuery}
+                        onChange={(event) => setProjectMenuQuery(event.target.value)}
+                      />
+                      {filteredProjectMenuChoices.map((project) => (
                         <button
                           type="button"
                           role="menuitemradio"
@@ -2548,6 +2594,7 @@ export function App() {
                           disabled={openingProjectId !== null}
                           key={project.id}
                           onClick={() => {
+                            setProjectMenuQuery("");
                             if (project.id === selectedProjectId) setProjectMenuOpen(false);
                             else void selectProject(project);
                           }}
@@ -2558,6 +2605,9 @@ export function App() {
                           {project.id === selectedProjectId && <span className="project-menu-check" aria-hidden="true"><LinearIcon name="check" /></span>}
                         </button>
                       ))}
+                      {filteredProjectMenuChoices.length === 0 && (
+                        <span className="header-project-empty">没有匹配的项目</span>
+                      )}
                     </div>
                   )}
                 </div>

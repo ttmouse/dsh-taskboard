@@ -202,6 +202,9 @@ export interface Project {
   name: string;
   workspacePath: string | null;
   issueCount: number;
+  youCount: number;
+  inProgressCount: number;
+  openCount: number;
   automationEnabled: boolean;
   lastActivityAt: string | null;
   createdAt: string;

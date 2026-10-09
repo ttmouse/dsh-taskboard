@@ -252,6 +252,9 @@ function projectFromRow(row) {
     name: row.name,
     workspacePath: row.workspace_path,
     issueCount: Number(row.issue_count ?? 0),
+    youCount: Number(row.you_count ?? 0),
+    inProgressCount: Number(row.in_progress_count ?? 0),
+    openCount: Number(row.open_count ?? 0),
     automationEnabled: Number(row.automation_enabled ?? 0) === 1,
     lastActivityAt: row.last_activity_at ?? null,
     createdAt: row.created_at,
@@ -848,6 +851,9 @@ export class TaskboardDatabase {
         projects.updated_at,
         projects.automation_enabled,
         COUNT(DISTINCT tasks.id) AS issue_count,
+        COUNT(DISTINCT CASE WHEN tasks.status IN ('in_review', 'blocked') THEN tasks.id END) AS you_count,
+        COUNT(DISTINCT CASE WHEN tasks.status = 'in_progress' THEN tasks.id END) AS in_progress_count,
+        COUNT(DISTINCT CASE WHEN tasks.status NOT IN ('done', 'canceled') THEN tasks.id END) AS open_count,
         MAX(task_activities.created_at) AS last_activity_at
       FROM projects
       LEFT JOIN tasks
