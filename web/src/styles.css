@@ -13308,7 +13308,11 @@ kbd {
 .app-shell.compact .workspace { height: 100vh; }
 .app-shell.compact .project-home-button,
 .app-shell.compact .breadcrumb-chevron { display: none; }
-.app-shell.compact .workspace-title { padding-left: 8px; }
+.app-shell.compact .workspace-title { padding-left: 20px; }
+/* Compact chrome: the header's 16px padding stacks with the title's 8px and
+   the switcher's own padding, pushing the project switcher visibly right of
+   the host tab above it — drop the header's share so the left edges align. */
+.app-shell.compact .workspace-header { padding-left: 0; }
 .app-shell.compact .view-tabs { display: none; }
 
 /* Compact chrome: the project switcher doubles as the project name label.
