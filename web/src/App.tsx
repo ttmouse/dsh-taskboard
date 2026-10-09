@@ -1282,6 +1282,20 @@ export function App() {
         return;
       }
 
+      if (message.type === "taskboard:open-issue" && message.payload) {
+        // 侧栏深链：tab 已挂载本应用时的卡片点击（同任务重复点击不触发 iframe
+        // 重挂，插件改为发消息驱动），按 identifier 直接打开详情。
+        const payload = message.payload as { issue?: unknown; projectId?: unknown };
+        if (typeof payload.issue === "string" && payload.issue !== "") {
+          const projectId = typeof payload.projectId === "string" ? payload.projectId : "";
+          if (projectId !== "" && projectId !== selectedProjectIdRef.current) {
+            setSelectedProjectId(projectId);
+          }
+          openTaskDetail({ identifier: payload.issue, projectId });
+        }
+        return;
+      }
+
       if (message.type !== "taskboard:host-context" || !message.payload) return;
       const payload = message.payload as HostContext;
       setHostContext(payload);

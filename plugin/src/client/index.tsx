@@ -305,6 +305,9 @@ const DSH_EXECUTE_MESSAGE = 'taskboard:dsh-execute'
 /** The taskboard app's open-conversation command (iframe → shell). */
 const OPEN_THREAD_MESSAGE = 'taskboard:open-thread'
 
+/** Shell → app deep link: open one issue's detail in the already-mounted board. */
+const OPEN_ISSUE_MESSAGE = 'taskboard:open-issue'
+
 /** Taskboard route prefix proxied by the host half on the shared webserver. */
 const BOARD_API_PREFIX = '/dsh-taskboard'
 
@@ -815,8 +818,10 @@ interface TabInfo {
  * Deep link: when the tab was navigated with a `taskId` param (a turn-tail
  * card click), the iframe mounts with the app's `issue=` param so the task's
  * detail opens over the list; the iframe is keyed by that target, so a later
- * navigation to another task remounts it with the new `issue=` value instead
- * of needing an app-side message protocol.
+ * navigation to another task remounts it with the new `issue=` value. A repeat
+ * navigation to the same task (re-click after the detail was closed) leaves
+ * that key unchanged, so the body also drives the mounted app by message
+ * (`taskboard:open-issue`).
  * @param props - the session id the tab body was minted for, the seat's tab
  *   information hook, and the shared mount plumbing.
  */
@@ -858,6 +863,23 @@ function SideTasksBody({ sessionId, sessions, onFrame, t, locale, useTabInfo }: 
     }
   }, [sessionId, sessions])
 
+  // Repeat navigation to a task the tab already showed (re-clicking a turn card
+  // after the detail was closed back to the list) leaves `key` unchanged, so
+  // the remount path never fires — drive the mounted app by message instead.
+  // Kept above the early returns: hooks must run on every render.
+  useEffect(() => {
+    if (deepTask === undefined || deepTask === null) return
+    const win = frame.current?.contentWindow
+    if (win) {
+      win.postMessage({
+        type: OPEN_ISSUE_MESSAGE,
+        payload: { issue: deepTask.identifier, projectId: deepTask.projectId },
+      }, '*')
+    }
+    // `revision` steps on every card click even for the same task — that is
+    // the repeat-navigation case the key-remount path cannot cover.
+  }, [deepTask, navigation?.revision, frame])
+
   if (project === 'loading' || (navTaskId !== null && deepTask === undefined)) {
     return <p style={SIDE_HINT_STYLE}>{t('sidepanel.resolving')}</p>
   }
@@ -867,6 +889,7 @@ function SideTasksBody({ sessionId, sessions, onFrame, t, locale, useTabInfo }: 
   // A resolved deep-link task adds the app's issue param (uppercase identifier,
   // as the app's route reader expects); a failed lookup falls back to the list.
   const issueParam = deepTask ? deepTask.identifier : null
+
   return (
     <div style={SIDE_FRAME_STYLE}>
       <PanelFrame
