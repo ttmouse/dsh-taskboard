@@ -265,12 +265,16 @@ kbd {
   border-right: var(--border-hairline) solid var(--border);
 }
 
-.app-shell:has(.nav-expand-button) {
+.app-shell:has(.nav-expand-button, .nav-expand-inline) {
   grid-template-columns: minmax(0, 1fr);
 }
 
-.app-shell.nav-collapsed .workspace-header {
-  padding-left: 44px;
+.app-shell:has(.nav-expand-button, .nav-expand-inline) .workspace {
+  grid-column: 1 / -1;
+}
+
+.nav-expand-inline {
+  flex: none;
 }
 
 .nav-expand-button {

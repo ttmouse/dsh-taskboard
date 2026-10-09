@@ -685,6 +685,7 @@ export function App() {
   const [openingThreadTaskId, setOpeningThreadTaskId] = useState<string | null>(null);
   const issueListRef = useRef<HTMLDivElement>(null);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
+  const [sidebarProjectMenuOpen, setSidebarProjectMenuOpen] = useState(false);
   const [favoriteProjectIds, setFavoriteProjectIds] = useState(readFavoriteProjectIds);
   const [deviceWorkspacePaths, setDeviceWorkspacePaths] = useState(readDeviceWorkspacePaths);
   const [projectAutomations, setProjectAutomations] = useState(readProjectAutomations);
@@ -1232,13 +1233,19 @@ export function App() {
   }, [tasks]);
 
   useEffect(() => {
-    if (!projectMenuOpen) return;
+    if (!projectMenuOpen && !sidebarProjectMenuOpen) return;
     function closeProjectMenu(event: PointerEvent) {
       const target = event.target as HTMLElement;
-      if (!target.closest("[data-project-switcher]")) setProjectMenuOpen(false);
+      if (!target.closest("[data-project-switcher]")) {
+        setProjectMenuOpen(false);
+        setSidebarProjectMenuOpen(false);
+      }
     }
     function closeProjectMenuWithEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") setProjectMenuOpen(false);
+      if (event.key === "Escape") {
+        setProjectMenuOpen(false);
+        setSidebarProjectMenuOpen(false);
+      }
     }
     document.addEventListener("pointerdown", closeProjectMenu);
     window.addEventListener("keydown", closeProjectMenuWithEscape);
@@ -1246,7 +1253,7 @@ export function App() {
       document.removeEventListener("pointerdown", closeProjectMenu);
       window.removeEventListener("keydown", closeProjectMenuWithEscape);
     };
-  }, [projectMenuOpen]);
+  }, [projectMenuOpen, sidebarProjectMenuOpen]);
 
   useEffect(() => {
     setAutomationError(null);
@@ -2351,7 +2358,7 @@ export function App() {
 
   return (
     <TaskboardLanguageProvider language={language}>
-    <div className={`app-shell${embedded ? " embedded" : ""}${compact ? " compact" : ""}${navCollapsed && !embedded ? " nav-collapsed" : ""}`} style={appShellStyle}>
+    <div className={`app-shell${embedded ? " embedded" : ""}${compact ? " compact" : ""}`} style={appShellStyle}>
       {taskboardMetadata && taskboardMetadata.mode !== "cloud" && (
         <LocalRealtimeSync
           selectedProjectId={selectedProjectId}
@@ -2423,7 +2430,7 @@ export function App() {
           </div>
         </aside>
       )}
-      {!embedded && navCollapsed && (
+      {!embedded && navCollapsed && !selectedProjectId && (
         <button
           className="nav-expand-button"
           type="button"
@@ -2440,6 +2447,17 @@ export function App() {
           <header className="workspace-header">
           <div className="workspace-title">
             <div className="workspace-kicker">
+              {!embedded && navCollapsed && (
+                <button
+                  className="detail-back-button nav-expand-inline"
+                  type="button"
+                  aria-label="打开侧边栏"
+                  title="打开侧边栏"
+                  onClick={toggleNavCollapsed}
+                >
+                  <LinearIcon name="chevronRight" />
+                </button>
+              )}
               {detailTask && (
                 <button
                   className="detail-back-button"
