@@ -702,38 +702,43 @@
   color: var(--text-secondary);
 }
 
+/* 议题 09582F74F86A-111：开关对齐官方 ui-primitives Switch——
+   36×20 轨道、2px 内边距、16px 圆形滑块、on 态位移 16px；
+   on 态轨道用官方截图中的深色（text-primary）。 */
 .routine-switch {
   position: relative;
   flex: none;
-  width: 34px;
+  box-sizing: border-box;
+  width: 36px;
   height: 20px;
-  padding: 0;
+  padding: 2px;
   border: 0;
   border-radius: 999px;
   outline: 0;
-  background: color-mix(in srgb, var(--text-tertiary) 34%, transparent);
+  background: var(--border);
   cursor: pointer;
   transition: background-color 120ms ease;
 }
 
 .routine-switch > span {
+  display: block;
   position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 14px;
-  height: 14px;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   background: var(--surface-raised);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
-  transition: transform 140ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: transform 120ms ease;
 }
 
 .routine-switch.is-on {
-  background: var(--accent);
+  background: var(--text-primary);
 }
 
 .routine-switch.is-on > span {
-  transform: translateX(14px);
+  transform: translateX(16px);
 }
 
 .routine-switch:focus-visible {
@@ -2431,6 +2436,15 @@
 .routine-row-side {
   position: relative;
   z-index: 3;
+}
+
+/* 议题 09582F74F86A-111：开关列固定不动，动作按钮放到开关左边——
+   side 定宽、row-reverse 让开关贴右缘固定；▶/■ 向左生长，
+   出现/消失不再把开关左右推挤。 */
+.routine-row-side {
+  width: 116px;
+  flex-direction: row-reverse;
+  justify-content: flex-start;
 }
 
 /* ▶/■ 图标按钮：明显的悬停底色与按压反馈 */
