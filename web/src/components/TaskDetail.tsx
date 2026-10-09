@@ -439,10 +439,34 @@ function MarkdownImage({ alt, src, ...props }: ImgHTMLAttributes<HTMLImageElemen
   const [nonce, setNonce] = useState(0);
   const [plainAttempt, setPlainAttempt] = useState(0);
   const [plainFailed, setPlainFailed] = useState(!src);
+  // Same-origin <img> requests have proven unreliable inside the desktop
+  // webview, so when the plain element fails we stop retrying it and switch
+  // to the fetch-then-blob loader instead — it renders through an object URL
+  // and never asks <img> to issue the request itself.
+  const [fetchFallback, setFetchFallback] = useState(false);
+  const [fallbackNonce, setFallbackNonce] = useState(0);
   const plainTimerRef = useRef<number | null>(null);
 
-  const isAttachment = typeof src === "string" && src !== "" && isAttachmentUrl(src);
-  const attachment = useAttachmentImage(isAttachment ? src : null, nonce);
+  // Accept any spelling of the attachment namespace (missing leading slash,
+  // bare api/…, absolute 127.0.0.1 URL) so the fetch-first path can take over.
+  const normalizedSrc =
+    typeof src === "string" && /(^|\/)api\/attachments\//.test(src) && !src.startsWith("blob:")
+      ? resolvePersistedAttachmentUrl(src)
+      : src;
+  const isAttachment = typeof normalizedSrc === "string" && normalizedSrc !== "" && isAttachmentUrl(normalizedSrc);
+  const attachment = useAttachmentImage(isAttachment ? normalizedSrc : null, nonce);
+  const fallback = useAttachmentImage(fetchFallback && !isAttachment ? normalizedSrc ?? null : null, fallbackNonce);
+
+  function isSameOriginUrl(value: string): boolean {
+    if (/^https?:/i.test(value)) {
+      try {
+        return new URL(value, document.baseURI).origin === window.location.origin;
+      } catch {
+        return false;
+      }
+    }
+    return true;
+  }
 
   useEffect(() => {
     setPlainAttempt(0);
@@ -473,9 +497,17 @@ function MarkdownImage({ alt, src, ...props }: ImgHTMLAttributes<HTMLImageElemen
     }
     setPlainAttempt(0);
     setPlainFailed(false);
+    setFetchFallback(true);
+    setFallbackNonce((current) => current + 1);
   }
 
   function handlePlainError() {
+    // First failure: prefer the fetch loader over more <img> retries — the
+    // request itself is what fails in the desktop webview.
+    if (!fetchFallback && typeof normalizedSrc === "string" && isSameOriginUrl(normalizedSrc)) {
+      setFetchFallback(true);
+      return;
+    }
     if (plainAttempt >= IMAGE_RETRY_DELAYS_MS.length) {
       setPlainFailed(true);
       return;
@@ -511,7 +543,26 @@ function MarkdownImage({ alt, src, ...props }: ImgHTMLAttributes<HTMLImageElemen
     );
   }
 
-  if (plainFailed || !src) {
+  if (fetchFallback && fallback.blobUrl) {
+    return <img {...props} src={fallback.blobUrl} alt={alt ?? ""} />;
+  }
+
+  if (fetchFallback && fallback.failed) {
+    const reason = fallback.failureStatus !== null
+      ? `(HTTP ${fallback.failureStatus})`
+      : text("（网络未连通）", "(network unreachable)");
+    return (
+      <span className="markdown-image-broken">
+        <LinearIcon name="alert" />
+        <span>{text("图片加载失败", "Image failed to load")}{reason}</span>
+        <button type="button" onClick={retryNow}>
+          {text("重试", "Retry")}
+        </button>
+      </span>
+    );
+  }
+
+  if (fetchFallback || plainFailed || !src) {
     return (
       <span className="markdown-image-broken">
         <LinearIcon name="alert" />
@@ -1030,6 +1081,10 @@ export function TaskDetail({
           )
         : { ...comment, attachments: [...comment.attachments, ...uploaded] };
       setComments((current) => [...current, nextComment]);
+      // 同步清掉草稿存储：成功路径紧接着 onClose() 卸载本组件，挂载在
+      // commentSegments 上的草稿落盘 effect 不会再执行，仅 setState 清空
+      // 会把已发送的评论留在 localStorage，下次打开被当成草稿回填。
+      taskboardStorage.removeItem(`taskboard.comment-draft.${task.id}`);
       setCommentSegments(createInlineMediaSegments());
       setPendingCommentFiles([]);
       if (commentAttachmentInputRef.current) commentAttachmentInputRef.current.value = "";
