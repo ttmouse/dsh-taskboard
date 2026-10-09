@@ -1551,84 +1551,6 @@ kbd {
   flex: 0 0 auto;
 }
 
-.board-settings-trigger {
-  position: relative;
-  display: grid;
-  place-items: center;
-  flex: 0 0 auto;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  box-shadow: none;
-  color: var(--text-tertiary);
-  cursor: pointer;
-}
-
-.board-settings-trigger:hover {
-  background: var(--surface-hover);
-  color: var(--text-primary);
-}
-
-.board-settings-trigger:focus-visible {
-  outline: 0;
-  box-shadow: 0 0 0 2px var(--accent-soft);
-}
-
-.board-settings-trigger.is-open {
-  background: var(--surface-active);
-  color: var(--text-primary);
-}
-
-.board-settings-trigger.is-active {
-  color: var(--accent);
-}
-
-.board-settings-trigger svg {
-  width: 16px;
-  height: 16px;
-}
-
-.board-settings-active-dot {
-  position: absolute;
-  top: 3px;
-  right: 3px;
-  width: 6px;
-  height: 6px;
-  border: 2px solid var(--surface);
-  border-radius: 50%;
-  background: var(--accent);
-}
-
-.board-settings-menu {
-  -webkit-app-region: no-drag;
-  position: fixed;
-  z-index: 1200;
-  width: max-content;
-  min-width: 210px;
-  padding: 6px;
-  border: var(--border-hairline) solid var(--border-strong);
-  border-radius: 12px;
-  background: var(--surface-raised);
-  color: var(--text-primary);
-  font-size: 13px;
-  font-weight: 450;
-  line-height: 20px;
-  box-shadow: 0 16px 38px rgba(0, 0, 0, 0.14), 0 4px 12px rgba(0, 0, 0, 0.08), 0 0 0 0.5px rgba(0, 0, 0, 0.035);
-  user-select: none;
-  animation: context-menu-in 90ms ease-out both;
-}
-
-.board-settings-note {
-  margin: 0;
-  padding: 0 8px 6px;
-  color: var(--text-tertiary);
-  font-size: 11.5px;
-  line-height: 1.55;
-}
-
 /* ── 列模型 ─────────────────────────────────────────────────────────────
    列回答「现在该谁动」。看板默认只剩「等你」一条（它空着也在），
    其余列有内容才出现。「等你」是唯一要人动手的地方，所以它最重。 */
@@ -1683,16 +1605,6 @@ kbd {
 
 .column-segment-count {
   font-variant-numeric: tabular-nums;
-}
-
-.board-settings-section h2 {
-  margin: 0;
-  padding: 4px 8px 6px;
-  color: var(--text-tertiary);
-  font-size: 11px;
-  font-weight: 550;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
 }
 
 .board-setting-row {
@@ -4062,14 +3974,75 @@ kbd {
   stroke-width: 1.2;
 }
 
-/* 图片附件缩略图：与文件图标同尺寸占位，图片就绪后撑到 44px 方块。 */
+/* 图片附件缩略图：附件区横排纯缩略图条，图片就绪前以灰底占位。 */
 .attachment-thumb {
   flex: 0 0 auto;
-  width: 44px;
-  height: 44px;
-  border-radius: 6px;
+  width: 72px;
+  height: 72px;
+  border-radius: 8px;
   object-fit: cover;
   background: var(--surface-muted, rgba(127, 127, 127, 0.2));
+}
+
+.attachment-thumb-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 10px;
+  padding: 0;
+  list-style: none;
+}
+
+.attachment-thumb-strip > li {
+  display: contents;
+}
+
+.attachment-thumb-button {
+  display: block;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: zoom-in;
+  background: none;
+}
+
+.attachment-thumb-button .attachment-thumb {
+  display: block;
+}
+
+/* 查看器内的上一张 / 下一张按钮。 */
+.attachment-viewer-nav {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary, inherit);
+  cursor: pointer;
+}
+
+.attachment-viewer-nav:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.attachment-viewer-nav svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.4;
+}
+
+.attachment-viewer-count {
+  color: var(--text-tertiary, inherit);
+  font-size: 11px;
 }
 
 .attachment-copy {

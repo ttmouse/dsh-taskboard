@@ -629,9 +629,23 @@ function MarkdownImage({ alt, src, ...props }: ImgHTMLAttributes<HTMLImageElemen
 
 // Click-to-view lightbox for image attachments. Reuses the same
 // fetch-then-blob loader as inline images so it behaves identically in the
-// desktop webview; Esc, the backdrop, or the close button dismiss it.
-function AttachmentImageViewer({ attachment, onClose }: { attachment: Attachment; onClose: () => void }) {
+// desktop webview; Esc, the backdrop, or the close button dismiss it, and
+// ←/→ step through the task's image attachments.
+function AttachmentImageViewer({
+  attachments,
+  index,
+  onNavigate,
+  onClose,
+  onDelete,
+}: {
+  attachments: Attachment[];
+  index: number;
+  onNavigate: (nextIndex: number) => void;
+  onClose: () => void;
+  onDelete: (attachment: Attachment) => void;
+}) {
   const { text } = useTaskboardI18n();
+  const attachment = attachments[index];
   const image = useAttachmentImage(attachmentContentUrl(attachment), 0);
 
   useEffect(() => {
@@ -639,20 +653,54 @@ function AttachmentImageViewer({ attachment, onClose }: { attachment: Attachment
     // handler (closes the whole task detail) fires for the same event and
     // ESC would exit both the viewer and the detail pane (issue -103).
     const handleKey = (event: Event) => {
-      if ((event as globalThis.KeyboardEvent).key === "Escape") {
+      const key = (event as globalThis.KeyboardEvent).key;
+      if (key === "Escape") {
         event.stopPropagation();
         onClose();
+      } else if (key === "ArrowLeft" && index > 0) {
+        event.stopPropagation();
+        onNavigate(index - 1);
+      } else if (key === "ArrowRight" && index < attachments.length - 1) {
+        event.stopPropagation();
+        onNavigate(index + 1);
       }
     };
     window.addEventListener("keydown", handleKey, true);
     return () => window.removeEventListener("keydown", handleKey, true);
-  }, [onClose]);
+  }, [onClose, onNavigate, index, attachments.length]);
 
   return (
     <div className="attachment-viewer-backdrop" role="dialog" aria-modal="true" aria-label={attachment.filename} onClick={onClose}>
       <figure className="attachment-viewer" onClick={(event) => event.stopPropagation()}>
         <figcaption className="attachment-viewer-caption">
+          {attachments.length > 1 && (
+            <button
+              type="button"
+              className="attachment-viewer-nav"
+              aria-label={text("上一张", "Previous image")}
+              title={text("上一张（←）", "Previous (←)")}
+              disabled={index === 0}
+              onClick={() => onNavigate(index - 1)}
+            >
+              <LinearIcon name="chevronLeft" />
+            </button>
+          )}
           <strong>{attachment.filename}</strong>
+          {attachments.length > 1 && (
+            <span className="attachment-viewer-count">{index + 1} / {attachments.length}</span>
+          )}
+          {attachments.length > 1 && (
+            <button
+              type="button"
+              className="attachment-viewer-nav"
+              aria-label={text("下一张", "Next image")}
+              title={text("下一张（→）", "Next (→)")}
+              disabled={index === attachments.length - 1}
+              onClick={() => onNavigate(index + 1)}
+            >
+              <LinearIcon name="chevronRight" />
+            </button>
+          )}
           <span>{fileSize(attachment.size)}</span>
           <a
             href={attachmentDownloadUrl(attachment)}
@@ -662,6 +710,14 @@ function AttachmentImageViewer({ attachment, onClose }: { attachment: Attachment
           >
             <LinearIcon name="openExternal" />
           </a>
+          <button
+            type="button"
+            aria-label={text(`删除 ${attachment.filename}`, `Delete ${attachment.filename}`)}
+            title={text("删除附件", "Delete attachment")}
+            onClick={() => onDelete(attachment)}
+          >
+            <LinearIcon name="trash" />
+          </button>
           <button type="button" aria-label={text("关闭", "Close")} title={text("关闭", "Close")} onClick={onClose}>
             <LinearIcon name="close" />
           </button>
@@ -784,7 +840,7 @@ export function TaskDetail({
   const [attachmentsError, setAttachmentsError] = useState<TaskDetailError | null>(null);
   const [uploadingAttachments, setUploadingAttachments] = useState(false);
   const [pendingAttachmentDelete, setPendingAttachmentDelete] = useState<Attachment | null>(null);
-  const [viewingImage, setViewingImage] = useState<Attachment | null>(null);
+  const [viewedImageIndex, setViewedImageIndex] = useState<number | null>(null);
   const [deletingAttachment, setDeletingAttachment] = useState(false);
   const [comments, setComments] = useState<Comment[]>([]);
   const [taskActivities, setTaskActivities] = useState<TaskChangeActivity[]>([]);
@@ -1388,6 +1444,7 @@ export function TaskDetail({
   const visibleTaskAttachments = attachments.filter(
     (attachment) => !markdownIncludesAttachment(description, attachment),
   );
+  const imageAttachments = visibleTaskAttachments.filter((a) => a.contentType.startsWith("image/"));
   /** Newest comment timestamp: a question card older than it is already answered. */
   const latestCommentAt = comments.reduce<string | null>(
     (latest, comment) => (latest === null || comment.createdAt > latest ? comment.createdAt : latest),
@@ -1590,61 +1647,72 @@ export function TaskDetail({
               {attachmentsLoading ? (
                 <div className="attachments-loading" aria-label={text("正在加载附件", "Loading attachments")} aria-busy="true"><i /><i /></div>
               ) : visibleTaskAttachments.length > 0 ? (
-                <ul className="attachment-list">
-                  {visibleTaskAttachments.map((attachment) => (
-                    <li key={attachment.id}>
-                      {attachment.contentType.startsWith("image/") ? (
-                        <button
-                          type="button"
-                          className="attachment-link"
-                          title={text(`查看 ${attachment.filename}`, `View ${attachment.filename}`)}
-                          onClick={() => setViewingImage(attachment)}
-                        >
-                          <AttachmentThumbnail attachment={attachment} />
-                          <span className="attachment-copy">
-                            <strong>{attachment.filename}</strong>
-                            <span>{fileSize(attachment.size)} · {relativeTime(attachment.createdAt, locale)}</span>
-                          </span>
-                        </button>
-                      ) : (
-                      <a
-                        className="attachment-link"
-                        href={attachmentDownloadUrl(attachment)}
-                        download={attachment.filename}
-                        title={text(`下载 ${attachment.filename}`, `Download ${attachment.filename}`)}
-                        onClick={(event) => handleAttachmentDownload(event, attachment)}
-                      >
-                        <span className="attachment-file-icon" aria-hidden="true">
-                          <LinearIcon name="file" />
-                        </span>
-                        <span className="attachment-copy">
-                          <strong>{attachment.filename}</strong>
-                          <span>{fileSize(attachment.size)} · {relativeTime(attachment.createdAt, locale)}</span>
-                        </span>
-                      </a>
+                (() => {
+                  const fileAttachments = visibleTaskAttachments.filter((a) => !a.contentType.startsWith("image/"));
+                  return (
+                    <>
+                      {imageAttachments.length > 0 && (
+                        <ul className="attachment-thumb-strip" aria-label={text("图片附件", "Image attachments")}>
+                          {imageAttachments.map((attachment) => (
+                            <li key={attachment.id}>
+                              <button
+                                type="button"
+                                className="attachment-thumb-button"
+                                title={text(`查看 ${attachment.filename}`, `View ${attachment.filename}`)}
+                                aria-label={text(`查看 ${attachment.filename}`, `View ${attachment.filename}`)}
+                                onClick={() => setViewedImageIndex(imageAttachments.findIndex((a) => a.id === attachment.id))}
+                              >
+                                <AttachmentThumbnail attachment={attachment} />
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
                       )}
-                      <div className="attachment-actions">
-                        <a
-                          href={attachmentDownloadUrl(attachment)}
-                          download={attachment.filename}
-                          aria-label={text(`下载 ${attachment.filename}`, `Download ${attachment.filename}`)}
-                          title={text("下载附件", "Download attachment")}
-                          onClick={(event) => handleAttachmentDownload(event, attachment)}
-                        >
-                          <LinearIcon name="openExternal" />
-                        </a>
-                        <button
-                          type="button"
-                          aria-label={text(`删除 ${attachment.filename}`, `Delete ${attachment.filename}`)}
-                          title={text("删除附件", "Delete attachment")}
-                          onClick={() => setPendingAttachmentDelete(attachment)}
-                        >
-                          <LinearIcon name="trash" />
-                        </button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
+                      {fileAttachments.length > 0 && (
+                        <ul className="attachment-list">
+                          {fileAttachments.map((attachment) => (
+                            <li key={attachment.id}>
+                              <a
+                                className="attachment-link"
+                                href={attachmentDownloadUrl(attachment)}
+                                download={attachment.filename}
+                                title={text(`下载 ${attachment.filename}`, `Download ${attachment.filename}`)}
+                                onClick={(event) => handleAttachmentDownload(event, attachment)}
+                              >
+                                <span className="attachment-file-icon" aria-hidden="true">
+                                  <LinearIcon name="file" />
+                                </span>
+                                <span className="attachment-copy">
+                                  <strong>{attachment.filename}</strong>
+                                  <span>{fileSize(attachment.size)} · {relativeTime(attachment.createdAt, locale)}</span>
+                                </span>
+                              </a>
+                              <div className="attachment-actions">
+                                <a
+                                  href={attachmentDownloadUrl(attachment)}
+                                  download={attachment.filename}
+                                  aria-label={text(`下载 ${attachment.filename}`, `Download ${attachment.filename}`)}
+                                  title={text("下载附件", "Download attachment")}
+                                  onClick={(event) => handleAttachmentDownload(event, attachment)}
+                                >
+                                  <LinearIcon name="openExternal" />
+                                </a>
+                                <button
+                                  type="button"
+                                  aria-label={text(`删除 ${attachment.filename}`, `Delete ${attachment.filename}`)}
+                                  title={text("删除附件", "Delete attachment")}
+                                  onClick={() => setPendingAttachmentDelete(attachment)}
+                                >
+                                  <LinearIcon name="trash" />
+                                </button>
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </>
+                  );
+                })()
               ) : null}
               {attachmentsError && (
                 <div className="attachments-error" role="alert">
@@ -2378,8 +2446,14 @@ export function TaskDetail({
           </div>
         </div>
       )}
-      {viewingImage && (
-        <AttachmentImageViewer attachment={viewingImage} onClose={() => setViewingImage(null)} />
+      {viewedImageIndex !== null && imageAttachments.length > 0 && (
+        <AttachmentImageViewer
+          attachments={imageAttachments}
+          index={Math.min(viewedImageIndex, imageAttachments.length - 1)}
+          onNavigate={setViewedImageIndex}
+          onDelete={setPendingAttachmentDelete}
+          onClose={() => setViewedImageIndex(null)}
+        />
       )}
       {/* 附件上传的隐藏 input 常驻挂载：附件区块为空时不渲染，入口移到右栏。 */}
       <input
