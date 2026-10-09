@@ -2676,8 +2676,8 @@ export function App() {
                 title={propertiesCollapsed ? text("显示属性", "Show properties") : text("隐藏属性", "Hide properties")}
                 onClick={() => setPropertiesCollapsed((current) => !current)}
               >
-                <LinearIcon
-                  name="chevronDown"
+                <TaskboardIcon
+                  name="dropdown"
                   style={propertiesCollapsed ? undefined : { transform: "rotate(180deg)" }}
                 />
               </button>
