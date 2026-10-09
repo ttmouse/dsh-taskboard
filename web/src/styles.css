@@ -13270,21 +13270,38 @@ kbd {
    the narrow-viewport calc(100vh - 46px) reservation — it left a dead band
    at the bottom of the sidebar embed. */
 .app-shell.compact .workspace { height: 100vh; }
-.app-shell.compact .header-project-switcher { display: none; }
 .app-shell.compact .project-home-button,
 .app-shell.compact .breadcrumb-chevron { display: none; }
 .app-shell.compact .workspace-title { padding-left: 8px; }
 .app-shell.compact .view-tabs { display: none; }
 
-/* Compact chrome: read-only project name label (the switcher stays hidden). */
-.app-shell.compact .header-project-static {
-  max-width: 200px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* Compact chrome: the project switcher doubles as the project name label. */
+.app-shell.compact .header-project-button {
+  max-width: 220px;
+  height: 30px;
+  margin: 0;
+  padding: 0 6px;
+  border: var(--border-hairline) solid var(--border-strong);
+  border-radius: 7px;
+  background: var(--surface-raised);
   color: var(--text-primary);
   font-weight: 600;
   font-size: 14px;
+}
+
+.app-shell.compact .header-project-button:hover,
+.app-shell.compact .header-project-button[aria-expanded="true"] {
+  background: var(--surface-hover);
+}
+
+.app-shell.compact .header-project-menu {
+  top: calc(100% + 4px);
+}
+
+/* Narrow-viewport chrome hides header avatars globally; keep them inside the
+   compact project menu so the switcher list stays readable. */
+.app-shell.compact .header-project-menu .project-avatar {
+  display: block;
 }
 
 /* Compact chrome: tools live in the header actions row; the separate

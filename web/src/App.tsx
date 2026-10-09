@@ -2521,10 +2521,6 @@ export function App() {
                 </button>
               )}
               {selectedProjectId && <span className="breadcrumb-chevron" aria-hidden="true"><LinearIcon name="chevronRight" /></span>}
-              {/* Compact chrome: show the project name read-only (no switching). */}
-              {compact && selectedProjectId && (
-                <span className="header-project-static" title={headerProjectName}>{headerProjectName}</span>
-              )}
               {selectedProjectId ? (
                 <div className="header-project-switcher" data-project-switcher>
                   <button
