@@ -13299,10 +13299,18 @@ kbd {
   top: calc(100% + 4px);
 }
 
-/* Narrow-viewport chrome hides header avatars globally; keep them inside the
-   compact project menu so the switcher list stays readable. */
+/* Compact chrome: drop the letter avatar from the project switcher (button
+   and menu items) — name only, like the host's own switcher. */
+.app-shell.compact .header-project-button .project-avatar {
+  display: none;
+}
+
 .app-shell.compact .header-project-menu .project-avatar {
-  display: block;
+  display: none;
+}
+
+.app-shell.compact .header-project-menu button {
+  grid-template-columns: minmax(0, 1fr) auto auto;
 }
 
 /* Compact chrome: tools live in the header actions row; the separate
