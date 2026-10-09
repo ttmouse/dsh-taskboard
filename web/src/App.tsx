@@ -659,8 +659,13 @@ export function App() {
     // embed so the compact panel opens straight onto the list. Absent or
     // unknown values fall back to the board.
     const view = getTaskboardLocation().searchParams.get("view");
-    return view === "list" || view === "gantt" || view === "dashboard" || view === "workflow"
-      ? view
+    if (view === "list" || view === "gantt" || view === "dashboard" || view === "workflow") {
+      return view;
+    }
+    // Remembered view: reopening the sidebar returns to the last used view.
+    const saved = window.localStorage.getItem("taskboard.boardView");
+    return saved === "issues" || saved === "list" || saved === "gantt" || saved === "dashboard" || saved === "workflow"
+      ? saved
       : "issues";
   });
   const [ganttZoom, setGanttZoom] = useState<GanttZoom>("week");
@@ -1774,6 +1779,7 @@ export function App() {
     closeContextMenu();
     setGanttViewMenuOpen(false);
     setBoardView(view);
+    window.localStorage.setItem("taskboard.boardView", view);
   }
 
   async function saveEditor(
