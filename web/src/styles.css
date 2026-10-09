@@ -2890,8 +2890,8 @@ kbd {
 }
 
 .priority-icon svg {
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
   fill: currentColor;
 }
 
@@ -2973,6 +2973,7 @@ kbd {
   flex: 0 0 auto;
   gap: 3px;
   max-width: none;
+  border-radius: 4px;
 }
 
 .thread-link:hover {
@@ -10565,11 +10566,21 @@ kbd {
   height: 6px;
 }
 
-/* 底部右侧的「直接完成」按钮：复用 icon-button 外观（含悬停 surface-hover），仅用强调色区分。 */
+/* 底部右侧的「直接完成」按钮：与卡片底部其他按钮（优先级/对话）同规格——
+   20×20、hairline 边框、4px 圆角、12px 图标，仅用强调色区分。 */
 .task-card .card-complete-pill {
+  width: 20px;
+  height: 20px;
   margin-left: auto;
+  border: var(--border-hairline) solid var(--border);
+  border-radius: 4px;
   color: var(--accent);
   pointer-events: auto;
+}
+
+.task-card .card-complete-pill svg {
+  width: 12px;
+  height: 12px;
 }
 
 .task-card .card-complete-pill:hover:not(:disabled) {
