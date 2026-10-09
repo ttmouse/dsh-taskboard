@@ -2404,21 +2404,49 @@ export function App() {
 
           <div className="project-nav">
             <span className="nav-label">项目</span>
-            {sortedSidebarProjects.map((project) => (
+            <div className="sidebar-project-switcher" data-project-switcher>
               <button
-                key={project.id}
+                className="sidebar-project-button"
                 type="button"
-                className={`project-nav-item${selectedProjectId === project.id ? " active" : ""}`}
-                onClick={() => changeProject(project.id)}
+                aria-label="切换项目"
+                aria-haspopup="menu"
+                aria-expanded={sidebarProjectMenuOpen}
+                onClick={() => setSidebarProjectMenuOpen((current) => !current)}
               >
-                <span
-                  className={`project-dot${project.automationEnabled ? " has-automation" : ""}`}
-                  aria-hidden="true"
-                  title={project.automationEnabled ? "已开启自动认领" : undefined}
-                />
-                <span>{project.name}</span>
+                {selectedProject && (
+                  <span
+                    className={`project-dot${selectedProject.automationEnabled ? " has-automation" : ""}`}
+                    aria-hidden="true"
+                  />
+                )}
+                <span className="sidebar-project-name">{selectedProject?.name ?? "全局"}</span>
+                <LinearIcon className="project-switcher-chevron" name="chevronDown" />
               </button>
-            ))}
+              {sidebarProjectMenuOpen && (
+                <div className="sidebar-project-menu" role="menu" aria-label="项目">
+                  {sortedSidebarProjects.map((project) => (
+                    <button
+                      key={project.id}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={project.id === selectedProjectId}
+                      onClick={() => {
+                        setSidebarProjectMenuOpen(false);
+                        if (project.id !== selectedProjectId) changeProject(project.id);
+                      }}
+                    >
+                      <span
+                        className={`project-dot${project.automationEnabled ? " has-automation" : ""}`}
+                        aria-hidden="true"
+                        title={project.automationEnabled ? "已开启自动认领" : undefined}
+                      />
+                      <span>{project.name}</span>
+                      {project.id === selectedProjectId && <span className="project-menu-check" aria-hidden="true"><LinearIcon name="check" /></span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="nav-spacer" />
