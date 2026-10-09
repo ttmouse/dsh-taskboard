@@ -615,6 +615,15 @@ export function App() {
   const hostMessaging = hostMode === "codex" || hostMode === "dsh";
   const undoShortcut = navigator.userAgent.includes("Macintosh") ? "⌘Z" : "Ctrl+Z";
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
+  const [navCollapsed, setNavCollapsed] = useState(
+    () => window.localStorage.getItem("taskboard.navCollapsed") === "1",
+  );
+  const toggleNavCollapsed = useCallback(() => {
+    setNavCollapsed((prev) => {
+      window.localStorage.setItem("taskboard.navCollapsed", prev ? "0" : "1");
+      return !prev;
+    });
+  }, []);
   const [hostContext, setHostContext] = useState<HostContext | null>(null);
   const language = resolveTaskboardLanguage(
     hostContext?.language ?? query.get("lang") ?? navigator.language,
@@ -2356,12 +2365,27 @@ export function App() {
         />
       )}
       {!embedded && (
-        <aside className="app-nav" aria-label="Taskboard navigation">
+        <aside
+          className={`app-nav${navCollapsed ? " nav-collapsed" : ""}`}
+          aria-label="Taskboard navigation"
+        >
           <div className="brand-row">
             <span className="brand-mark" aria-hidden="true"><LinearIcon name="project" /></span>
-            <span>任务面板</span>
+            {!navCollapsed && <span>任务面板</span>}
+            <button
+              className="nav-collapse-button"
+              type="button"
+              title={navCollapsed ? "展开侧边栏" : "折叠侧边栏"}
+              aria-label={navCollapsed ? "展开侧边栏" : "折叠侧边栏"}
+              aria-expanded={!navCollapsed}
+              onClick={toggleNavCollapsed}
+            >
+              <LinearIcon name={navCollapsed ? "chevronRight" : "chevronLeft"} />
+            </button>
           </div>
 
+          {!navCollapsed && (
+          <>
           <nav className="primary-nav" aria-label="Views">
             <span className="nav-label">工作区</span>
             <button className="nav-item active" type="button" aria-current="page">
@@ -2391,14 +2415,18 @@ export function App() {
               </button>
             ))}
           </div>
+          </>
+          )}
 
           <div className="nav-spacer" />
+          {!navCollapsed && (
           <div className="nav-footer">
             <div className={`connection connection-${connection}`}>
               <span aria-hidden="true" />
               {connection === "live" ? "实时同步" : "正在重新连接…"}
             </div>
           </div>
+          )}
         </aside>
       )}
 

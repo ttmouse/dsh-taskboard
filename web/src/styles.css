@@ -265,7 +265,16 @@ kbd {
   border-right: var(--border-hairline) solid var(--border);
 }
 
+.app-shell:has(.app-nav.nav-collapsed) {
+  grid-template-columns: 40px minmax(0, 1fr);
+}
+
+.app-nav.nav-collapsed {
+  padding: 10px 4px 8px;
+}
+
 .brand-row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -274,6 +283,40 @@ kbd {
   color: var(--text-primary);
   font-size: 13px;
   font-weight: 550;
+}
+
+.app-nav.nav-collapsed .brand-row {
+  justify-content: center;
+  padding: 0;
+}
+
+.nav-collapse-button {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+
+.nav-collapse-button:hover {
+  background: rgba(127, 127, 127, 0.18);
+  color: var(--text-primary);
+}
+
+.nav-collapse-button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.app-nav.nav-collapsed .nav-collapse-button {
+  margin-left: 0;
 }
 
 .brand-mark {
@@ -3023,27 +3066,23 @@ kbd {
 }
 
 /* 滚动时吸附在顶部的议题标识+标题条 */
-.issue-sticky-title.visible {
-  cursor: pointer;
-}
-
 .issue-sticky-title {
   position: sticky;
   top: 0;
   z-index: 5;
+  /* 零高度悬浮层：不显示时不在文档流里占位（否则详情顶部永远空出一条），
+     显示时盖在滚过的内容上。背景/边框必须在内层——外层高度为 0，
+     画在自己盒子上的背景衬不住溢出显示的内层。 */
+  height: 0;
+  overflow: visible;
   opacity: 0;
   pointer-events: none;
   transform: translateY(-4px);
   transition: opacity 120ms ease, transform 120ms ease;
-  background: var(--bg);
-  border-bottom: 1px solid transparent;
 }
 
 .issue-sticky-title.visible {
-  opacity: 1;
-  pointer-events: auto;
-  transform: translateY(0);
-  border-bottom-color: var(--border);
+  cursor: pointer;
 }
 
 .issue-sticky-title-inner {
@@ -3052,6 +3091,12 @@ kbd {
   width: min(1237px, 100%);
   margin: 0 auto;
   padding: 10px 40px;
+  background: var(--bg);
+  border-bottom: 1px solid transparent;
+}
+
+.issue-sticky-title.visible .issue-sticky-title-inner {
+  border-bottom-color: var(--border);
 }
 
 .issue-sticky-title-text {
@@ -3407,9 +3452,9 @@ kbd {
   display: inline-flex;
   align-items: center;
   max-width: 100%;
-  min-height: 36px;
+  min-height: 32px;
   gap: 8px;
-  padding: 0 11px;
+  padding: 0 10px;
   border: var(--border-hairline) solid var(--border);
   border-radius: 6px;
   background: var(--surface);
@@ -3450,6 +3495,8 @@ kbd {
 }
 
 .conversation-thread-id {
+  /* 超长线程 id 只作识别用：限宽截断（完整 id 悬停 title 里有），别撑爆胶囊。 */
+  max-width: 200px;
   min-width: 0;
   overflow: hidden;
   color: var(--text-tertiary);
@@ -3770,7 +3817,7 @@ kbd {
   justify-content: space-between;
   min-height: 28px;
   gap: 12px;
-  margin-bottom: 7px;
+  margin-bottom: 8px;
 }
 
 .attachments-heading > div {
@@ -3835,8 +3882,8 @@ kbd {
   position: relative;
   display: flex;
   align-items: center;
-  min-height: 48px;
-  padding: 4px 5px 4px 7px;
+  min-height: 44px;
+  padding: 4px 6px 4px 7px;
   border: var(--border-hairline) solid transparent;
   border-radius: 7px;
   background: var(--surface-muted);
@@ -3863,9 +3910,9 @@ kbd {
   display: grid;
   place-items: center;
   flex: 0 0 auto;
-  width: 30px;
-  height: 30px;
-  border-radius: 5px;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
   background: #b489f6;
   color: #fff;
 }
@@ -3890,15 +3937,15 @@ kbd {
 .attachment-copy strong {
   overflow: hidden;
   color: var(--text-primary);
-  font-size: 11px;
-  font-weight: 520;
+  font-size: 12px;
+  font-weight: 530;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .attachment-copy > span {
   color: var(--text-tertiary);
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .attachment-actions {
@@ -3962,9 +4009,9 @@ kbd {
 
 .attachments-loading {
   display: grid;
-  grid-template-columns: 30px minmax(0, 1fr);
+  grid-template-columns: 28px minmax(0, 1fr);
   align-items: center;
-  min-height: 48px;
+  min-height: 44px;
   gap: 9px;
   padding: 7px;
   border: var(--border-hairline) solid var(--border);
@@ -3972,8 +4019,8 @@ kbd {
 }
 
 .attachments-loading i {
-  height: 30px;
-  border-radius: 5px;
+  height: 28px;
+  border-radius: 6px;
   background: var(--surface-muted);
   animation: shimmer 1.5s linear infinite;
 }
@@ -4007,7 +4054,7 @@ kbd {
   align-items: center;
   height: 28px;
   gap: 7px;
-  margin: 0 0 10px;
+  margin: 0 0 8px;
 }
 
 .activity-heading h2,
@@ -6795,19 +6842,6 @@ kbd {
    scheduling chips. Rows are explicit tracks rather than a wrapping flex line,
    so a chip can never end up orphaned beside the "…" button and the two lines
    keep a consistent gap. */
-/* 新建议题默认折叠行：只留状态 + 附件入口 + 「⋯」展开按钮。
-   附件入口在这里与底部操作按钮分离，不再紧贴「创建」按钮。 */
-.dock-summary {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 20px;
-}
-
-.dock-summary .property-more {
-  margin-left: auto;
-}
-
 .task-form-dock > .property-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -9621,6 +9655,11 @@ kbd {
     padding: 30px 20px 104px;
   }
 
+  /* 吸附标题条与内容左缘（layout 20px + 主栏 14px）对齐 */
+  .issue-sticky-title-inner {
+    padding: 10px 34px;
+  }
+
   .issue-detail-main,
   .issue-properties {
     width: 100%;
@@ -9647,7 +9686,7 @@ kbd {
   }
 
   .attachment-list {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -13182,7 +13221,15 @@ kbd {
 }
 /* 切换行必须独占整行：否则在两栏 grid 里自动放置会把 toggle 放进第 1 列、
    主内容挤进 320px 的属性栏轨道（侧边栏窄开详情后再拖宽时的错版）。 */
-.issue-properties-toggle-row { display: flex; justify-content: flex-end; grid-column: 1 / -1; }
+.issue-properties-toggle-row {
+  display: flex;
+  justify-content: flex-end;
+  grid-column: 1 / -1;
+  /* 窄容器下父级 layout 转为 flex 列且 align-items:start，会把本行收缩成
+     内容宽（justify-content 没了作用宽度，按钮孤在左侧）；拉伸回整行才靠右。 */
+  align-self: stretch;
+  padding-right: 14px;
+}
 .issue-properties-toggle {
   appearance: none;
   display: inline-flex;
