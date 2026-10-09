@@ -252,6 +252,8 @@ const DEFAULT_USER_ACTOR: ActorIdentity = {
 const LAST_PROJECT_KEY = "taskboard.lastProjectId";
 const FAVORITE_PROJECTS_KEY = "taskboard.favoriteProjectIds";
 const DEVICE_WORKSPACE_PATHS_KEY = "taskboard.deviceWorkspacePaths.v1";
+/** 项目最近使用时间（projectId → 时间戳），用于全局新建议题菜单的「按最近使用」排序。 */
+const RECENT_PROJECT_USAGE_KEY = "taskboard.recentProjectUsage.v1";
 const LANE_COLLAPSED_KEY = "taskboard.laneCollapsed.v1";
 const LANE_VISIBILITY_KEY = "taskboard.laneVisibility.v1";
 const PROJECT_AUTOMATIONS_KEY = "taskboard.projectAutomations.v1";
@@ -701,6 +703,23 @@ export function App() {
   const [sidebarProjectMenuOpen, setSidebarProjectMenuOpen] = useState(false);
   // 「全局」视图新建议题时的项目选择菜单。
   const [globalCreateMenuOpen, setGlobalCreateMenuOpen] = useState(false);
+  // 项目最近使用时间表（切换项目时打点），驱动全局新建菜单的「按最近使用」排序。
+  const [projectUsageAt, setProjectUsageAt] = useState<Record<string, number>>(() => {
+    try {
+      const parsed = JSON.parse(window.localStorage.getItem(RECENT_PROJECT_USAGE_KEY) ?? "{}");
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  });
+  const rememberProjectUsage = useCallback((projectId: string) => {
+    setProjectUsageAt((current) => {
+      if (current[projectId] && Date.now() - current[projectId] < 60_000) return current;
+      const next = { ...current, [projectId]: Date.now() };
+      window.localStorage.setItem(RECENT_PROJECT_USAGE_KEY, JSON.stringify(next));
+      return next;
+    });
+  }, []);
   const [projectMenuQuery, setProjectMenuQuery] = useState("");
   const [favoriteProjectIds, setFavoriteProjectIds] = useState(readFavoriteProjectIds);
   const [deviceWorkspacePaths, setDeviceWorkspacePaths] = useState(readDeviceWorkspacePaths);
@@ -883,6 +902,16 @@ export function App() {
       return left.index - right.index;
     }).map((entry) => entry.project);
   }, [projects]);
+  // 全局新建议题菜单的项目顺序：按最近使用（切换/打点时间）靠前，没用过的按创建顺序排在最后；「全局」不是落点项目，不进菜单。
+  const globalCreateProjects = useMemo(() => (
+    sortedSidebarProjects
+      .filter((project) => !isGlobalProjectId(project.id))
+      .sort((left, right) => (projectUsageAt[right.id] ?? 0) - (projectUsageAt[left.id] ?? 0))
+  ), [sortedSidebarProjects, projectUsageAt]);
+  // 当前选中项目视为「最近使用」：加载恢复的选中项目也打点，保证菜单把它排前。
+  useEffect(() => {
+    if (selectedProjectId && !isGlobalProjectId(selectedProjectId)) rememberProjectUsage(selectedProjectId);
+  }, [selectedProjectId, rememberProjectUsage]);
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
 
   // 项目切换菜单的排序：等你（in_review/blocked）→ 有进行中 → 有未完任务 →
@@ -2271,6 +2300,7 @@ export function App() {
     setBoardView("issues");
     setSelectedProjectId(projectId);
     window.localStorage.setItem(LAST_PROJECT_KEY, projectId);
+    rememberProjectUsage(projectId);
     setSearch("");
     setFilters(EMPTY_TASK_FILTERS);
     setActionError(null);
@@ -2702,7 +2732,7 @@ export function App() {
                 </button>
                 {isGlobalView && globalCreateMenuOpen && (
                   <div className="sidebar-project-menu global-create-menu" role="menu" aria-label="选择议题所属项目">
-                    {sortedSidebarProjects.map((project) => (
+                    {globalCreateProjects.map((project) => (
                       <button
                         key={project.id}
                         type="button"
