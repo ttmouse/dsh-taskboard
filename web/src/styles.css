@@ -13275,15 +13275,16 @@ kbd {
 .app-shell.compact .workspace-title { padding-left: 8px; }
 .app-shell.compact .view-tabs { display: none; }
 
-/* Compact chrome: the project switcher doubles as the project name label. */
+/* Compact chrome: the project switcher doubles as the project name label.
+   No default chrome — background appears on hover/expanded only. */
 .app-shell.compact .header-project-button {
   max-width: 220px;
   height: 30px;
   margin: 0;
   padding: 0 6px;
-  border: var(--border-hairline) solid var(--border-strong);
+  border: 0;
   border-radius: 7px;
-  background: var(--surface-raised);
+  background: transparent;
   color: var(--text-primary);
   font-weight: 600;
   font-size: 14px;
