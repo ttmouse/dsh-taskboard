@@ -767,22 +767,28 @@ function TaskboardHeaderAction({ sessionId, onOpen, t }: {
   )
 }
 
-/** Guide artwork for the tasks entry: a checklist glyph. */
+/**
+ * Guide artwork for the tasks entry. The guide renders every entry at 26px, so
+ * a 16px-box monochrome stroke glyph reads thin and gray next to the official
+ * fixed-palette artworks (36px box, ~2–3.5 stroke at that box). This draws the
+ * same checklist subject in that family: two rows of a blue check plus rule,
+ * round caps, palette taken from the shell's own blue artworks (#539CFA,
+ * #679EFE, #B7D3FE).
+ */
 function TasksGuideIcon({ size }: { size?: number }): ReactElement {
   const edge = size ?? 28
   return (
     <svg
-      viewBox="0 0 16 16"
+      viewBox="0 0 36 36"
       width={edge}
       height={edge}
       fill="none"
-      stroke="currentColor"
-      strokeWidth={1.3}
-      strokeLinecap="round"
-      strokeLinejoin="round"
       aria-hidden="true"
     >
-      <path d="M2.5 4.5 3.5 5.5 5.5 3.5M2.5 11.5 3.5 12.5 5.5 10.5M8 4.5h5.5M8 11.5h5.5" />
+      <path d="M7.5 12.5 10.5 15.5 16 9.5" stroke="#539CFA" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M21 12.5H28.5" stroke="#679EFE" strokeWidth="3" strokeLinecap="round" />
+      <path d="M7.5 24.5 10.5 27.5 16 21.5" stroke="#539CFA" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M21 24.5H28.5" stroke="#B7D3FE" strokeWidth="3" strokeLinecap="round" />
     </svg>
   )
 }
