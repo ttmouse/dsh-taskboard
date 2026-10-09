@@ -538,7 +538,7 @@ function BoardTaskCard({
         )}
         {onComplete && task.status !== "done" && task.status !== "canceled" && (
           <button
-            className="card-complete-pill"
+            className="icon-button compact card-complete-pill"
             type="button"
             disabled={isMoving}
             aria-label={`${task.identifier} 确认完成`}
@@ -546,7 +546,6 @@ function BoardTaskCard({
             onClick={stopThen(() => onComplete(task))}
           >
             <LinearIcon name="check" />
-            完成
           </button>
         )}
       </div>
