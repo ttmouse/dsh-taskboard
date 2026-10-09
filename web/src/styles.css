@@ -265,16 +265,44 @@ kbd {
   border-right: var(--border-hairline) solid var(--border);
 }
 
-.app-shell:has(.app-nav.nav-collapsed) {
-  grid-template-columns: 40px minmax(0, 1fr);
+.app-shell:has(.nav-expand-button) {
+  grid-template-columns: minmax(0, 1fr);
 }
 
-.app-nav.nav-collapsed {
-  padding: 10px 4px 8px;
+.app-shell.nav-collapsed .workspace-header {
+  padding-left: 44px;
+}
+
+.nav-expand-button {
+  position: fixed;
+  top: 12px;
+  left: 8px;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-tertiary);
+  opacity: 0.45;
+  cursor: pointer;
+}
+
+.nav-expand-button:hover {
+  background: rgba(127, 127, 127, 0.18);
+  color: var(--text-primary);
+  opacity: 1;
+}
+
+.nav-expand-button svg {
+  width: 14px;
+  height: 14px;
 }
 
 .brand-row {
-  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -283,11 +311,6 @@ kbd {
   color: var(--text-primary);
   font-size: 13px;
   font-weight: 550;
-}
-
-.app-nav.nav-collapsed .brand-row {
-  justify-content: center;
-  padding: 0;
 }
 
 .nav-collapse-button {
@@ -313,10 +336,6 @@ kbd {
 .nav-collapse-button svg {
   width: 14px;
   height: 14px;
-}
-
-.app-nav.nav-collapsed .nav-collapse-button {
-  margin-left: 0;
 }
 
 .brand-mark {
