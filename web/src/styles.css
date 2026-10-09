@@ -10541,6 +10541,15 @@ kbd {
   height: 6px;
 }
 
+/* 看板卡片右上角的常驻「直接完成」按钮：验收动作跟着人走，不必点进详情。 */
+.task-card .card-complete-button {
+  color: var(--accent);
+}
+
+.task-card .card-complete-button:hover {
+  background: var(--accent-soft);
+}
+
 .card-reference {
   flex: 1 1 auto;
   max-width: 100%;
