@@ -1026,29 +1026,30 @@
 
 .routine-row-main {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  gap: 0;
   min-width: 0;
   flex: 1;
 }
 
-/* 议题 09582F74F86A-111：紧凑单行布局——名称 + 徽标靠左，
-   「下次」时间右对齐收拢到控件之前，去掉两行大行高。 */
+/* 议题 09582F74F86A-111：对齐官方 ui-schedule TaskManagerPage 行几何——
+   图标 16×20 顶对齐，标题行 500/23px，摘要行 13px/21px 灰字、` · ` 分隔。 */
 .routine-row-main .routine-next {
-  margin-left: auto;
-  padding-left: 12px;
-  color: var(--text-tertiary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.routine-row-main .routine-name {
-  flex: 0 1 auto;
+  color: inherit;
 }
 
 .routine-row-main .routine-schedule {
   flex: none;
+}
+
+.routine-meta-status {
+  color: inherit;
+}
+
+/* 摘要行内多段元数据用官方式 ` · ` 分隔（状态 · 频率 · 下次计划时间） */
+.routine-row-meta > * + *::before {
+  content: ' · ';
+  padding: 0 2px;
 }
 
 .routine-row-title {
@@ -1076,8 +1077,9 @@
   color: var(--text-tertiary);
 }
 
+/* 官方摘要行是整行统一灰字（tertiary），频率不再单独提色 */
 .routine-row .routine-schedule {
-  color: var(--text-secondary);
+  color: var(--text-tertiary);
 }
 
 .routine-meta-dot {
@@ -1739,8 +1741,18 @@
 }
 
 .routine-row .routine-name {
+  flex: 0 1 auto;
   font-weight: 500;
   line-height: 23px;
+}
+
+/* 官方摘要行是纯文本，频率在列表里不再是芯片 */
+.routine-row .routine-schedule {
+  height: auto;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
 }
 
 .routine-row-meta {

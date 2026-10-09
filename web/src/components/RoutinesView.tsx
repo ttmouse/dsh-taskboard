@@ -563,15 +563,20 @@ export function RoutinesView({ onClose }: RoutinesViewProps) {
                   onClick={() => setDetailName(routine.name)}
                   aria-label={`${routine.name} · ${text("查看详情", "View details")}`}
                 />
+                <svg className="routine-row-icon" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+                  <circle cx="8" cy="8" r="6.4" fill="none" stroke="currentColor" strokeWidth="1.3" />
+                  <path d="M8 4.6V8l2.4 1.6" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+                </svg>
                 <div className="routine-row-main">
-                  <svg className="routine-row-icon" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
-                    <circle cx="8" cy="8" r="6.4" fill="none" stroke="currentColor" strokeWidth="1.3" />
-                    <path d="M8 4.6V8l2.4 1.6" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-                  </svg>
-                  <strong className="routine-name">{routineDisplayName(routine)}</strong>
-                  {isClaimRoutine(routine.name) && <span className="routine-badge">认领</span>}
-                  <span className="routine-schedule">{describeSchedule(routine.schedule, text)}</span>
-                  <span className="routine-next">{text("下次", "Next")}: {formatNextRun(routine, text)}</span>
+                  <div className="routine-row-title">
+                    <strong className="routine-name">{routineDisplayName(routine)}</strong>
+                    {isClaimRoutine(routine.name) && <span className="routine-badge">认领</span>}
+                  </div>
+                  <div className="routine-row-meta">
+                    {routine.paused && <span className="routine-meta-status">{text("已关闭", "Off")}</span>}
+                    <span className="routine-schedule">{describeSchedule(routine.schedule, text)}</span>
+                    <span className="routine-next">{text("下次计划时间", "Next")}: {formatNextRun(routine, text)}</span>
+                  </div>
                 </div>
                 <div className="routine-row-side">
                   <button
