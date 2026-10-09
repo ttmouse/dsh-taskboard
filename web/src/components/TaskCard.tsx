@@ -409,6 +409,7 @@ function BoardTaskCard({
   onDragStart,
   onDragEnd,
   onOpenThread,
+  onComplete,
 }: BoardTaskCardProps) {
   const dueDate = task.dueDate
     ? new Intl.DateTimeFormat("zh-CN", { month: "short", day: "numeric" }).format(new Date(`${task.dueDate}T12:00:00`))
@@ -492,6 +493,18 @@ function BoardTaskCard({
           >
             <LinearIcon name="chevronRight" />
           </button>
+          {onComplete && task.status !== "done" && task.status !== "canceled" && (
+            <button
+              className="icon-button compact card-complete-button"
+              type="button"
+              disabled={isMoving}
+              aria-label={`${task.identifier} 确认完成`}
+              title="直接完成（验收通过，移入已完成）"
+              onClick={stopThen(() => onComplete(task))}
+            >
+              <LinearIcon name="check" />
+            </button>
+          )}
         </div>
       </div>
 
