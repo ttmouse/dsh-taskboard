@@ -1717,12 +1717,14 @@
   align-items: flex-start;
 }
 
+/* 议题 09582F74F86A-111：悬停/选中改官方 interactive-bg-hover 权重
+   （浅色 rgba(38,49,72,.06) ≈ 前景 6%），用 color-mix 兼容明暗主题。 */
 .routine-row:hover {
-  background: var(--border);
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
 }
 
 .routine-row.is-selected {
-  background: var(--border);
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
 }
 
 /* 已关闭行：官方 endedRow 语义 —— 文字降灰，非整行降透明 */
