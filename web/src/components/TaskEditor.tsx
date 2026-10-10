@@ -614,7 +614,7 @@ export function TaskEditor({
           )}
 
           <footer className="dialog-footer">
-            {task && <span aria-hidden="true" />}
+            <span aria-hidden="true" />
             <div className="dialog-actions">
               {task && <span className="dialog-updated">{text(`编辑 ${task.identifier}`, `Editing ${task.identifier}`)}</span>}
               {!task && (
