@@ -10025,13 +10025,20 @@ button.priority-icon {
 
 .workspace-kicker .detail-back-button,
 .workspace-kicker .project-home-button {
-  width: 22px;
   height: 22px;
   margin: 0;
   border: 0;
   border-radius: 5px;
   background: transparent;
   color: var(--text-secondary);
+}
+
+/* 议题 09582F74F86A-128：首页按钮带文字，不能沿用图标键的固定宽，
+   否则文字溢出、悬停高亮只画在左侧 22px 方块上（热区错位）。 */
+.workspace-kicker .project-home-button {
+  width: auto;
+  gap: 4px;
+  padding: 0 6px;
 }
 
 .workspace-kicker .detail-back-button:hover,
