@@ -1318,8 +1318,13 @@ export function App() {
         const dx = previous.x - next.x;
         const dy = previous.y - next.y;
         if (!dx && !dy) continue;
-        node.classList.add("is-flipping");
+        // 先在无过渡状态下写入反向位移，再启用过渡清零——否则「设置位移」本身会被
+        // 过渡动画化，一帧后清零只剩微小回弹，视觉上仍是瞬移。
+        node.style.transition = "none";
         node.style.transform = `translate3d(${dx}px, ${dy}px, 0)`;
+        void node.getBoundingClientRect();
+        node.classList.add("is-flipping");
+        node.style.transition = "";
         void node.getBoundingClientRect();
         requestAnimationFrame(() => {
           node.style.transform = "";
