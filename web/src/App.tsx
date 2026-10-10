@@ -700,7 +700,6 @@ export function App() {
   const [openingThreadTaskId, setOpeningThreadTaskId] = useState<string | null>(null);
   const issueListRef = useRef<HTMLDivElement>(null);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
-  const [sidebarProjectMenuOpen, setSidebarProjectMenuOpen] = useState(false);
   // 「全局」视图新建议题时的项目选择菜单。
   const [globalCreateMenuOpen, setGlobalCreateMenuOpen] = useState(false);
   // 项目最近使用时间表（切换项目时打点），驱动全局新建菜单的「按最近使用」排序。
@@ -1310,19 +1309,17 @@ export function App() {
   }, [tasks]);
 
   useEffect(() => {
-    if (!projectMenuOpen && !sidebarProjectMenuOpen) return;
+    if (!projectMenuOpen) return;
     function closeProjectMenu(event: PointerEvent) {
       const target = event.target as HTMLElement;
       if (!target.closest("[data-project-switcher]")) {
         setProjectMenuOpen(false);
-        setSidebarProjectMenuOpen(false);
         setProjectMenuQuery("");
       }
     }
     function closeProjectMenuWithEscape(event: KeyboardEvent) {
       if (event.key === "Escape") {
         setProjectMenuOpen(false);
-        setSidebarProjectMenuOpen(false);
         setProjectMenuQuery("");
       }
     }
@@ -1332,7 +1329,7 @@ export function App() {
       document.removeEventListener("pointerdown", closeProjectMenu);
       window.removeEventListener("keydown", closeProjectMenuWithEscape);
     };
-  }, [projectMenuOpen, sidebarProjectMenuOpen]);
+  }, [projectMenuOpen]);
 
   useEffect(() => {
     setAutomationError(null);
@@ -2470,49 +2467,21 @@ export function App() {
 
           <div className="project-nav">
             <span className="nav-label">项目</span>
-            <div className="sidebar-project-switcher" data-project-switcher>
+            {sortedSidebarProjects.map((project) => (
               <button
-                className="sidebar-project-button"
+                key={project.id}
                 type="button"
-                aria-label="切换项目"
-                aria-haspopup="menu"
-                aria-expanded={sidebarProjectMenuOpen}
-                onClick={() => setSidebarProjectMenuOpen((current) => !current)}
+                className={`project-nav-item${selectedProjectId === project.id ? " active" : ""}`}
+                onClick={() => changeProject(project.id)}
               >
-                {selectedProject && (
-                  <span
-                    className={`project-dot${selectedProject.automationEnabled ? " has-automation" : ""}`}
-                    aria-hidden="true"
-                  />
-                )}
-                <span className="sidebar-project-name">{selectedProject?.name ?? "全局"}</span>
-                <LinearIcon className="project-switcher-chevron" name="chevronDown" />
+                <span
+                  className={`project-dot${project.automationEnabled ? " has-automation" : ""}`}
+                  aria-hidden="true"
+                  title={project.automationEnabled ? "已开启自动认领" : undefined}
+                />
+                <span>{project.name}</span>
               </button>
-              {sidebarProjectMenuOpen && (
-                <div className="sidebar-project-menu" role="menu" aria-label="项目">
-                  {sortedSidebarProjects.map((project) => (
-                    <button
-                      key={project.id}
-                      type="button"
-                      role="menuitemradio"
-                      aria-checked={project.id === selectedProjectId}
-                      onClick={() => {
-                        setSidebarProjectMenuOpen(false);
-                        if (project.id !== selectedProjectId) changeProject(project.id);
-                      }}
-                    >
-                      <span
-                        className={`project-dot${project.automationEnabled ? " has-automation" : ""}`}
-                        aria-hidden="true"
-                        title={project.automationEnabled ? "已开启自动认领" : undefined}
-                      />
-                      <span>{project.name}</span>
-                      {project.id === selectedProjectId && <span className="project-menu-check" aria-hidden="true"><LinearIcon name="check" /></span>}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+            ))}
           </div>
 
           <div className="nav-spacer" />
@@ -3044,6 +3013,7 @@ export function App() {
                   onOpenThread={openThread}
                   onHide={() => updateLaneVisibility(lane.id, false)}
                   onComplete={(task) => void acceptIssueFromCard(task)}
+                  onUpdate={(task, changes) => updateTaskProperties(task, changes)}
                 />
               ))}
               {hiddenLanes.length > 0 && (

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { DragEvent } from "react";
-import { TASK_STATUSES, type Task, type TaskStatus } from "../types";
+import { TASK_STATUSES, type Task, type TaskDraft, type TaskStatus } from "../types";
 import { LANE_LABELS, WAITING_REASON_LABELS, laneSegmentHeadingNeeded, type BoardLane, type BoardLaneId } from "../boardColumns";
 import { ColumnVisibilityMenu } from "./ColumnVisibilityMenu";
 import { TaskCard } from "./TaskCard";
@@ -86,6 +86,7 @@ interface BoardColumnProps {
   onOpenThread: (threadId: string) => void;
   onHide: () => void;
   onComplete?: (task: Task) => void;
+  onUpdate?: (task: Task, changes: Partial<TaskDraft>) => Promise<Task> | void;
 }
 
 /** 列标题来自共享的列模型；这里只补一个代表性状态（取图标与色调）。 */
@@ -122,6 +123,7 @@ export function BoardColumn({
   onOpenThread,
   onHide,
   onComplete,
+  onUpdate,
 }: BoardColumnProps) {
   const lane_ = lane;
   // 段标题只在「这条列里真有不止一种东西」时才值得出现：只有一种时
@@ -307,6 +309,7 @@ export function BoardColumn({
                     onDragEnd={onDragEnd}
                     onOpenThread={onOpenThread}
                     onComplete={onComplete}
+                    onUpdate={onUpdate}
                   />
                 );
               })}

@@ -367,6 +367,7 @@ kbd {
   margin-top: 18px;
   flex: 1;
   min-height: 0;
+  overflow-y: auto;
 }
 
 .nav-label {
@@ -447,45 +448,6 @@ kbd {
 }
 
 .project-nav-item span:last-child {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sidebar-project-switcher {
-  position: relative;
-  min-width: 0;
-}
-
-.sidebar-project-button {
-  display: flex;
-  align-items: center;
-  width: 100%;
-  min-width: 0;
-  height: 30px;
-  gap: 4px;
-  padding: 0 8px 0 4px;
-  border: var(--border-hairline) solid var(--border-strong);
-  border-radius: 7px;
-  background: var(--surface-raised);
-  color: var(--text-primary);
-  font-size: 12px;
-  font-weight: 500;
-  text-align: left;
-}
-
-.sidebar-project-button:hover,
-.sidebar-project-button[aria-expanded="true"] {
-  background: var(--surface-hover);
-}
-
-.sidebar-project-button .project-dot {
-  margin: 0 4px;
-}
-
-.sidebar-project-name {
-  flex: 1 1 auto;
-  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2865,9 +2827,20 @@ kbd {
   flex: 0 0 auto;
   width: 20px;
   height: 20px;
+  padding: 0;
   border: var(--border-hairline) solid var(--border);
   border-radius: 4px;
+  background: transparent;
   color: var(--text-tertiary);
+}
+
+button.priority-icon {
+  cursor: pointer;
+}
+
+.task-card button.priority-icon:hover {
+  border-color: var(--text-tertiary);
+  background: rgba(128, 128, 128, 0.12);
 }
 
 .priority-icon svg {

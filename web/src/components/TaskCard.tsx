@@ -48,6 +48,8 @@ interface BoardTaskCardProps extends CommonTaskCardProps {
   onMove: (task: Task, status: TaskStatus) => void;
   onOpenThread: (threadId: string) => void;
   onComplete?: (task: Task) => void;
+  /** 卡片上的优先级图标做成可交互下拉；不传则保持静态图标。 */
+  onUpdate?: (task: Task, changes: Partial<TaskDraft>) => Promise<Task> | void;
 }
 
 /** 上游完整卡片接口（由 OtherTasksPanel 等上游组件调用） */
@@ -410,7 +412,11 @@ function BoardTaskCard({
   onDragEnd,
   onOpenThread,
   onComplete,
+  onUpdate,
 }: BoardTaskCardProps) {
+  const { language } = useTaskboardI18n();
+  const [priorityMenuOpen, setPriorityMenuOpen] = useState(false);
+  const [savingPriority, setSavingPriority] = useState(false);
   const dueDate = task.dueDate
     ? new Intl.DateTimeFormat("zh-CN", { month: "short", day: "numeric" }).format(new Date(`${task.dueDate}T12:00:00`))
     : null;
@@ -429,7 +435,7 @@ function BoardTaskCard({
 
   return (
     <article
-      className={`task-card status-${task.status} priority-${task.priority}${isDragging ? " is-dragging" : ""}${dragShift ? " is-drag-shifted" : ""}${isMoving ? " is-moving" : ""}${isSettling ? " is-settling" : ""}${isContextMenuOpen ? " is-context-open" : ""}`}
+      className={`task-card status-${task.status} priority-${task.priority}${isDragging ? " is-dragging" : ""}${dragShift ? " is-drag-shifted" : ""}${isMoving ? " is-moving" : ""}${isSettling ? " is-settling" : ""}${isContextMenuOpen ? " is-context-open" : ""}${priorityMenuOpen ? " is-property-menu-open" : ""}`}
       style={dragShift ? { transform: `translate3d(0, ${dragShift}px, 0)` } : undefined}
       draggable={!isMoving}
       aria-labelledby={`task-${task.id}-title`}
@@ -499,9 +505,36 @@ function BoardTaskCard({
       <h3 id={`task-${task.id}-title`}>{task.title}</h3>
 
       <div className="card-properties" aria-label="议题属性">
-        <span className={`priority-icon priority-icon-${task.priority}`} title={PRIORITY_LABELS[task.priority]}>
-          <LinearPriorityIcon priority={task.priority} />
-        </span>
+        {onUpdate ? (
+          <TaskPropertyPicker
+            value={task.priority}
+            options={TASK_PRIORITIES.map((priority) => ({
+              value: priority,
+              label: taskPriorityLabel(language, priority),
+              icon: <LinearPriorityIcon priority={priority} />,
+              className: `priority-${priority}`,
+            }))}
+            open={priorityMenuOpen}
+            disabled={savingPriority}
+            className="card-property-control"
+            triggerClassName={`priority-icon priority-icon-${task.priority}`}
+            iconOnly
+            ariaLabel={`${task.identifier} 优先级`}
+            title={`优先级：${PRIORITY_LABELS[task.priority]}`}
+            onOpenChange={setPriorityMenuOpen}
+            onChange={(priority) => {
+              if (priority === task.priority) return;
+              setSavingPriority(true);
+              void Promise.resolve(onUpdate(task, { priority }))
+                .catch(() => {})
+                .finally(() => setSavingPriority(false));
+            }}
+          />
+        ) : (
+          <span className={`priority-icon priority-icon-${task.priority}`} title={PRIORITY_LABELS[task.priority]}>
+            <LinearPriorityIcon priority={task.priority} />
+          </span>
+        )}
         {activeBlockers > 0 && (
           <span className="blocked-by-count" title={`被 ${activeBlockers} 个未完成议题阻塞`}>
             <LinearIcon name="alert" />

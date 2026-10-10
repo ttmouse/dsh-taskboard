@@ -22,6 +22,8 @@ interface TaskPropertyPickerProps<Value extends string> {
   disabled?: boolean;
   className?: string;
   triggerClassName: string;
+  /** 触发器只渲染图标，不带文字标签（看板卡片优先级角标用）。 */
+  iconOnly?: boolean;
   ariaLabel: string;
   title?: string;
   onOpenChange: (open: boolean) => void;
@@ -35,6 +37,7 @@ export function TaskPropertyPicker<Value extends string>({
   disabled = false,
   className = "",
   triggerClassName,
+  iconOnly = false,
   ariaLabel,
   title,
   onOpenChange,
@@ -149,7 +152,7 @@ export function TaskPropertyPicker<Value extends string>({
         onClick={() => onOpenChange(!open)}
       >
         <span className="task-property-trigger-icon">{selected.icon}</span>
-        <span className="task-property-trigger-label">{selected.label}</span>
+        {!iconOnly && <span className="task-property-trigger-label">{selected.label}</span>}
       </button>
       {menu}
     </div>
