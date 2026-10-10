@@ -699,6 +699,9 @@ export function App() {
   const [openingProjectId, setOpeningProjectId] = useState<string | null>(null);
   const [openingThreadTaskId, setOpeningThreadTaskId] = useState<string | null>(null);
   const issueListRef = useRef<HTMLDivElement>(null);
+  // FLIP 动画：记录上一帧卡片位置，卡片换列（点「完成」、菜单移动等）时平滑飞到新列。
+  const cardRectsRef = useRef<Map<string, { x: number; y: number }>>(new Map());
+  const cardStatusRef = useRef<Map<string, string>>(new Map());
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   // 「全局」视图新建议题时的项目选择菜单。
   const [globalCreateMenuOpen, setGlobalCreateMenuOpen] = useState(false);
@@ -1299,6 +1302,45 @@ export function App() {
   }, [embedded, theme]);
 
   useEffect(() => onTaskboardThemeChange((next) => setTheme(next)), []);
+  // 卡片换列 FLIP：渲染提交后对比上一帧位置，给换了列的卡片施加反向位移再过渡归零，
+  // 让「点完成 / 菜单移动 / 拖拽落列」都呈现卡片动态飞到新列的效果。
+  useLayoutEffect(() => {
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const previousRects = cardRectsRef.current;
+    const previousStatuses = cardStatusRef.current;
+    if (!reduceMotion) {
+      for (const task of tasks) {
+        const previous = previousRects.get(task.id);
+        if (!previous || previousStatuses.get(task.id) === task.status) continue;
+        const node = document.querySelector<HTMLElement>(`[data-task-id="${task.id}"]`);
+        if (!node || node.classList.contains("is-flipping")) continue;
+        const next = node.getBoundingClientRect();
+        const dx = previous.x - next.x;
+        const dy = previous.y - next.y;
+        if (!dx && !dy) continue;
+        node.classList.add("is-flipping");
+        node.style.transform = `translate3d(${dx}px, ${dy}px, 0)`;
+        void node.getBoundingClientRect();
+        requestAnimationFrame(() => {
+          node.style.transform = "";
+          window.setTimeout(() => {
+            node.classList.remove("is-flipping");
+            node.style.transform = "";
+          }, 360);
+        });
+      }
+    }
+    previousRects.clear();
+    previousStatuses.clear();
+    for (const task of tasks) {
+      // 正在飞行中的卡片位置被临时位移污染，保留旧条目等下一帧再测。
+      const node = document.querySelector<HTMLElement>(`[data-task-id="${task.id}"]`);
+      if (!node || node.classList.contains("is-flipping")) continue;
+      const rect = node.getBoundingClientRect();
+      previousRects.set(task.id, { x: rect.x, y: rect.y });
+      previousStatuses.set(task.id, task.status);
+    }
+  }, [tasks]);
 
   useEffect(() => {
     writeTaskFilters(filters);
