@@ -291,6 +291,7 @@ export function TaskEditor({
     if (!task && (event.metaKey || event.ctrlKey)) {
       event.preventDefault();
       createSubmitIntentRef.current = true;
+      createAndRunIntentRef.current = true;
       event.currentTarget.requestSubmit();
       return;
     }
@@ -618,7 +619,7 @@ export function TaskEditor({
               {task && <span className="dialog-updated">{text(`编辑 ${task.identifier}`, `Editing ${task.identifier}`)}</span>}
               {!task && (
                 <button
-                  className="button"
+                  className="button primary"
                   type="submit"
                   disabled={saving}
                   onClick={() => {
@@ -631,23 +632,21 @@ export function TaskEditor({
                     : text("创建并执行", "Create and run")}
                 </button>
               )}
-              <button
-                className="button primary"
-                type="submit"
-                disabled={saving}
-                onClick={() => {
-                  if (!task) {
+              {!task && (
+                <button
+                  className="button"
+                  type="submit"
+                  disabled={saving}
+                  onClick={() => {
                     createSubmitIntentRef.current = true;
                     createAndRunIntentRef.current = false;
-                  }
-                }}
-              >
-                {saving
-                  ? text("正在保存…", "Saving…")
-                  : task
-                    ? text("保存更改", "Save changes")
-                    : text("创建议题", "Create issue")}
-              </button>
+                  }}
+                >
+                  {saving
+                    ? text("正在保存…", "Saving…")
+                    : text("创建但不执行", "Create without running")}
+                </button>
+              )}
             </div>
           </footer>
         </div>
