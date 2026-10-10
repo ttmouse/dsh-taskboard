@@ -1004,7 +1004,8 @@ kbd {
 
 .header-project-menu button {
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr) auto auto;
+  /* 议题 09582F74F86A-128：下拉项不再展示字母徽标，只有名称 + 收藏 + 选中勾 */
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
   width: 100%;
   min-height: 32px;
@@ -1024,15 +1025,10 @@ kbd {
   outline: none;
 }
 
-.header-project-menu button > span:nth-child(2) {
+.header-project-menu button > span:first-child {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.header-project-menu .project-avatar {
-  width: 16px;
-  height: 16px;
 }
 
 .project-menu-check {
@@ -13313,10 +13309,6 @@ button.priority-icon {
 /* Compact chrome: drop the letter avatar from the project switcher (button
    and menu items) — name only, like the host's own switcher. */
 .app-shell.compact .header-project-button .project-avatar {
-  display: none;
-}
-
-.app-shell.compact .header-project-menu .project-avatar {
   display: none;
 }
 

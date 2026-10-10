@@ -2566,9 +2566,6 @@ export function App() {
                     aria-expanded={projectMenuOpen}
                     onClick={() => { setProjectMenuQuery(""); setProjectMenuOpen((current) => !current); }}
                   >
-                    <span className="project-avatar" aria-hidden="true">
-                      {headerProjectName.slice(0, 1).toUpperCase()}
-                    </span>
                     <span className="project-name">{headerProjectName}</span>
                     <LinearIcon className="project-switcher-chevron" name="chevronDown" />
                   </button>
@@ -2596,7 +2593,6 @@ export function App() {
                             else void selectProject(project);
                           }}
                         >
-                          <span className="project-avatar" aria-hidden="true">{project.name.slice(0, 1).toUpperCase()}</span>
                           <span>{project.name}</span>
                           {favoriteProjectIds.has(project.id) && <span className="project-menu-favorite" aria-label="已收藏"><LinearIcon name="favorite" /></span>}
                           {project.id === selectedProjectId && <span className="project-menu-check" aria-hidden="true"><LinearIcon name="check" /></span>}
@@ -2610,9 +2606,6 @@ export function App() {
                 </div>
               ) : (
                 <>
-                  <span className="project-avatar" aria-hidden="true">
-                    {headerProjectName.slice(0, 1).toUpperCase()}
-                  </span>
                   <span className="project-name">{headerProjectName}</span>
                 </>
               )}
