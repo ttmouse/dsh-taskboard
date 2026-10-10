@@ -619,21 +619,6 @@ export function TaskEditor({
               {task && <span className="dialog-updated">{text(`编辑 ${task.identifier}`, `Editing ${task.identifier}`)}</span>}
               {!task && (
                 <button
-                  className="button primary"
-                  type="submit"
-                  disabled={saving}
-                  onClick={() => {
-                    createSubmitIntentRef.current = true;
-                    createAndRunIntentRef.current = true;
-                  }}
-                >
-                  {saving
-                    ? text("正在保存…", "Saving…")
-                    : text("创建并执行", "Create and run")}
-                </button>
-              )}
-              {!task && (
-                <button
                   className="button"
                   type="submit"
                   disabled={saving}
@@ -645,6 +630,21 @@ export function TaskEditor({
                   {saving
                     ? text("正在保存…", "Saving…")
                     : text("创建但不执行", "Create without running")}
+                </button>
+              )}
+              {!task && (
+                <button
+                  className="button primary"
+                  type="submit"
+                  disabled={saving}
+                  onClick={() => {
+                    createSubmitIntentRef.current = true;
+                    createAndRunIntentRef.current = true;
+                  }}
+                >
+                  {saving
+                    ? text("正在保存…", "Saving…")
+                    : text("创建并执行", "Create and run")}
                 </button>
               )}
             </div>
