@@ -2560,7 +2560,10 @@ export function App() {
           <header className="workspace-header">
           <div className="workspace-title">
             <div className="workspace-kicker">
-              {!embedded && navCollapsed && (
+              {/* 议题 09582F74F86A-137：紧凑面板（右侧边栏）里 SPA 自己的项目侧栏
+                  被 CSS 永久隐藏，这个「打开侧边栏」箭头点了没有任何效果，所以只在
+                  非紧凑的完整形态里渲染。 */}
+              {!embedded && !compact && navCollapsed && (
                 <button
                   className="detail-back-button nav-expand-inline"
                   type="button"
