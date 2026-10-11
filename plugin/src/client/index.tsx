@@ -240,6 +240,63 @@ const FRAME_STYLE = {
 } as const
 
 /**
+ * 议题 09582F74F86A-134「在任务详情这里的头部，需要支持拖拽整个窗口」。
+ *
+ * 看板自己的面板头部是窗口拖拽柄（SPA 内 .workspace-drag-region 带
+ * app-region: drag），但那块在**跨文档 iframe** 里：Chromium 的可拖拽区域对
+ * 子框架不生效，点它只会落在 iframe 自己的文档上，窗口不动。
+ *
+ * 修法：宿主（看板页面自己就是宿主文档）在 iframe 上方盖一条拖拽条——
+ *   - 宽度/位置跟看板头部的拖拽柄一致（左端让开返回键/首页键/项目名，
+ *     右端让开属性开关与其它图标键），所以能拖的区域和头部那条空白完全重合；
+ *   - 自带 `data-window-drag`：宿主 CSS 据此给该元素 app-region: drag，宿主
+ *     全局的窗口拖拽管理器也把它算进拖拽区集合——集合或几何一变，管理器会
+ *     短暂把 body 标成 data-window-drag-recall 再清掉，逼 Chromium 重算可拖拽
+ *     区域；条出现/移动因此会被重新应用，而不是干等下一次别的区域变化；
+ *   - `pointer-events: none`：指针照旧穿透给 iframe，悬停/点击/拖卡片都不受影响
+ *     （可拖拽区域本身不吃指针事件，命中判定与指针事件无关）。
+ */
+const HOST_DRAG_BAR_STYLE = {
+  position: 'absolute',
+  zIndex: 5,
+  top: 0,
+  height: 44,
+  pointerEvents: 'none',
+  WebkitAppRegion: 'drag',
+} as const
+
+/** 面板视口相对 iframe 的位置尺寸（视口坐标）。 */
+interface DragBarBox {
+  left: number
+  width: number
+}
+
+/**
+ * 由 iframe 自报的头部拖拽柄矩形换算出宿主里的拖拽条。
+ *
+ * iframe 铺满宿主窗口的中间列（左边缘与面板左边缘对齐，见 FRAME_STYLE 与
+ * `--codex-titlebar-left-inset: 0`），所以只需累加沿途容器（含滚动位移）的
+ * 左/上偏移即可，无需读取跨文档布局。窗口比面板窄时（窄视口）取不到有意义的
+ * 矩形，此时退回整条头部。
+ * @param frame - 看板 iframe。
+ * @param rect - iframe 上报的拖拽柄矩形（iframe 视口坐标）。
+ * @returns 宿主视口坐标下的拖拽条位置与宽度。
+ */
+function toHostDragBar(frame: HTMLIFrameElement, rect: { x: number; width: number }): DragBarBox {
+  const frameRect = frame.getBoundingClientRect()
+  let offsetX = 0
+  for (let node: HTMLElement | null = frame.parentElement; node !== null; node = node.parentElement) {
+    offsetX += node.offsetLeft - node.scrollLeft
+  }
+  const left = Math.max(0, rect.x + offsetX)
+  const right = Math.min(frameRect.left + frameRect.width, rect.x + rect.width + offsetX)
+  const width = right - left
+  // 上报的拖拽柄为空条（窄视口下 SPA 会这么判）时，退回整条头部。
+  if (!(width > 24)) return { left: Math.max(0, frameRect.left), width: frameRect.width }
+  return { left, width }
+}
+
+/**
  * The board SPA in an iframe. Mounted only while this panel is the selected
  * main panel (the shell unmounts the losing key), and the GUI theme is pushed
  * into the app — initial theme via query param, live theme via postMessage.
@@ -254,12 +311,39 @@ function PanelFrame({ url, title, frameRef, locale }: {
 }): JSX.Element {
   const localRef = useRef<HTMLIFrameElement | null>(null)
   const language = useShellLocale(locale)
+  const hostRef = useRef<HTMLDivElement | null>(null)
+  const [dragBar, setDragBar] = useState<DragBarBox | null>(null)
 
   /** Push the current GUI theme into the app once its window is ready. */
   const syncTheme = useCallback((): void => {
     const frame = localRef.current
     if (frame === null || frame.contentWindow === null) return
     frame.contentWindow.postMessage({ type: THEME_MESSAGE, theme: currentGuiTheme() }, '*')
+  }, [])
+
+  // 看板头部把拖拽柄矩形（iframe 视口坐标）上报给宿主；这里换成宿主坐标的
+  // 拖拽条。矩形为 null（独立模式、或 SPA 判定没有可见拖拽柄）时收起拖拽条。
+  useEffect(() => {
+    const receive = (event: MessageEvent): void => {
+      const frame = localRef.current
+      if (frame === null || frame.contentWindow === null) return
+      if (event.source !== frame.contentWindow) return
+      const data = event.data as { type?: string; payload?: { x: number; y: number; width: number; height: number } | null } | null
+      if (data === null || data.type !== DRAG_REGION_MESSAGE) return
+      const rect = data.payload
+      setDragBar(rect === null || rect === undefined ? null : toHostDragBar(frame, rect))
+    }
+    window.addEventListener('message', receive)
+    return () => window.removeEventListener('message', receive)
+  }, [])
+
+  // 面板尺寸变化（窗口缩放、侧栏开合）后条的位置会失效：等看板重新上报。
+  useEffect(() => {
+    const frame = localRef.current
+    if (frame === null || typeof ResizeObserver !== 'function') return
+    const observer = new ResizeObserver(() => setDragBar(null))
+    observer.observe(frame)
+    return () => observer.disconnect()
   }, [])
 
   useEffect(() => {
@@ -284,18 +368,27 @@ function PanelFrame({ url, title, frameRef, locale }: {
   }, [frameRef])
 
   return (
-    <iframe
-      ref={attach}
-      src={src}
-      title={title}
-      style={FRAME_STYLE}
-      onLoad={() => {
-        // The app registers its message listener after the React mount, which
-        // can lag the load event; retry once shortly after to cover the gap.
-        syncTheme()
-        window.setTimeout(syncTheme, 800)
-      }}
-    />
+    <div ref={hostRef} style={{ position: 'relative', display: 'block', flex: '1 1 auto', width: '100%', height: '100%', minHeight: 0 }}>
+      <iframe
+        ref={attach}
+        src={src}
+        title={title}
+        style={FRAME_STYLE}
+        onLoad={() => {
+          // The app registers its message listener after the React mount, which
+          // can lag the load event; retry once shortly after to cover the gap.
+          syncTheme()
+          window.setTimeout(syncTheme, 800)
+        }}
+      />
+      {dragBar !== null && (
+        <div
+          data-window-drag
+          aria-hidden="true"
+          style={{ ...HOST_DRAG_BAR_STYLE, left: dragBar.left, width: dragBar.width }}
+        />
+      )}
+    </div>
   )
 }
 
@@ -307,6 +400,9 @@ const OPEN_THREAD_MESSAGE = 'taskboard:open-thread'
 
 /** Shell → app deep link: open one issue's detail in the already-mounted board. */
 const OPEN_ISSUE_MESSAGE = 'taskboard:open-issue'
+
+/** App → shell: where the board's header drag handle sits (issue 134). */
+const DRAG_REGION_MESSAGE = 'taskboard:drag-region'
 
 /** Taskboard route prefix proxied by the host half on the shared webserver. */
 const BOARD_API_PREFIX = '/dsh-taskboard'

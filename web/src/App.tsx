@@ -621,6 +621,10 @@ export function App() {
   // keeping automation on the direct local API path.
   const hostMode = query.get("host");
   const hostMessaging = hostMode === "codex" || hostMode === "dsh";
+  // 「拖拽整个窗口」：面板头部（.workspace-drag-region）是窗口拖拽柄。
+  // 议题 09582F74F86A-134：DSH GUI 的中间列面板由 PanelFrame 以 host=dsh 挂载，
+  // 而拖拽柄此前只在 host=codex 时生效，于是在真实 App 里拖头部不动窗口。
+  const windowDrag = hostMessaging;
   const undoShortcut = navigator.userAgent.includes("Macintosh") ? "⌘Z" : "Ctrl+Z";
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
   const [navCollapsed, setNavCollapsed] = useState(
@@ -1454,7 +1458,7 @@ export function App() {
   }, [hostMessaging]);
 
   useLayoutEffect(() => {
-    if (!embedded || window.parent === window || !dragRegionRef.current) return;
+    if (!windowDrag || window.parent === window || !dragRegionRef.current) return;
     const region = dragRegionRef.current;
     const publish = () => {
       const rect = region.getBoundingClientRect();
@@ -1472,7 +1476,7 @@ export function App() {
       window.removeEventListener("resize", publish);
       window.parent.postMessage({ type: "taskboard:drag-region", payload: null }, "*");
     };
-  }, [detailTaskId, embedded, selectedProjectId]);
+  }, [detailTaskId, embedded, selectedProjectId, windowDrag]);
 
   const loadProjectList = useCallback(async (signal?: AbortSignal) => {
     setProjectsLoading(true);
@@ -2467,7 +2471,7 @@ export function App() {
 
   return (
     <TaskboardLanguageProvider language={language}>
-    <div className={`app-shell${embedded ? " embedded" : ""}${compact ? " compact" : ""}`} style={appShellStyle}>
+    <div className={`app-shell${embedded ? " embedded" : ""}${windowDrag ? " window-drag" : ""}${compact ? " compact" : ""}`} style={appShellStyle}>
       {taskboardMetadata && taskboardMetadata.mode !== "cloud" && (
         <LocalRealtimeSync
           selectedProjectId={selectedProjectId}

@@ -614,6 +614,13 @@ kbd {
   -webkit-app-region: drag;
 }
 
+/* 议题 09582F74F86A-134：DSH GUI 的中间列面板以 host=dsh 挂载，头部同样要能
+   拖拽整个窗口，所以窗口拖拽柄不再只认 host=codex（.embedded）、改由 .window-drag
+   表达「宿主里跑、要窗口拖拽」。宿主端另有 [data-window-drag] 覆盖条兜底。 */
+.app-shell.window-drag .home-window-drag-region {
+  -webkit-app-region: drag;
+}
+
 .workspace-header {
   display: flex;
   flex: 0 0 44px;
@@ -637,9 +644,16 @@ kbd {
   -webkit-app-region: drag;
 }
 
+.app-shell.window-drag .workspace-drag-region {
+  -webkit-app-region: drag;
+}
+
 .app-shell.embedded .workspace-header .header-actions,
 .app-shell.embedded .workspace-header button,
-.app-shell.embedded .workspace-header select {
+.app-shell.embedded .workspace-header select,
+.app-shell.window-drag .workspace-header .header-actions,
+.app-shell.window-drag .workspace-header button,
+.app-shell.window-drag .workspace-header select {
   -webkit-app-region: no-drag;
 }
 
