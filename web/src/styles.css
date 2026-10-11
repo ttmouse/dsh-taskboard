@@ -10554,6 +10554,53 @@ button.priority-icon {
   color: var(--text-primary);
 }
 
+/* 待办卡上的「让 AI 承接」：点一下等同面板里的派发（POST /tasks/:id/dispatch），
+   不必等自动认领扫到。派发中/进行中由按钮自己的禁用态表达，失败则就地在
+   卡片上留一行可读错误，不必打开详情。 */
+.task-card .card-dispatch-pill {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 4px;
+  height: 20px;
+  padding: 0 8px;
+  border: var(--border-hairline) solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  border-radius: 4px;
+  background: transparent;
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 15px;
+  white-space: nowrap;
+  pointer-events: auto;
+}
+
+.task-card .card-dispatch-pill svg {
+  width: 11px;
+  height: 11px;
+}
+
+.task-card .card-dispatch-pill:hover:not(:disabled) {
+  background: var(--accent-soft);
+}
+
+.task-card .card-dispatch-pill:disabled {
+  border-color: var(--border);
+  color: var(--text-tertiary);
+  cursor: default;
+}
+
+.task-card .card-dispatch-error {
+  flex: 0 1 auto;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--danger);
+  font-size: 10px;
+  line-height: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .card-reference {
   flex: 1 1 auto;
   max-width: 100%;

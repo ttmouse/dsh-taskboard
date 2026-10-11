@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { MouseEvent } from "react";
-import { attachmentContentUrl, attachmentUrlId, isAttachmentUrl, resolvePersistedAttachmentUrl } from "../api";
+import {
+  ApiError,
+  attachmentContentUrl,
+  attachmentUrlId,
+  dispatchIssue,
+  fetchDispatchState,
+  isAttachmentUrl,
+  resolvePersistedAttachmentUrl,
+} from "../api";
 import {
   TASK_PRIORITIES,
   TASK_STATUSES,
@@ -425,6 +433,50 @@ function BoardTaskCard({
   const activeBlockers = task.relations.blockedBy.filter((issue) => (
     issue.status !== "done" && issue.status !== "canceled"
   )).length;
+  // 待办卡上的「让 AI 承接」：点一下就是一次显式派发，不必等自动认领扫到。
+  // 点下即禁用（starting），成功后驻留「Agent 进行中」；服务端回 409
+  // DISPATCH_BUSY 视为「已经在跑」，同一张卡上不出现第二次派发。
+  const [dispatchState, setDispatchState] = useState<"idle" | "starting" | "busy" | "error">("idle");
+  const [dispatchError, setDispatchError] = useState<string | null>(null);
+
+  // 待办卡挂载时问一次租约：这一轮可能是从详情页或别的入口派起来的，
+  // 那就直接显示「Agent 进行中」而不是一个点了才知道的点不动的按钮。
+  useEffect(() => {
+    if (task.status !== "todo") return;
+    const controller = new AbortController();
+    fetchDispatchState(task.id, controller.signal).then(
+      (busy) => {
+        if (busy && !controller.signal.aborted) setDispatchState("busy");
+      },
+      () => {},
+    );
+    return () => controller.abort();
+  }, [task.id, task.status]);
+
+  async function dispatchToAgent() {
+    if (dispatchState === "starting" || dispatchState === "busy") return;
+    setDispatchState("starting");
+    setDispatchError(null);
+    try {
+      await dispatchIssue(task.id);
+      setDispatchState("busy");
+    } catch (error) {
+      if (error instanceof ApiError && error.code === "DISPATCH_BUSY") {
+        setDispatchState("busy");
+        return;
+      }
+      setDispatchState("error");
+      setDispatchError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  const dispatchLabel = dispatchState === "starting"
+    ? "派发中…"
+    : dispatchState === "busy"
+      ? "Agent 进行中"
+      : dispatchState === "error"
+        ? "重试派发"
+        : "让 AI 承接";
 
   function stopThen(callback: () => void) {
     return (event: MouseEvent<HTMLButtonElement>) => {
@@ -568,6 +620,26 @@ function BoardTaskCard({
           >
             <TaskboardIcon name="conversation" />
           </button>
+        )}
+        {task.status === "todo" && (
+          <button
+            className="card-dispatch-pill"
+            type="button"
+            disabled={dispatchState === "starting" || dispatchState === "busy" || isMoving}
+            aria-label={`${task.identifier} 让 AI 承接`}
+            title={dispatchState === "busy"
+              ? "这个议题已经有活轮次在跑"
+              : "不打字，直接让 Agent 承接这个待办议题（等同详情的「干一轮」）"}
+            onClick={stopThen(() => void dispatchToAgent())}
+          >
+            <LinearIcon name="play" />
+            {dispatchLabel}
+          </button>
+        )}
+        {dispatchState === "error" && dispatchError && (
+          <span className="card-dispatch-error" title={`派发失败：${dispatchError}`}>
+            派发失败：{dispatchError}
+          </span>
         )}
         {onComplete && task.status !== "done" && task.status !== "canceled" && (
           <button
