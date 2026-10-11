@@ -242,58 +242,61 @@ const FRAME_STYLE = {
 /**
  * 议题 09582F74F86A-134「在任务详情这里的头部，需要支持拖拽整个窗口」。
  *
- * 看板自己的面板头部是窗口拖拽柄（SPA 内 .workspace-drag-region 带
- * app-region: drag），但那块在**跨文档 iframe** 里：Chromium 的可拖拽区域对
- * 子框架不生效，点它只会落在 iframe 自己的文档上，窗口不动。
+ * 看板自己的面板头部是窗口拖拽柄（SPA 内 .workspace-drag-region），但那块在
+ * **跨文档 iframe** 里：Chromium 的可拖拽区域对子框架不生效，点它只会落在
+ * iframe 自己的文档上，窗口不动。
  *
- * 修法：宿主（看板页面自己就是宿主文档）在 iframe 上方盖一条拖拽条——
- *   - 宽度/位置跟看板头部的拖拽柄一致（左端让开返回键/首页键/项目名，
- *     右端让开属性开关与其它图标键），所以能拖的区域和头部那条空白完全重合；
- *   - 自带 `data-window-drag`：宿主 CSS 据此给该元素 app-region: drag，宿主
- *     全局的窗口拖拽管理器也把它算进拖拽区集合——集合或几何一变，管理器会
- *     短暂把 body 标成 data-window-drag-recall 再清掉，逼 Chromium 重算可拖拽
- *     区域；条出现/移动因此会被重新应用，而不是干等下一次别的区域变化；
- *   - `pointer-events: none`：指针照旧穿透给 iframe，悬停/点击/拖卡片都不受影响
- *     （可拖拽区域本身不吃指针事件，命中判定与指针事件无关）。
+ * 修法：宿主文档（看板面板本身就跑在宿主文档里）在 iframe 上方盖一条拖拽条——
+ *   - 位置/宽度直接读 iframe 内那个拖拽柄元素的 rect（同源，见 readBoardDragHandle），
+ *     左端让开返回键/首页键/项目名、右端让开属性开关与图标键，能拖的区域与头部
+ *     那条空白完全重合；
+ *   - 自带 `data-window-drag`：宿主 CSS 据此给该元素 app-region: drag，宿主全局的
+ *     窗口拖拽管理器也把它算进拖拽区集合——集合或几何一变，管理器会短暂把 body 标成
+ *     data-window-drag-recall 再清掉，逼 Chromium 重算可拖拽区域，条出现/移动因此
+ *     会被重新应用，而不是干等下一次别的区域变化；
+ *   - 不做 `pointer-events: none`：宿主自己的拖拽元素都是正常参与命中的元素，
+ *     条只有落在头部空白处（那里没有可点元素），保持可命中更稳。
  */
 const HOST_DRAG_BAR_STYLE = {
   position: 'absolute',
   zIndex: 5,
   top: 0,
   height: 44,
-  pointerEvents: 'none',
   WebkitAppRegion: 'drag',
 } as const
 
-/** 面板视口相对 iframe 的位置尺寸（视口坐标）。 */
+/** 拖拽条相对 iframe 容器（= 面板内容区）的位置与宽度。 */
 interface DragBarBox {
   left: number
   width: number
 }
 
+/** 看板头部拖拽柄的选择器（SPA 侧，含首屏与详情两种头部）。 */
+const BOARD_DRAG_HANDLE = '.workspace-drag-region'
+
 /**
- * 由 iframe 自报的头部拖拽柄矩形换算出宿主里的拖拽条。
+ * 读看板 iframe 里头部拖拽柄的位置尺寸。
  *
- * iframe 铺满宿主窗口的中间列（左边缘与面板左边缘对齐，见 FRAME_STYLE 与
- * `--codex-titlebar-left-inset: 0`），所以只需累加沿途容器（含滚动位移）的
- * 左/上偏移即可，无需读取跨文档布局。窗口比面板窄时（窄视口）取不到有意义的
- * 矩形，此时退回整条头部。
+ * iframe 铺满宿主里的容器且容器无内边距/边框，所以 iframe 视口坐标即容器坐标，
+ * 不需要跨文档累加偏移（那会在嵌套的静态定位容器上重复计数，把条推到面板外，
+ * 正是第一版拖不动的原因）。同源限制下拿不到 contentDocument 时返回 null。
  * @param frame - 看板 iframe。
- * @param rect - iframe 上报的拖拽柄矩形（iframe 视口坐标）。
- * @returns 宿主视口坐标下的拖拽条位置与宽度。
+ * @returns 容器坐标下的拖拽条位置与宽度；没有可见拖拽柄时 null。
  */
-function toHostDragBar(frame: HTMLIFrameElement, rect: { x: number; width: number }): DragBarBox {
-  const frameRect = frame.getBoundingClientRect()
-  let offsetX = 0
-  for (let node: HTMLElement | null = frame.parentElement; node !== null; node = node.parentElement) {
-    offsetX += node.offsetLeft - node.scrollLeft
+function readBoardDragHandle(frame: HTMLIFrameElement): DragBarBox | null {
+  let handle: Element | null = null
+  try {
+    handle = frame.contentDocument?.querySelector(BOARD_DRAG_HANDLE) ?? null
+  } catch {
+    return null
   }
-  const left = Math.max(0, rect.x + offsetX)
-  const right = Math.min(frameRect.left + frameRect.width, rect.x + rect.width + offsetX)
+  if (handle === null) return null
+  const rect = handle.getBoundingClientRect()
+  const frameRect = frame.getBoundingClientRect()
+  const left = Math.max(0, rect.x)
+  const right = Math.min(frameRect.width, rect.x + rect.width)
   const width = right - left
-  // 上报的拖拽柄为空条（窄视口下 SPA 会这么判）时，退回整条头部。
-  if (!(width > 24)) return { left: Math.max(0, frameRect.left), width: frameRect.width }
-  return { left, width }
+  return width > 24 ? { left, width } : null
 }
 
 /**
@@ -311,7 +314,6 @@ function PanelFrame({ url, title, frameRef, locale }: {
 }): JSX.Element {
   const localRef = useRef<HTMLIFrameElement | null>(null)
   const language = useShellLocale(locale)
-  const hostRef = useRef<HTMLDivElement | null>(null)
   const [dragBar, setDragBar] = useState<DragBarBox | null>(null)
 
   /** Push the current GUI theme into the app once its window is ready. */
@@ -321,29 +323,27 @@ function PanelFrame({ url, title, frameRef, locale }: {
     frame.contentWindow.postMessage({ type: THEME_MESSAGE, theme: currentGuiTheme() }, '*')
   }, [])
 
-  // 看板头部把拖拽柄矩形（iframe 视口坐标）上报给宿主；这里换成宿主坐标的
-  // 拖拽条。矩形为 null（独立模式、或 SPA 判定没有可见拖拽柄）时收起拖拽条。
+  // 拖拽条跟随 iframe 里的头部拖拽柄：直接读 iframe 文档（同源），不依赖任何
+  // 上报时序——面板刚挂载、看板还在首屏、切进详情、项目名变长都会在下一个
+  // 轮询里对齐；窗口缩放后条的位置也不会残留。
   useEffect(() => {
-    const receive = (event: MessageEvent): void => {
+    const sync = (): void => {
       const frame = localRef.current
-      if (frame === null || frame.contentWindow === null) return
-      if (event.source !== frame.contentWindow) return
-      const data = event.data as { type?: string; payload?: { x: number; y: number; width: number; height: number } | null } | null
-      if (data === null || data.type !== DRAG_REGION_MESSAGE) return
-      const rect = data.payload
-      setDragBar(rect === null || rect === undefined ? null : toHostDragBar(frame, rect))
+      if (frame === null) return
+      const next = readBoardDragHandle(frame)
+      setDragBar((current) => (
+        current !== null && next !== null && current.left === next.left && current.width === next.width
+          ? current
+          : next
+      ))
     }
-    window.addEventListener('message', receive)
-    return () => window.removeEventListener('message', receive)
-  }, [])
-
-  // 面板尺寸变化（窗口缩放、侧栏开合）后条的位置会失效：等看板重新上报。
-  useEffect(() => {
-    const frame = localRef.current
-    if (frame === null || typeof ResizeObserver !== 'function') return
-    const observer = new ResizeObserver(() => setDragBar(null))
-    observer.observe(frame)
-    return () => observer.disconnect()
+    sync()
+    const timer = window.setInterval(sync, 400)
+    window.addEventListener('resize', sync)
+    return () => {
+      window.clearInterval(timer)
+      window.removeEventListener('resize', sync)
+    }
   }, [])
 
   useEffect(() => {
@@ -368,7 +368,7 @@ function PanelFrame({ url, title, frameRef, locale }: {
   }, [frameRef])
 
   return (
-    <div ref={hostRef} style={{ position: 'relative', display: 'block', flex: '1 1 auto', width: '100%', height: '100%', minHeight: 0 }}>
+    <div style={{ position: 'relative', display: 'block', flex: '1 1 auto', width: '100%', height: '100%', minHeight: 0 }}>
       <iframe
         ref={attach}
         src={src}
@@ -400,9 +400,6 @@ const OPEN_THREAD_MESSAGE = 'taskboard:open-thread'
 
 /** Shell → app deep link: open one issue's detail in the already-mounted board. */
 const OPEN_ISSUE_MESSAGE = 'taskboard:open-issue'
-
-/** App → shell: where the board's header drag handle sits (issue 134). */
-const DRAG_REGION_MESSAGE = 'taskboard:drag-region'
 
 /** Taskboard route prefix proxied by the host half on the shared webserver. */
 const BOARD_API_PREFIX = '/dsh-taskboard'
