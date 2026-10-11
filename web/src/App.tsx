@@ -2296,24 +2296,23 @@ export function App() {
     const instruction = `e-taskboard Addressing the issues mentioned in ${task.identifier}`;
     const prompt = `[$manage-taskboard](${manageTaskboardSkillPath}) ${instruction}`;
 
-    if (!embedded || window.parent === window) {
-      // host=dsh：在同一 GUI 内驱动真实 DSH 会话（由插件宿主监听执行），
-      // 独立模式（无宿主，或裸标签页里 window.parent 就是自己）没有可用的
-      // 会话执行路径——不要向自身 postMessage（会被静默丢弃）。
-      if (hostMessaging && window.parent !== window) {
-        window.parent.postMessage({
-          type: "taskboard:dsh-execute",
-          payload: {
-            taskId: task.id,
-            identifier: task.identifier,
-            prompt,
-            workspacePath,
-            projectId: selectedProject?.id ?? null,
-          },
-        }, "*");
-        return;
-      }
-      setActionError("请在 DSH Web GUI 中以插件方式打开看板，才能驱动真实会话执行议题。");
+    // host=dsh：在同一 GUI 内驱动真实 DSH 会话（由插件宿主监听执行）。
+    // 判据只看「有没有宿主父窗口 + 宿主协议」，不再要求 host=codex：
+    // 看板主面板由 PanelFrame 以 host=dsh 挂载，旧判据会把它的「让 AI 执行」
+    // 误判成独立模式，直接报「请在 DSH Web GUI 中以插件方式打开看板」。
+    // 只有真·独立模式（裸标签页，window.parent 就是自己）才没有执行通道——
+    // 不要向自身 postMessage（会被静默丢弃）。
+    if (window.parent !== window && hostMessaging) {
+      window.parent.postMessage({
+        type: "taskboard:dsh-execute",
+        payload: {
+          taskId: task.id,
+          identifier: task.identifier,
+          prompt,
+          workspacePath,
+          projectId: selectedProject?.id ?? null,
+        },
+      }, "*");
       return;
     }
     if (openingThreadTaskId) return;
